@@ -36,12 +36,16 @@ planning papier existante).
 | `alertes-stock` | Matières sous seuil (attention / critique) |
 | `ordonnancement` | Planification automatique par priorité + séquencement de gamme |
 | `ordonnancement-auto` | Version planifiée (cron) de la fonction ci-dessus, chaque matin en semaine |
+| `referentiels` | Données de référence légères (opérations, machines, personnel, titres) pour construire des formulaires |
+| `creer-ordre` | Crée un nouvel OF + sa gamme opératoire |
+| `gammes-ordre` | Liste les étapes de gamme d'un OF (pour choisir laquelle planifier) |
+| `affecter-planning` | Affecte une étape de gamme à une machine/personne/jour, avec contrôle de disponibilité et de séquencement |
 
 ### Front
 | Fichier | Rôle |
 |---|---|
 | `atelier-planning.html` | Prototype de démo (données en mémoire, pour visualiser l'ergonomie) |
-| `atelier-planning-deploy.html` | Version branchée sur `lecture-planning`, avec repli sur la démo si le backend ne répond pas — à déployer sur Netlify pour fonctionner réellement |
+| `atelier-planning-deploy.html` / `index.html` | Version branchée sur les fonctions réelles (lecture ET écriture : création d'OF, affectation planning), avec repli sur la démo si le backend ne répond pas — à déployer sur Netlify sous le nom `index.html` |
 
 ## Mise en route
 
