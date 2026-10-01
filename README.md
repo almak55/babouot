@@ -24,6 +24,7 @@ planning papier existante).
 | `migration_2_personnel_machines.sql` | Compétence machine précise (Benoit) + rôle d'encadrement |
 | `migration_3_ajustements.sql` | Fabrice en encadrement, Alain compétent sur tout le parc |
 | `migration_4_corrections.sql` | Corrections de lecture (Ventura, 3210, CRF, Retour SODIS, Coupe cuir) + Rhodoïds |
+| `migration_5_legende_couleurs.sql` | Peuple `legende_couleurs` (hypothèse : périodes de congés) |
 | `reset_complet.sql` | À utiliser seulement si vous voulez repartir de zéro (efface tout) |
 
 ### Backend (Netlify Functions — dans `netlify-functions.zip`)
@@ -53,7 +54,7 @@ planning papier existante).
 ## Points ouverts / hypothèses à confirmer
 
 - **Dorure — Pléiade / PE-PE** : traités comme deux machines distinctes (par analogie avec BDM/DA sous Montage de couverture), mais pourraient être deux lignes de produit plutôt que deux machines physiques. À confirmer.
-- **Code couleur de la feuille papier** (rouge/bleu/vert/orange/rose/jaune) : signification non confirmée. Le champ `couleur_code` existe dans `planning_jour` et `personnel_planning_jour` mais n'est pas encore interprété par l'application.
+- **Code couleur de la feuille papier** : interprété comme des périodes de congés du personnel (rouge=mars, bleu=octobre, vert=juin, orange=septembre), peuplé dans `legende_couleurs` via `migration_5_legende_couleurs.sql`. À confirmer — une seule table à corriger si ce n'est pas le bon sens.
 - **Benoit / machines couverturières** : compétence enregistrée au niveau machine (`personnel_machines`), alors que le reste du personnel est au niveau opération (`personnel_competences`) — cohérent avec son cas particulier, mais à garder en tête si d'autres personnes ont ce genre de spécialisation fine.
 - **Charge du personnel** : approximée (créneaux planning de la semaine affichée / 5 jours ouvrés) — pas une vraie moyenne glissante, à affiner si besoin d'un chiffre plus précis.
 
