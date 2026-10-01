@@ -109,6 +109,7 @@ exports.handler = async (event) => {
 
     return { statusCode: 405, body: JSON.stringify({ error: 'Méthode non autorisée.' }) };
   } catch (err) {
+    console.error('gerer-machines error:', err);
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
 };
