@@ -55,11 +55,9 @@ planning papier existante).
 - **Dorure — Pléiade / PE-PE** : traités comme deux machines distinctes (par analogie avec BDM/DA sous Montage de couverture), mais pourraient être deux lignes de produit plutôt que deux machines physiques. À confirmer.
 - **Code couleur de la feuille papier** (rouge/bleu/vert/orange/rose/jaune) : signification non confirmée. Le champ `couleur_code` existe dans `planning_jour` et `personnel_planning_jour` mais n'est pas encore interprété par l'application.
 - **Benoit / machines couverturières** : compétence enregistrée au niveau machine (`personnel_machines`), alors que le reste du personnel est au niveau opération (`personnel_competences`) — cohérent avec son cas particulier, mais à garder en tête si d'autres personnes ont ce genre de spécialisation fine.
-- **Avancement (%) des OF** : pas encore stocké en base ; `atelier-planning-deploy.html` l'affiche à 0 pour l'instant.
 - **Charge du personnel** : approximée (créneaux planning de la semaine affichée / 5 jours ouvrés) — pas une vraie moyenne glissante, à affiner si besoin d'un chiffre plus précis.
 
 ## Prochaines étapes possibles
 
-- Stocker et exploiter l'avancement réel d'un OF (mise à jour depuis l'atelier)
 - Interpréter la légende de couleurs une fois sa signification confirmée
 - Bascule progressive depuis la feuille papier (une ou deux machines pilotes avant généralisation)
