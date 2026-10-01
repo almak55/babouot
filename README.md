@@ -40,6 +40,7 @@ planning papier existante).
 | `creer-ordre` | Crée un nouvel OF + sa gamme opératoire |
 | `gammes-ordre` | Liste les étapes de gamme d'un OF (pour choisir laquelle planifier) |
 | `affecter-planning` | Affecte une étape de gamme à une machine/personne/jour, avec contrôle de disponibilité et de séquencement |
+| `gerer-machines` | Liste, crée et modifie les machines du parc (code, nom, opération principale, actif/inactif) |
 
 ### Front
 | Fichier | Rôle |
