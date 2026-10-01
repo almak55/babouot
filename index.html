@@ -243,6 +243,7 @@
   .row-icon.amber { background: var(--accent-amber-soft); color: var(--accent-amber-text); }
   .row-icon.danger { background: var(--danger-soft); color: var(--danger-text); }
   .row-icon.green { background: var(--accent-green-soft); color: var(--accent-green); }
+  .row-icon.muted { background: var(--paper-raised-2); color: var(--ink-500); }
   .row-title { font-weight: 600; font-family: "IBM Plex Mono", monospace; font-size: 12px; }
   .row-sub { color: var(--ink-500); font-size: 12px; margin-top: 1px; }
   .chip { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; background: var(--paper-raised-2); color: var(--ink-700); }
@@ -302,10 +303,14 @@
   .gantt th.day.today { color: var(--accent-teal); position: relative; }
   .gantt th.day.today::after { content: ''; position: absolute; bottom: -1px; left: 50%; transform: translateX(-50%); width: 24px; height: 2px; background: var(--accent-teal); border-radius: 2px; }
   .gantt td.machine-cell {
-    padding: 11px 16px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line);
+    padding: 9px 16px 9px 13px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line);
     font-size: 12.5px; white-space: nowrap; background: var(--paper-raised); position: sticky; left: 0;
+    border-left: 3px solid transparent;
   }
-  .gantt td.machine-cell .m-name { font-weight: 500; }
+  .gantt td.machine-cell.row-accent-teal { border-left-color: var(--accent-teal); }
+  .gantt td.machine-cell.row-accent-muted { border-left-color: var(--line); }
+  .gantt td.machine-cell .m-row { display: flex; align-items: center; gap: 10px; }
+  .gantt td.machine-cell .m-name { font-weight: 600; }
   .gantt td.machine-cell .m-sub { color: var(--ink-500); font-size: 10.5px; font-family: "IBM Plex Mono", monospace; }
   .gantt tbody tr:hover td.machine-cell { background: var(--accent-teal-soft); }
   .gantt td.slot { border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); height: 56px; padding: 4px; position: relative; transition: background .12s var(--ease); }
@@ -645,8 +650,11 @@
     DAYS.forEach((d,i)=> thead += `<th class="day ${i===TODAY_IDX?'today':''}">${d}</th>`);
     thead += '</tr>';
     let rows = '';
+    const ICON_MACHINE = '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>';
     state.machines.forEach(m=>{
-      rows += `<tr><td class="machine-cell"><div class="m-name">${m.name}</div><div class="m-sub">${m.code}</div></td>`;
+      const actif = (state.planning[m.id]||[]).length > 0;
+      const accent = actif ? 'teal' : 'muted';
+      rows += `<tr><td class="machine-cell row-accent-${accent}"><div class="m-row"><span class="row-icon ${accent}">${svgIcon(ICON_MACHINE)}</span><div><div class="m-name">${m.name}</div><div class="m-sub">${m.code}</div></div></div></td>`;
       for(let d=0; d<7; d++){
         const slot = (state.planning[m.id]||[]).find(s=>s.day===d);
         if(slot){
