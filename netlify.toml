@@ -1,6 +1,6 @@
 [build]
   publish = "."
-  functions = "functions"
+  functions = "netlify/functions"
 
 [functions."ordonnancement-auto"]
   schedule = "0 5 * * 1-5"
