@@ -878,12 +878,15 @@
   function renderReporting(){
     const enCours = state.ordres.filter(o=>o.statut==='en cours').length;
     const enRetard = state.stocks.filter(s=>s.statut==='danger').length;
-    const chargeMoy = Math.round(state.personnel.filter(p=>p.charge>0).reduce((a,p)=>a+p.charge,0) / state.personnel.filter(p=>p.charge>0).length);
+    const personnelActif = state.personnel.filter(p=>p.charge>0);
+    const chargeMoy = personnelActif.length > 0
+      ? Math.round(personnelActif.reduce((a,p)=>a+p.charge,0) / personnelActif.length)
+      : 0;
 
     const wrap = el(`<div></div>`);
     const kpis = el(`
       <div class="kpis">
-        <div class="kpi accent-teal"><div class="v">84%</div><div class="l">TRS moyen atelier</div></div>
+        <div class="kpi accent-teal"><div class="v">84%</div><div class="l">TRS moyen atelier (démo)</div></div>
         <div class="kpi accent-amber"><div class="v">${enCours}</div><div class="l">OF en cours</div></div>
         <div class="kpi accent-teal"><div class="v">${chargeMoy}%</div><div class="l">Charge moyenne équipe</div></div>
         <div class="kpi ${enRetard?'accent-danger':'accent-teal'}"><div class="v">${enRetard}</div><div class="l">Matières sous seuil critique</div></div>
@@ -937,7 +940,7 @@
       {name:'Encarteuse-piqueuse', trs:82},
       {name:'Presse à chaud', trs:69},
     ];
-    const panel = el(`<div class="panel"><div class="panel-head"><h2>TRS par machine — semaine en cours</h2></div></div>`);
+    const panel = el(`<div class="panel"><div class="panel-head"><h2>TRS par machine — semaine en cours <span style="font-weight:400; color:var(--ink-500); font-size:12px;">(données de démonstration)</span></h2></div></div>`);
     const body = el(`<div style="padding:16px; display:flex; flex-direction:column; gap:12px;"></div>`);
     trsByMachine.forEach(m=>{
       const cls = m.trs>=85?'':(m.trs>=75?'warn':'danger');
