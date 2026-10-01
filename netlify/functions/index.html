@@ -203,6 +203,30 @@
   .bar-fill.danger { background: var(--danger); }
 
   .hidden { display: none !important; }
+
+  /* ---- Modale ---- */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+    display: flex; align-items: center; justify-content: center; z-index: 100;
+    padding: 20px;
+  }
+  .modal {
+    background: var(--paper-raised); border-radius: 10px; border: 1px solid var(--line);
+    width: 100%; max-width: 440px; max-height: 90vh; overflow-y: auto;
+    padding: 20px;
+  }
+  .modal h3 { margin: 0 0 14px; font-size: 16px; }
+  .modal .field { margin-bottom: 12px; }
+  .modal .field label { margin-bottom: 4px; }
+  .modal .field input, .modal .field select { width: 100%; }
+  .modal .op-list { display: flex; flex-direction: column; gap: 6px; max-height: 160px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+  .modal .op-list label { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-900); }
+  .modal .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .modal .msg { font-size: 12px; margin-top: 8px; }
+  .modal .msg.error { color: var(--danger); }
+  .modal .msg.ok { color: var(--accent-teal); }
+  .slot.clickable { cursor: pointer; }
+  .slot.clickable:hover { background: var(--accent-teal-soft); }
 </style>
 </head>
 <body>
@@ -212,8 +236,9 @@
     <button class="navbtn active" data-tab="planning"><span class="n">01</span>Planification</button>
     <button class="navbtn" data-tab="ordres"><span class="n">02</span>Ordres de fabrication</button>
     <button class="navbtn" data-tab="personnel"><span class="n">03</span>Personnel</button>
-    <button class="navbtn" data-tab="stocks"><span class="n">04</span>Stocks &amp; matières</button>
-    <button class="navbtn" data-tab="reporting"><span class="n">05</span>Reporting</button>
+    <button class="navbtn" data-tab="machines"><span class="n">04</span>Machines</button>
+    <button class="navbtn" data-tab="stocks"><span class="n">05</span>Stocks &amp; matières</button>
+    <button class="navbtn" data-tab="reporting"><span class="n">06</span>Reporting</button>
     <div class="side-foot mono">v0.1 — prototype interne</div>
   </nav>
 
@@ -231,6 +256,9 @@
     <div class="content" id="content"></div>
   </div>
 </div>
+
+<div id="modal-root"></div>
+
 
 <script>
 (function(){
@@ -334,6 +362,7 @@
     planning: ['Planification', 'Semaine du 22 au 28 septembre 2026'],
     ordres: ['Ordres de fabrication', "5 ordres actifs — 2 en cours, 2 planifiés, 1 en pause"],
     personnel: ['Personnel', 'Affectation, compétences et charge par opérateur'],
+    machines: ['Machines', 'Parc machine — créer, modifier, rattacher à une opération'],
     stocks: ['Stocks & matières', 'Papier, colle, fil, couverture — suivi des seuils'],
     reporting: ['Reporting', 'Indicateurs de production — semaine en cours'],
   };
@@ -382,12 +411,20 @@
           const color = slot.statut==='danger' ? 'var(--danger)' : slot.statut==='warn' ? 'var(--accent-amber)' : 'var(--accent-teal)';
           rows += `<td class="slot"><div class="bar" style="background:${color}"><span class="b-of">${slot.of}</span><span class="b-name">${of?of.produit:''}</span></div></td>`;
         } else {
-          rows += `<td class="slot"></td>`;
+          rows += `<td class="slot clickable" data-machine-uuid="${m.uuid||''}" data-machine-name="${m.name}" data-day="${d}"></td>`;
         }
       }
       rows += `</tr>`;
     });
     table.innerHTML = thead + rows;
+
+    table.querySelectorAll('.slot.clickable').forEach(td=>{
+      td.addEventListener('click', ()=> ouvrirModaleAffectation({
+        machineUuid: td.dataset.machineUuid,
+        machineName: td.dataset.machineName,
+        dayIdx: parseInt(td.dataset.day, 10),
+      }));
+    });
 
     return wrap;
   }
@@ -451,6 +488,109 @@
       `));
     });
     return wrap;
+  }
+
+  function renderMachines(){
+    const wrap = el(`
+      <div class="panel">
+        <div class="panel-head"><h2>Parc machine</h2><button class="btn primary" id="new-machine">+ Nouvelle machine</button></div>
+        <table>
+          <thead><tr><th>Code</th><th>Nom</th><th>Opération principale</th><th>Statut</th><th></th></tr></thead>
+          <tbody id="machines-tbody"><tr><td colspan="5" class="empty">Chargement…</td></tr></tbody>
+        </table>
+      </div>
+    `);
+
+    chargerListeMachines(wrap);
+
+    wrap.querySelector('#new-machine').addEventListener('click', () => ouvrirModaleMachine(null));
+    return wrap;
+  }
+
+  async function chargerListeMachines(wrap) {
+    const tbody = wrap.querySelector('#machines-tbody');
+    try {
+      const res = await fetch(`${API}/gerer-machines`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const machines = await res.json();
+      tbody.innerHTML = '';
+      machines.forEach(m => {
+        tbody.appendChild(el(`
+          <tr>
+            <td class="mono">${m.code}</td>
+            <td>${m.nom}</td>
+            <td>${m.operation || '<span style="color:var(--ink-500)">— non rattachée —</span>'}</td>
+            <td><span class="tag ${m.actif ? 'ok' : 'danger'}">${m.actif ? 'Active' : 'Inactive'}</span></td>
+            <td><button class="btn edit-machine" data-id="${m.id}">Modifier</button></td>
+          </tr>
+        `));
+      });
+      tbody.querySelectorAll('.edit-machine').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const m = machines.find(x => x.id === btn.dataset.id);
+          ouvrirModaleMachine(m);
+        });
+      });
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="5" class="empty">Backend indisponible — impossible de charger le parc machine réel. (${e.message})</td></tr>`;
+    }
+  }
+
+  async function ouvrirModaleMachine(machine) {
+    let refs;
+    try { refs = await getReferentiels(); }
+    catch (e) {
+      afficherModale(`<h3>Machine</h3><div class="msg error">Backend indisponible. (${e.message})</div><div class="actions"><button class="btn" id="m-close">Fermer</button></div>`);
+      document.getElementById('m-close').addEventListener('click', fermerModale);
+      return;
+    }
+
+    const estEdition = !!machine;
+    const opOptions = `<option value="">— non rattachée —</option>` + refs.operations.map(o =>
+      `<option value="${o.code}" ${machine && machine.operation_code === o.code ? 'selected' : ''}>${o.nom}</option>`
+    ).join('');
+
+    afficherModale(`
+      <h3>${estEdition ? 'Modifier la machine' : 'Nouvelle machine'}</h3>
+      <div class="field"><label>Code</label><input id="m-code" value="${machine ? machine.code : ''}" placeholder="ex: SIGLOCH"></div>
+      <div class="field"><label>Nom</label><input id="m-nom" value="${machine ? machine.nom : ''}" placeholder="ex: Sigloch"></div>
+      <div class="field"><label>Opération principale</label><select id="m-operation">${opOptions}</select></div>
+      ${estEdition ? `<div class="field"><label><input type="checkbox" id="m-actif" ${machine.actif ? 'checked' : ''}> Machine active</label></div>` : ''}
+      <div class="field"><label>Notes</label><input id="m-notes" value="${machine && machine.notes ? machine.notes : ''}" placeholder="optionnel"></div>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">${estEdition ? 'Enregistrer' : 'Créer'}</button></div>
+    `);
+
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.getElementById('m-submit').addEventListener('click', async () => {
+      const code = document.getElementById('m-code').value.trim();
+      const nom = document.getElementById('m-nom').value.trim();
+      const operation_code = document.getElementById('m-operation').value || null;
+      const notes = document.getElementById('m-notes').value.trim();
+      const msg = document.getElementById('m-msg');
+
+      if (!code || !nom) {
+        msg.innerHTML = `<div class="msg error">Code et nom sont requis.</div>`;
+        return;
+      }
+      msg.innerHTML = `<div class="msg">Enregistrement en cours…</div>`;
+      try {
+        const payload = estEdition
+          ? { id: machine.id, code, nom, operation_code, notes, actif: document.getElementById('m-actif').checked }
+          : { code, nom, operation_code, notes };
+        const res = await fetch(`${API}/gerer-machines`, {
+          method: estEdition ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+        msg.innerHTML = `<div class="msg ok">Enregistré.</div>`;
+        setTimeout(() => { fermerModale(); render(); }, 500);
+      } catch (e) {
+        msg.innerHTML = `<div class="msg error">${e.message}</div>`;
+      }
+    });
   }
 
   function renderStocks(){
@@ -519,7 +659,7 @@
     return wrap;
   }
 
-  const renderers = { planning: renderPlanning, ordres: renderOrdres, personnel: renderPersonnel, stocks: renderStocks, reporting: renderReporting };
+  const renderers = { planning: renderPlanning, ordres: renderOrdres, personnel: renderPersonnel, machines: renderMachines, stocks: renderStocks, reporting: renderReporting };
 
   function render(){
     const content = document.getElementById('content');
@@ -531,12 +671,8 @@
 
     const addOfBtn = document.getElementById('add-of-btn');
     const newOfBtn = document.getElementById('new-of');
-    [addOfBtn, newOfBtn].forEach(btn=>{
-      if(btn) btn.addEventListener('click', ()=>{
-        state.tab = 'ordres';
-        render();
-      });
-    });
+    if (addOfBtn) addOfBtn.addEventListener('click', () => ouvrirModaleAffectation({}));
+    if (newOfBtn) newOfBtn.addEventListener('click', ouvrirModaleNouvelOf);
   }
 
   document.querySelectorAll('.navbtn').forEach(btn=>{
@@ -572,7 +708,7 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 
-      state.machines = data.machines.map(m => ({ id: m.code, name: m.nom, code: m.code }));
+      state.machines = data.machines.map(m => ({ id: m.code, uuid: m.id, name: m.nom, code: m.code }));
 
       state.personnel = data.personnel.map(p => {
         const creneauxSemaine = data.planning.filter(c => c.personnel_id === p.id).length;
@@ -585,7 +721,7 @@
       });
 
       state.ordres = data.ordres.map(o => ({
-        id: o.numero,
+        id: o.numero, uuid: o.id,
         produit: o.titres ? o.titres.nom : '(titre non renseigné)',
         client: o.titres ? o.titres.client : '',
         qte: o.quantite, delai: o.delai, priorite: o.priorite,
@@ -618,6 +754,163 @@
       console.warn('Backend indisponible, affichage des données de démonstration.', e);
       render();
     }
+  }
+
+  // ---------- Écriture : création d'OF et affectation planning ----------
+  const API = '/.netlify/functions';
+  let referentielsCache = null;
+
+  async function getReferentiels() {
+    if (referentielsCache) return referentielsCache;
+    const res = await fetch(`${API}/referentiels`);
+    if (!res.ok) throw new Error('Impossible de charger les référentiels.');
+    referentielsCache = await res.json();
+    return referentielsCache;
+  }
+
+  function fermerModale() {
+    document.getElementById('modal-root').innerHTML = '';
+  }
+
+  function afficherModale(contenuHtml) {
+    const root = document.getElementById('modal-root');
+    root.innerHTML = `<div class="modal-overlay" id="modal-overlay"><div class="modal">${contenuHtml}</div></div>`;
+    root.querySelector('#modal-overlay').addEventListener('click', (e) => {
+      if (e.target.id === 'modal-overlay') fermerModale();
+    });
+  }
+
+  async function ouvrirModaleNouvelOf() {
+    let refs;
+    try { refs = await getReferentiels(); }
+    catch (e) {
+      afficherModale(`<h3>Nouvel OF</h3><div class="msg error">Backend indisponible : impossible de charger les opérations/titres. (${e.message})</div><div class="actions"><button class="btn" id="m-close">Fermer</button></div>`);
+      document.getElementById('m-close').addEventListener('click', fermerModale);
+      return;
+    }
+
+    const opsHtml = refs.operations.map(o => `
+      <label><input type="checkbox" value="${o.code}"> ${o.nom}</label>
+    `).join('');
+
+    afficherModale(`
+      <h3>Nouvel ordre de fabrication</h3>
+      <div class="field"><label>Titre / produit</label><input id="m-titre-nom" placeholder="ex: Trône de Fer 5"></div>
+      <div class="field"><label>Client</label><input id="m-titre-client" placeholder="ex: Éditions Pléiade"></div>
+      <div class="field"><label>Quantité</label><input id="m-qte" type="number" min="1" placeholder="2000"></div>
+      <div class="field"><label>Délai</label><input id="m-delai" type="date"></div>
+      <div class="field"><label>Priorité</label>
+        <select id="m-priorite"><option value="normale">Normale</option><option value="haute">Haute</option><option value="urgente">Urgente</option></select>
+      </div>
+      <div class="field"><label>Gamme opératoire (cocher dans l'ordre voulu)</label><div class="op-list">${opsHtml}</div></div>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">Créer l'OF</button></div>
+    `);
+
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.getElementById('m-submit').addEventListener('click', async () => {
+      const nom = document.getElementById('m-titre-nom').value.trim();
+      const client = document.getElementById('m-titre-client').value.trim();
+      const quantite = parseInt(document.getElementById('m-qte').value, 10);
+      const delai = document.getElementById('m-delai').value || null;
+      const priorite = document.getElementById('m-priorite').value;
+      const operations = Array.from(document.querySelectorAll('.op-list input:checked')).map(i => i.value);
+      const msg = document.getElementById('m-msg');
+
+      if (!nom || !quantite || operations.length === 0) {
+        msg.innerHTML = `<div class="msg error">Titre, quantité et au moins une opération sont requis.</div>`;
+        return;
+      }
+      msg.innerHTML = `<div class="msg">Création en cours…</div>`;
+      try {
+        const res = await fetch(`${API}/creer-ordre`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ titre: { nom, client }, quantite, delai, priorite, operations }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+        msg.innerHTML = `<div class="msg ok">OF ${data.numero} créé.</div>`;
+        setTimeout(() => { fermerModale(); chargerDonneesReelles(); }, 600);
+      } catch (e) {
+        msg.innerHTML = `<div class="msg error">${e.message}</div>`;
+      }
+    });
+  }
+
+  async function ouvrirModaleAffectation({ machineUuid, machineName, dayIdx }) {
+    let refs;
+    try { refs = await getReferentiels(); }
+    catch (e) {
+      afficherModale(`<h3>Affecter un OF</h3><div class="msg error">Backend indisponible. (${e.message})</div><div class="actions"><button class="btn" id="m-close">Fermer</button></div>`);
+      document.getElementById('m-close').addEventListener('click', fermerModale);
+      return;
+    }
+
+    const dateIso = dayIdx != null ? DAYS_ISO[dayIdx] : DAYS_ISO[0];
+    const ofOptions = state.ordres.map(o => `<option value="${o.uuid}">${o.id} — ${o.produit}</option>`).join('');
+    const machineOptions = state.machines.map(m => `<option value="${m.uuid}" ${m.uuid===machineUuid?'selected':''}>${m.name}</option>`).join('');
+    const persOptions = refs.personnel.map(p => `<option value="${p.id}">${p.nom}${p.poste ? ' — ' + p.poste : ''}</option>`).join('');
+
+    afficherModale(`
+      <h3>Affecter un OF au planning</h3>
+      <div class="field"><label>Ordre de fabrication</label><select id="m-of">${ofOptions}</select></div>
+      <div class="field"><label>Étape de gamme</label><select id="m-etape"><option>Choisir un OF d'abord…</option></select></div>
+      <div class="field"><label>Machine</label><select id="m-machine">${machineOptions}</select></div>
+      <div class="field"><label>Jour</label><input id="m-date" type="date" value="${dateIso}"></div>
+      <div class="field"><label>Personnel (optionnel)</label><select id="m-personnel"><option value="">— non assigné —</option>${persOptions}</select></div>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">Affecter</button></div>
+    `);
+
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+
+    async function chargerEtapes() {
+      const ofUuid = document.getElementById('m-of').value;
+      const etapeSelect = document.getElementById('m-etape');
+      etapeSelect.innerHTML = `<option>Chargement…</option>`;
+      try {
+        const res = await fetch(`${API}/gammes-ordre?of_id=${ofUuid}`);
+        const gammes = await res.json();
+        const aPlanifier = gammes.filter(g => g.statut === 'à planifier');
+        if (aPlanifier.length === 0) {
+          etapeSelect.innerHTML = `<option value="">Toutes les étapes sont déjà planifiées</option>`;
+          return;
+        }
+        etapeSelect.innerHTML = aPlanifier.map(g => `<option value="${g.id}">${g.sequence}. ${g.operation.nom}</option>`).join('');
+      } catch (e) {
+        etapeSelect.innerHTML = `<option value="">Erreur de chargement</option>`;
+      }
+    }
+    document.getElementById('m-of').addEventListener('change', chargerEtapes);
+    if (ofOptions) chargerEtapes();
+
+    document.getElementById('m-submit').addEventListener('click', async () => {
+      const gamme_operatoire_id = document.getElementById('m-etape').value;
+      const machine_id = document.getElementById('m-machine').value;
+      const date = document.getElementById('m-date').value;
+      const personnel_id = document.getElementById('m-personnel').value || null;
+      const msg = document.getElementById('m-msg');
+
+      if (!gamme_operatoire_id || !machine_id || !date) {
+        msg.innerHTML = `<div class="msg error">Étape, machine et jour sont requis.</div>`;
+        return;
+      }
+      msg.innerHTML = `<div class="msg">Affectation en cours…</div>`;
+      try {
+        const res = await fetch(`${API}/affecter-planning`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gamme_operatoire_id, machine_id, date, personnel_id }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+        msg.innerHTML = `<div class="msg ok">Affecté.</div>`;
+        setTimeout(() => { fermerModale(); chargerDonneesReelles(); }, 500);
+      } catch (e) {
+        msg.innerHTML = `<div class="msg error">${e.message}</div>`;
+      }
+    });
   }
 
   chargerDonneesReelles();
