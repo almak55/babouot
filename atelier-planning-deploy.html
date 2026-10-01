@@ -563,7 +563,6 @@
   // plutôt que d'afficher un écran vide.
   //
   // Limites actuelles de ce branchement (à lever plus tard si besoin) :
-  //  - l'avancement (%) d'un OF n'existe pas encore en base : mis à 0.
   //  - la charge du personnel est approximée (créneaux de la semaine
   //    affichée / 5 jours), pas une vraie moyenne glissante.
   async function chargerDonneesReelles() {
@@ -590,7 +589,7 @@
         produit: o.titres ? o.titres.nom : '(titre non renseigné)',
         client: o.titres ? o.titres.client : '',
         qte: o.quantite, delai: o.delai, priorite: o.priorite,
-        statut: o.statut, avancement: 0,
+        statut: o.statut, avancement: o.avancement,
       }));
 
       state.stocks = data.stocks.map(s => ({
