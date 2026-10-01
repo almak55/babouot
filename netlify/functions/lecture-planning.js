@@ -15,7 +15,7 @@
 //   planning: [...]   // créneaux planning_jour de la période demandée
 // }
 
-const { getSupabase } = require('./lib/supabaseClient');
+const { getSupabase } = require('./lib/supabaseclient');
 
 exports.handler = async (event) => {
   try {

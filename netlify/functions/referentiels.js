@@ -9,7 +9,7 @@
 // Réponse :
 // { operations: [...], machines: [...], personnel: [...], titres: [...] }
 
-const { getSupabase } = require('./lib/supabaseClient');
+const { getSupabase } = require('./lib/supabaseclient');
 
 exports.handler = async () => {
   try {

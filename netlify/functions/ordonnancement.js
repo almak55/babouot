@@ -28,7 +28,7 @@
 // Netlify, reprendre le pattern start/background/status déjà utilisé
 // sur ScoutLab (analyze-background.js).
 
-const { getSupabase } = require('./lib/supabaseClient');
+const { getSupabase } = require('./lib/supabaseclient');
 
 const PRIORITE_ORDRE = { urgente: 0, haute: 1, normale: 2 };
 
