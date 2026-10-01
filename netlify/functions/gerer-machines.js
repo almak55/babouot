@@ -24,7 +24,7 @@ exports.handler = async (event) => {
     if (event.httpMethod === 'GET') {
       const { data, error } = await supabase
         .from('machines')
-        .select('id, code, nom, actif, notes, operations(code, nom)')
+        .select('id, code, nom, actif, notes, operations!machines_operation_id_fkey(code, nom)')
         .order('code');
       if (error) throw error;
       return {
