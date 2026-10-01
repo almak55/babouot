@@ -228,6 +228,46 @@
   .tag.warn { background: var(--accent-amber); color: #4A2E00; }
   .tag.danger { background: var(--danger); color: #fff; }
 
+  /* ---- Lignes de type "production" (accent + icône + menu ···) ---- */
+  .row-icon-cell { width: 46px; }
+  tr[class^="row-accent-"] td:nth-child(2) { border-left: 3px solid transparent; padding-left: 13px; }
+  tr.row-accent-teal td:nth-child(2) { border-left-color: var(--accent-teal); }
+  tr.row-accent-amber td:nth-child(2) { border-left-color: var(--accent-amber); }
+  tr.row-accent-danger td:nth-child(2) { border-left-color: var(--danger); }
+  tr.row-accent-green td:nth-child(2) { border-left-color: var(--accent-green); }
+  .row-icon {
+    width: 30px; height: 30px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center;
+  }
+  .row-icon svg { width: 15px; height: 15px; }
+  .row-icon.teal { background: var(--accent-teal-soft); color: var(--accent-teal); }
+  .row-icon.amber { background: var(--accent-amber-soft); color: var(--accent-amber-text); }
+  .row-icon.danger { background: var(--danger-soft); color: var(--danger-text); }
+  .row-icon.green { background: var(--accent-green-soft); color: var(--accent-green); }
+  .row-title { font-weight: 600; font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+  .row-sub { color: var(--ink-500); font-size: 12px; margin-top: 1px; }
+  .chip { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; background: var(--paper-raised-2); color: var(--ink-700); }
+  .etat { font-size: 12.5px; font-weight: 600; }
+  .etat-teal { color: var(--accent-teal); }
+  .etat-amber { color: var(--accent-amber-text); }
+  .etat-danger { color: var(--danger-text); }
+  .etat-green { color: var(--accent-green); }
+  .row-menu-cell { width: 36px; }
+  .row-menu-btn {
+    width: 28px; height: 28px; border-radius: 50%; border: none; background: transparent; color: var(--ink-500);
+    display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background .12s var(--ease);
+  }
+  .row-menu-btn svg { width: 16px; height: 16px; }
+  .row-menu-btn:hover { background: var(--paper-raised-2); color: var(--ink-900); }
+  .row-menu {
+    position: absolute; background: var(--paper-raised); border: 1px solid var(--line); border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-lg); z-index: 150; overflow: hidden; min-width: 190px; color: var(--ink-900);
+  }
+  .row-menu button {
+    display: block; width: 100%; text-align: left; padding: 9px 13px; background: none; border: none; cursor: pointer;
+    font-size: 12.5px; color: var(--ink-900); transition: background .12s var(--ease);
+  }
+  .row-menu button:hover { background: var(--paper-raised-2); }
+
   .btn {
     display: inline-flex; align-items: center; gap: 6px;
     border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink-900);
@@ -637,32 +677,94 @@
     const wrap = el(`
       <div class="panel">
         <div class="panel-head"><h2>Ordres de fabrication</h2><button class="btn primary" id="new-of"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvel OF</button></div>
-        <table>
-          <thead><tr><th>OF</th><th>Produit</th><th>Client</th><th>Qté</th><th>Délai</th><th>Priorité</th><th>Statut</th><th>Avancement</th></tr></thead>
+        <table class="row-table">
+          <thead><tr><th></th><th>Production</th><th>Client</th><th>Qté</th><th>Délai</th><th>État</th><th>Avancement</th><th></th></tr></thead>
           <tbody id="of-tbody"></tbody>
         </table>
       </div>
     `);
     const tbody = wrap.querySelector('#of-tbody');
+
+    const PRIO_ICON = {
+      urgente: '<path d="M12 2L2 20h20L12 2z"/><path d="M12 9v5M12 17h.01"/>',
+      haute:   '<path d="M12 19V5M5 12l7-7 7 7"/>',
+      normale: '<circle cx="12" cy="12" r="8"/>',
+    };
+    const ROW_ACCENT = { 'en cours': 'amber', 'planifié': 'teal', 'en pause': 'danger', 'terminé': 'green' };
+    const ETAT_LABEL = { 'en cours': 'En cours', 'planifié': 'Planifié', 'en pause': 'En pause', 'terminé': 'Terminé' };
+
     state.ordres.forEach(o=>{
       const fillClass = o.avancement>=70?'':(o.avancement>=30?'warn':'danger');
+      const accent = ROW_ACCENT[o.statut] || 'teal';
       tbody.appendChild(el(`
-        <tr>
-          <td class="mono">${o.id}</td>
-          <td>${o.produit}</td>
-          <td>${o.client}</td>
+        <tr class="row-accent-${accent}">
+          <td class="row-icon-cell"><span class="row-icon ${accent}">${svgIcon(PRIO_ICON[o.priorite] || PRIO_ICON.normale)}</span></td>
+          <td><div class="row-title">${o.id}</div><div class="row-sub">${o.produit}</div></td>
+          <td><span class="chip">${o.client || '—'}</span></td>
           <td>${o.qte.toLocaleString('fr-FR')}</td>
-          <td>${o.delai}</td>
-          <td><span style="color:${prioColor(o.priorite)}; font-weight:500; text-transform:capitalize;">${o.priorite}</span></td>
-          <td><span class="tag ${statutTag(o.statut)}">${o.statut}</span></td>
+          <td class="mono">${o.delai || '—'}</td>
+          <td><span class="etat etat-${accent}">${ETAT_LABEL[o.statut] || o.statut}</span></td>
           <td style="min-width:110px;">
             <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--ink-500);"><span>${o.avancement}%</span></div>
             <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${o.avancement}%"></div></div>
           </td>
+          <td class="row-menu-cell">
+            <button class="row-menu-btn" data-ofid="${o.uuid}" data-ofnum="${o.id}" aria-label="Actions">${svgIcon('<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>')}</button>
+          </td>
         </tr>
       `));
     });
+
+    tbody.querySelectorAll('.row-menu-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        ouvrirMenuOf(btn, btn.dataset.ofid, btn.dataset.ofnum);
+      });
+    });
+
     return wrap;
+  }
+
+  function ouvrirMenuOf(btn, ofUuid, ofNumero) {
+    document.querySelectorAll('.row-menu').forEach(m => m.remove());
+    const menu = el(`
+      <div class="row-menu">
+        <button data-action="gamme">Voir la gamme opératoire</button>
+        <button data-action="affecter">Affecter au planning</button>
+      </div>
+    `);
+    document.body.appendChild(menu);
+    const r = btn.getBoundingClientRect();
+    menu.style.top = `${r.bottom + window.scrollY + 4}px`;
+    menu.style.left = `${r.right + window.scrollX - menu.offsetWidth}px`;
+
+    menu.querySelector('[data-action="affecter"]').addEventListener('click', () => {
+      menu.remove();
+      ouvrirModaleAffectation({});
+    });
+    menu.querySelector('[data-action="gamme"]').addEventListener('click', async () => {
+      menu.remove();
+      afficherModale(`<h3>Gamme opératoire — ${ofNumero}</h3><div id="gamme-list" class="empty">Chargement…</div>`);
+      try {
+        const res = await fetch(`${API}/gammes-ordre?of_id=${ofUuid}`);
+        const gammes = await res.json();
+        const list = document.getElementById('gamme-list');
+        const ETAT_LABEL2 = { 'à planifier': 'À planifier', 'planifié': 'Planifié', 'en cours': 'En cours', 'terminé': 'Terminé' };
+        list.className = '';
+        list.innerHTML = gammes.map(g => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px;">
+            <span><span class="mono" style="color:var(--ink-500); margin-right:8px;">${g.sequence}.</span>${g.operation.nom}</span>
+            <span class="tag ${g.statut==='terminé'?'ok':g.statut==='à planifier'?'warn':'ok'}">${ETAT_LABEL2[g.statut] || g.statut}</span>
+          </div>
+        `).join('') || '<div class="empty">Aucune étape.</div>';
+      } catch (e) {
+        document.getElementById('gamme-list').innerHTML = `Erreur : ${e.message}`;
+      }
+    });
+
+    setTimeout(() => {
+      document.addEventListener('click', function fermer(){ menu.remove(); document.removeEventListener('click', fermer); }, { once: true });
+    }, 0);
   }
 
   function renderPersonnel(){
