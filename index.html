@@ -236,8 +236,9 @@
     <button class="navbtn active" data-tab="planning"><span class="n">01</span>Planification</button>
     <button class="navbtn" data-tab="ordres"><span class="n">02</span>Ordres de fabrication</button>
     <button class="navbtn" data-tab="personnel"><span class="n">03</span>Personnel</button>
-    <button class="navbtn" data-tab="stocks"><span class="n">04</span>Stocks &amp; matières</button>
-    <button class="navbtn" data-tab="reporting"><span class="n">05</span>Reporting</button>
+    <button class="navbtn" data-tab="machines"><span class="n">04</span>Machines</button>
+    <button class="navbtn" data-tab="stocks"><span class="n">05</span>Stocks &amp; matières</button>
+    <button class="navbtn" data-tab="reporting"><span class="n">06</span>Reporting</button>
     <div class="side-foot mono">v0.1 — prototype interne</div>
   </nav>
 
@@ -361,6 +362,7 @@
     planning: ['Planification', 'Semaine du 22 au 28 septembre 2026'],
     ordres: ['Ordres de fabrication', "5 ordres actifs — 2 en cours, 2 planifiés, 1 en pause"],
     personnel: ['Personnel', 'Affectation, compétences et charge par opérateur'],
+    machines: ['Machines', 'Parc machine — créer, modifier, rattacher à une opération'],
     stocks: ['Stocks & matières', 'Papier, colle, fil, couverture — suivi des seuils'],
     reporting: ['Reporting', 'Indicateurs de production — semaine en cours'],
   };
@@ -488,6 +490,109 @@
     return wrap;
   }
 
+  function renderMachines(){
+    const wrap = el(`
+      <div class="panel">
+        <div class="panel-head"><h2>Parc machine</h2><button class="btn primary" id="new-machine">+ Nouvelle machine</button></div>
+        <table>
+          <thead><tr><th>Code</th><th>Nom</th><th>Opération principale</th><th>Statut</th><th></th></tr></thead>
+          <tbody id="machines-tbody"><tr><td colspan="5" class="empty">Chargement…</td></tr></tbody>
+        </table>
+      </div>
+    `);
+
+    chargerListeMachines(wrap);
+
+    wrap.querySelector('#new-machine').addEventListener('click', () => ouvrirModaleMachine(null));
+    return wrap;
+  }
+
+  async function chargerListeMachines(wrap) {
+    const tbody = wrap.querySelector('#machines-tbody');
+    try {
+      const res = await fetch(`${API}/gerer-machines`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const machines = await res.json();
+      tbody.innerHTML = '';
+      machines.forEach(m => {
+        tbody.appendChild(el(`
+          <tr>
+            <td class="mono">${m.code}</td>
+            <td>${m.nom}</td>
+            <td>${m.operation || '<span style="color:var(--ink-500)">— non rattachée —</span>'}</td>
+            <td><span class="tag ${m.actif ? 'ok' : 'danger'}">${m.actif ? 'Active' : 'Inactive'}</span></td>
+            <td><button class="btn edit-machine" data-id="${m.id}">Modifier</button></td>
+          </tr>
+        `));
+      });
+      tbody.querySelectorAll('.edit-machine').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const m = machines.find(x => x.id === btn.dataset.id);
+          ouvrirModaleMachine(m);
+        });
+      });
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="5" class="empty">Backend indisponible — impossible de charger le parc machine réel. (${e.message})</td></tr>`;
+    }
+  }
+
+  async function ouvrirModaleMachine(machine) {
+    let refs;
+    try { refs = await getReferentiels(); }
+    catch (e) {
+      afficherModale(`<h3>Machine</h3><div class="msg error">Backend indisponible. (${e.message})</div><div class="actions"><button class="btn" id="m-close">Fermer</button></div>`);
+      document.getElementById('m-close').addEventListener('click', fermerModale);
+      return;
+    }
+
+    const estEdition = !!machine;
+    const opOptions = `<option value="">— non rattachée —</option>` + refs.operations.map(o =>
+      `<option value="${o.code}" ${machine && machine.operation_code === o.code ? 'selected' : ''}>${o.nom}</option>`
+    ).join('');
+
+    afficherModale(`
+      <h3>${estEdition ? 'Modifier la machine' : 'Nouvelle machine'}</h3>
+      <div class="field"><label>Code</label><input id="m-code" value="${machine ? machine.code : ''}" placeholder="ex: SIGLOCH"></div>
+      <div class="field"><label>Nom</label><input id="m-nom" value="${machine ? machine.nom : ''}" placeholder="ex: Sigloch"></div>
+      <div class="field"><label>Opération principale</label><select id="m-operation">${opOptions}</select></div>
+      ${estEdition ? `<div class="field"><label><input type="checkbox" id="m-actif" ${machine.actif ? 'checked' : ''}> Machine active</label></div>` : ''}
+      <div class="field"><label>Notes</label><input id="m-notes" value="${machine && machine.notes ? machine.notes : ''}" placeholder="optionnel"></div>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">${estEdition ? 'Enregistrer' : 'Créer'}</button></div>
+    `);
+
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.getElementById('m-submit').addEventListener('click', async () => {
+      const code = document.getElementById('m-code').value.trim();
+      const nom = document.getElementById('m-nom').value.trim();
+      const operation_code = document.getElementById('m-operation').value || null;
+      const notes = document.getElementById('m-notes').value.trim();
+      const msg = document.getElementById('m-msg');
+
+      if (!code || !nom) {
+        msg.innerHTML = `<div class="msg error">Code et nom sont requis.</div>`;
+        return;
+      }
+      msg.innerHTML = `<div class="msg">Enregistrement en cours…</div>`;
+      try {
+        const payload = estEdition
+          ? { id: machine.id, code, nom, operation_code, notes, actif: document.getElementById('m-actif').checked }
+          : { code, nom, operation_code, notes };
+        const res = await fetch(`${API}/gerer-machines`, {
+          method: estEdition ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+        msg.innerHTML = `<div class="msg ok">Enregistré.</div>`;
+        setTimeout(() => { fermerModale(); render(); }, 500);
+      } catch (e) {
+        msg.innerHTML = `<div class="msg error">${e.message}</div>`;
+      }
+    });
+  }
+
   function renderStocks(){
     const wrap = el(`
       <div class="panel">
@@ -554,7 +659,7 @@
     return wrap;
   }
 
-  const renderers = { planning: renderPlanning, ordres: renderOrdres, personnel: renderPersonnel, stocks: renderStocks, reporting: renderReporting };
+  const renderers = { planning: renderPlanning, ordres: renderOrdres, personnel: renderPersonnel, machines: renderMachines, stocks: renderStocks, reporting: renderReporting };
 
   function render(){
     const content = document.getElementById('content');
