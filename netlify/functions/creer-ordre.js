@@ -13,7 +13,7 @@
 //
 // Réponse : { of_id, numero, gammes_operatoires: [...] }
 
-const { getSupabase } = require('./lib/supabaseClient');
+const { getSupabase } = require('./lib/supabaseclient');
 
 exports.handler = async (event) => {
   try {

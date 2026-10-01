@@ -9,7 +9,7 @@
 //
 // Réponse : [ { id, nom, quantite, unite, seuil_alerte, statut } ]
 
-const { getSupabase } = require('./lib/supabaseClient');
+const { getSupabase } = require('./lib/supabaseclient');
 
 exports.handler = async () => {
   try {

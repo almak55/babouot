@@ -12,7 +12,7 @@
 // Réponse :
 // { conflits_machine: [...], conflits_personnel: [...] }
 
-const { getSupabase } = require('./lib/supabaseClient');
+const { getSupabase } = require('./lib/supabaseclient');
 
 exports.handler = async (event) => {
   try {

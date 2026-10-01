@@ -4,7 +4,7 @@
 //
 // Réponse : [ { id, sequence, statut, operation: { id, code, nom } } ]
 
-const { getSupabase } = require('./lib/supabaseClient');
+const { getSupabase } = require('./lib/supabaseclient');
 
 exports.handler = async (event) => {
   try {

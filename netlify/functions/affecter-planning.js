@@ -15,7 +15,7 @@
 //
 // Réponse : { planning_jour_id } ou { error, conflit: 'machine'|'personnel'|'absence' }
 
-const { getSupabase } = require('./lib/supabaseClient');
+const { getSupabase } = require('./lib/supabaseclient');
 
 exports.handler = async (event) => {
   try {
