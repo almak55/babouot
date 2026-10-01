@@ -1,3 +1,7 @@
+[build]
+  publish = "."
+  functions = "functions"
+
 [functions."ordonnancement-auto"]
   schedule = "0 5 * * 1-5"
   # 5h00 UTC = 7h00 Paris en heure d'été (6h00 en heure d'hiver) —
