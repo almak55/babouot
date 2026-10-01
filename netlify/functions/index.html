@@ -519,7 +519,7 @@
           <tr>
             <td class="mono">${m.code}</td>
             <td>${m.nom}</td>
-            <td>${m.operation || '<span style="color:var(--ink-500)">— non rattachée —</span>'}</td>
+            <td>${(m.operations && m.operations.length) ? m.operations.map(o=>`<span class="tag ok" style="margin-right:4px;">${o.nom}</span>`).join('') : '<span style="color:var(--ink-500)">— aucune —</span>'}</td>
             <td><span class="tag ${m.actif ? 'ok' : 'danger'}">${m.actif ? 'Active' : 'Inactive'}</span></td>
             <td><button class="btn edit-machine" data-id="${m.id}">Modifier</button></td>
           </tr>
@@ -546,15 +546,16 @@
     }
 
     const estEdition = !!machine;
-    const opOptions = `<option value="">— non rattachée —</option>` + refs.operations.map(o =>
-      `<option value="${o.code}" ${machine && machine.operation_code === o.code ? 'selected' : ''}>${o.nom}</option>`
-    ).join('');
+    const codesActuels = machine ? (machine.operations || []).map(o => o.code) : [];
+    const opsHtml = refs.operations.map(o => `
+      <label><input type="checkbox" value="${o.code}" ${codesActuels.includes(o.code) ? 'checked' : ''}> ${o.nom}</label>
+    `).join('');
 
     afficherModale(`
       <h3>${estEdition ? 'Modifier la machine' : 'Nouvelle machine'}</h3>
       <div class="field"><label>Code</label><input id="m-code" value="${machine ? machine.code : ''}" placeholder="ex: SIGLOCH"></div>
       <div class="field"><label>Nom</label><input id="m-nom" value="${machine ? machine.nom : ''}" placeholder="ex: Sigloch"></div>
-      <div class="field"><label>Opération principale</label><select id="m-operation">${opOptions}</select></div>
+      <div class="field"><label>Opérations (cocher toutes celles que cette machine peut faire)</label><div class="op-list">${opsHtml}</div></div>
       ${estEdition ? `<div class="field"><label><input type="checkbox" id="m-actif" ${machine.actif ? 'checked' : ''}> Machine active</label></div>` : ''}
       <div class="field"><label>Notes</label><input id="m-notes" value="${machine && machine.notes ? machine.notes : ''}" placeholder="optionnel"></div>
       <div id="m-msg"></div>
@@ -565,7 +566,7 @@
     document.getElementById('m-submit').addEventListener('click', async () => {
       const code = document.getElementById('m-code').value.trim();
       const nom = document.getElementById('m-nom').value.trim();
-      const operation_code = document.getElementById('m-operation').value || null;
+      const operation_codes = Array.from(document.querySelectorAll('.modal .op-list input:checked')).map(i => i.value);
       const notes = document.getElementById('m-notes').value.trim();
       const msg = document.getElementById('m-msg');
 
@@ -576,8 +577,8 @@
       msg.innerHTML = `<div class="msg">Enregistrement en cours…</div>`;
       try {
         const payload = estEdition
-          ? { id: machine.id, code, nom, operation_code, notes, actif: document.getElementById('m-actif').checked }
-          : { code, nom, operation_code, notes };
+          ? { id: machine.id, code, nom, operation_codes, notes, actif: document.getElementById('m-actif').checked }
+          : { code, nom, operation_codes, notes };
         const res = await fetch(`${API}/gerer-machines`, {
           method: estEdition ? 'PUT' : 'POST',
           headers: { 'Content-Type': 'application/json' },
