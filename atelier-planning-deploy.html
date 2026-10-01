@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Atelier — Planification de production</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+
+    --paper: #EFE9DC;
+    --paper-raised: #F7F4EC;
+    --ink-900: #20241F;
+    --ink-700: #3C433C;
+    --ink-500: #6B7268;
+    --line: #CFC6AE;
+    --accent-amber: #C67B2E;
+    --accent-amber-soft: #F0DAB9;
+    --accent-teal: #3E6E64;
+    --accent-teal-soft: #D7E5E0;
+    --danger: #AD3B2C;
+    --danger-soft: #F1D6CF;
+    --shadow: 0 1px 0 rgba(32,36,31,0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #1B1D18;
+      --paper-raised: #24261F;
+      --ink-900: #EFEAE0;
+      --ink-700: #C9C4B6;
+      --ink-500: #928C7C;
+      --line: #3B3C33;
+      --accent-amber: #E0994A;
+      --accent-amber-soft: #40331D;
+      --accent-teal: #6FA79A;
+      --accent-teal-soft: #22322E;
+      --danger: #E27A67;
+      --danger-soft: #3B231E;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #1B1D18;
+    --paper-raised: #24261F;
+    --ink-900: #EFEAE0;
+    --ink-700: #C9C4B6;
+    --ink-500: #928C7C;
+    --line: #3B3C33;
+    --accent-amber: #E0994A;
+    --accent-amber-soft: #40331D;
+    --accent-teal: #6FA79A;
+    --accent-teal-soft: #22322E;
+    --danger: #E27A67;
+    --danger-soft: #3B231E;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink-900);
+    font-family: "IBM Plex Sans", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  code, .mono { font-family: "IBM Plex Mono", monospace; }
+  h1, h2, h3, .display { font-family: "Fraunces", serif; font-weight: 500; letter-spacing: -0.01em; }
+
+  a { color: inherit; }
+  button { font-family: inherit; }
+
+  /* ---- Layout shell ---- */
+  .shell {
+    display: grid;
+    grid-template-columns: 216px 1fr;
+    min-height: 100%;
+  }
+  @media (max-width: 820px) {
+    .shell { grid-template-columns: 1fr; }
+    .side { display: none; }
+    .side.open { display: flex; position: fixed; inset: 0; z-index: 50; width: 260px; box-shadow: 4px 0 24px rgba(0,0,0,.25); }
+  }
+
+  .side {
+    background: var(--ink-900);
+    color: var(--paper);
+    display: flex;
+    flex-direction: column;
+    padding: 20px 14px;
+    gap: 4px;
+    padding-top: calc(20px + env(safe-area-inset-top, 0px));
+  }
+  .brand {
+    font-family: "Fraunces", serif;
+    font-size: 17px;
+    font-weight: 500;
+    color: var(--paper);
+    padding: 0 10px 18px 10px;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .brand small { font-family: "IBM Plex Mono", monospace; font-size: 10px; opacity: .55; font-weight: 400; }
+  .navbtn {
+    display: flex; align-items: center; gap: 10px;
+    background: transparent; border: none; color: var(--paper);
+    opacity: .68;
+    padding: 9px 10px; border-radius: 5px; text-align: left;
+    font-size: 13.5px; cursor: pointer;
+  }
+  .navbtn .n { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; opacity: .6; width: 14px; }
+  .navbtn.active { opacity: 1; background: rgba(239,234,224,0.1); }
+  .navbtn:hover { opacity: 1; }
+  .side-foot { margin-top: auto; padding: 10px; font-size: 11px; opacity: .45; }
+
+  .main { min-width: 0; }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 22px; border-bottom: 1px solid var(--line);
+    position: sticky; top: env(safe-area-inset-top, 0px); background: var(--paper);
+    z-index: 5;
+  }
+  .topbar h1 { margin: 0; font-size: 20px; }
+  .topbar .sub { font-size: 12px; color: var(--ink-500); margin-top: 2px; }
+  .menubtn { display:none; background:none; border:1px solid var(--line); border-radius:6px; width:34px; height:34px; }
+  @media (max-width: 820px) { .menubtn { display:block; } }
+
+  .content { padding: 20px 22px 60px; max-width: 1180px; }
+
+  /* ---- Common bits ---- */
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: 12px; margin-bottom: 22px; }
+  .kpi { background: var(--paper-raised); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .kpi .v { font-family: "Fraunces", serif; font-size: 26px; font-weight: 500; }
+  .kpi .l { font-size: 11.5px; color: var(--ink-500); margin-top: 2px; }
+  .kpi.warn .v { color: var(--danger); }
+
+  .panel { background: var(--paper-raised); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 20px; }
+  .panel-head { display:flex; align-items:center; justify-content:space-between; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .panel-head h2 { margin: 0; font-size: 15.5px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-weight: 500; color: var(--ink-500); font-size: 11px; padding: 9px 14px; border-bottom: 1px solid var(--line); }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(0,0,0,0.015); }
+
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+  .tag.ok { background: var(--accent-teal-soft); color: var(--accent-teal); }
+  .tag.warn { background: var(--accent-amber-soft); color: var(--accent-amber); }
+  .tag.danger { background: var(--danger-soft); color: var(--danger); }
+
+  .btn {
+    border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink-900);
+    padding: 7px 13px; border-radius: 6px; font-size: 12.5px; cursor: pointer;
+  }
+  .btn.primary { background: var(--ink-900); color: var(--paper); border-color: var(--ink-900); }
+  .btn:hover { filter: brightness(0.97); }
+  .btn:focus-visible, .navbtn:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent-teal); outline-offset: 1px; }
+
+  input, select {
+    font-family: inherit; font-size: 13px; padding: 7px 9px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--paper);
+    color: var(--ink-900);
+  }
+  label { font-size: 11.5px; color: var(--ink-500); display:block; margin-bottom: 4px; }
+  .field { display:flex; flex-direction: column; }
+  .formgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px,1fr)); gap: 12px; padding: 16px; border-top: 1px solid var(--line); }
+
+  /* ---- Gantt ---- */
+  .gantt-wrap { overflow-x: auto; padding: 4px 0 16px; }
+  .gantt { border-collapse: separate; border-spacing: 0; min-width: 760px; width: 100%; }
+  .gantt th.day { text-align: center; font-size: 11px; padding: 8px 4px; border-bottom: 1px solid var(--line); color: var(--ink-500); }
+  .gantt th.day.today { color: var(--accent-teal); }
+  .gantt td.machine-cell {
+    padding: 10px 14px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line);
+    font-size: 12.5px; white-space: nowrap; background: var(--paper-raised); position: sticky; left: 0;
+  }
+  .gantt td.machine-cell .m-name { font-weight: 500; }
+  .gantt td.machine-cell .m-sub { color: var(--ink-500); font-size: 10.5px; font-family: "IBM Plex Mono", monospace; }
+  .gantt td.slot { border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); height: 54px; padding: 4px; position: relative; }
+  .bar {
+    height: 100%; border-radius: 5px; padding: 4px 7px; font-size: 10.5px; color: #fff;
+    display: flex; flex-direction: column; justify-content: center; overflow: hidden; cursor: default;
+  }
+  .bar .b-of { font-family: "IBM Plex Mono", monospace; opacity: .85; font-size: 9.5px; }
+  .bar .b-name { font-weight: 500; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+
+  .legend { display: flex; gap: 14px; padding: 10px 16px; font-size: 11px; color: var(--ink-500); flex-wrap: wrap; }
+  .legend span { display:inline-flex; align-items:center; gap:5px; }
+  .legend i { width: 10px; height: 10px; border-radius: 3px; display:inline-block; }
+
+  .empty { padding: 30px 16px; text-align: center; color: var(--ink-500); font-size: 12.5px; }
+
+  .bar-track { background: var(--line); border-radius: 4px; height: 6px; overflow: hidden; margin-top: 4px; }
+  .bar-fill { height: 100%; background: var(--accent-teal); }
+  .bar-fill.warn { background: var(--accent-amber); }
+  .bar-fill.danger { background: var(--danger); }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <nav class="side" id="side">
+    <div class="brand">Atelier <small>RELIURE&nbsp;INDUSTRIELLE</small></div>
+    <button class="navbtn active" data-tab="planning"><span class="n">01</span>Planification</button>
+    <button class="navbtn" data-tab="ordres"><span class="n">02</span>Ordres de fabrication</button>
+    <button class="navbtn" data-tab="personnel"><span class="n">03</span>Personnel</button>
+    <button class="navbtn" data-tab="stocks"><span class="n">04</span>Stocks &amp; matières</button>
+    <button class="navbtn" data-tab="reporting"><span class="n">05</span>Reporting</button>
+    <div class="side-foot mono">v0.1 — prototype interne</div>
+  </nav>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex; align-items:center; gap:12px;">
+        <button class="menubtn" id="menubtn">☰</button>
+        <div>
+          <h1 id="page-title">Planification</h1>
+          <div class="sub" id="page-sub">Semaine du 21 au 27 septembre 2026 — parc machine réel</div>
+        </div>
+      </div>
+      <button class="btn" id="theme-toggle" title="Changer le thème">☾/☀</button>
+    </div>
+    <div class="content" id="content"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+
+  // ---------- Données réelles de l'atelier (référentiels validés) ----------
+  const state = {
+    tab: 'planning',
+    machines: [
+      { id:'SIGLOCH',   name:'Sigloch',    code:'SIGLOCH',   competence:'Pressure en colle' },
+      { id:'KOLBUS',    name:'Kolbus',     code:'KOLBUS',    competence:'Pressure en colle' },
+      { id:'BUFFALO',   name:'Buffalo',    code:'BUFFALO',   competence:'Assemblage' },
+      { id:'MULTIPLEX', name:'Multiplex',  code:'MULTIPLEX', competence:'Assemblage' },
+      { id:'INVENTA_1', name:'Inventa 1',  code:'INVENTA_1', competence:'Assemblage' },
+      { id:'INVENTA_2', name:'Inventa 2',  code:'INVENTA_2', competence:'Assemblage' },
+      { id:'VENTURIA',  name:'Venturia',   code:'VENTURIA',  competence:'Assemblage' },
+      { id:'321D',      name:'321D',       code:'321D',      competence:'Couture' },
+      { id:'DA',        name:'DA',         code:'DA',        competence:'Montage de couverture (cartonnés)' },
+      { id:'BDM',       name:'BDM',        code:'BDM',       competence:'Montage de couverture (Pléiade)' },
+      { id:'INTEGRA',   name:'Intégra',    code:'INTEGRA',   competence:'Montage de couverture' },
+      { id:'PL_PL',     name:'PL-PL',      code:'PL_PL',     competence:'Dorure' },
+      { id:'PLUJADI',   name:'Plujadi',    code:'PLUJADI',   competence:'Dorure' },
+      { id:'CRIF',      name:'Crif',       code:'CRIF',      competence:'Pliure' },
+      { id:'MBO2',      name:'MBO2',       code:'MBO2',      competence:'Pliure' },
+      { id:'STAHL',     name:'Stahl',      code:'STAHL',     competence:'Pliure' },
+    ],
+    personnel: [
+      { id:'P1',  name:'Corinne',   role:'Opératrice couture', comp:['couture','finition'], statut:'Posté', charge:70 },
+      { id:'P2',  name:'Céline',    role:'Opératrice couture', comp:['couture','finition','travaux mains'], statut:'Posté', charge:66 },
+      { id:'P3',  name:'Valery',    role:'Opérateur pressure en colle', comp:['pressure en colle','massicot'], statut:'Posté', charge:82 },
+      { id:'P4',  name:'Romuald',   role:'Opérateur massicot', comp:['massicot','magasin'], statut:'Posté', charge:58 },
+      { id:'P5',  name:'Louka',     role:'Opérateur pressure en colle', comp:['pressure en colle','finition'], statut:'Posté', charge:74 },
+      { id:'P6',  name:'Bouba',     role:'Opérateur production pliure', comp:['pliure','finition'], statut:'Posté', charge:69 },
+      { id:'P7',  name:'Giacomo',   role:'Opérateur production dorure', comp:['dorure','finition'], statut:'Posté', charge:77 },
+      { id:'P8',  name:'Anita',     role:'Opératrice dorure coins ronds', comp:['dorure coins ronds','finition','réparation'], statut:'Posté', charge:63 },
+      { id:'P9',  name:'Sarry',     role:'Opératrice contrôle emboîtage', comp:['contrôle emboîtage','réparation'], statut:'Posté', charge:55 },
+      { id:'P10', name:'Sam',       role:'Opérateur production dorure', comp:['dorure','finition'], statut:'Posté', charge:71 },
+      { id:'P11', name:'Sébastien', role:'Conducteur chaîne emboîtage', comp:['emboîtage 1','emboîtage 2','pressure en colle'], statut:'Posté', charge:85 },
+      { id:'P12', name:'Maria',     role:'Opératrice refente peaux', comp:['refente','préparation peaux','finition'], statut:'Posté', charge:60 },
+      { id:'P13', name:'Claudine',  role:'Contrôle couvertures pléiade', comp:['contrôle couverture','réparation','finition'], statut:'Posté', charge:52 },
+      { id:'P14', name:'Helena',    role:'Opératrice réparation pléiade', comp:['réparation','finition'], statut:'Posté', charge:48 },
+      { id:'P15', name:'Alain',     role:'Agent de maîtrise / contremaître', comp:['encadrement'], statut:'Posté', charge:0 },
+      { id:'P16', name:'Stéphanie', role:'Opératrice production assemblage', comp:['assemblage','emboîtage 1','emboîtage 2','finition','dorure'], statut:'Posté', charge:80 },
+      { id:'P17', name:'Ghislaine', role:'Opératrice réparation', comp:['réparation'], statut:'Posté', charge:45 },
+      { id:'P18', name:'Patrick',   role:'Opérateur de finition', comp:['finition','tri peaux'], statut:'Posté', charge:57 },
+      { id:'P19', name:'Kevin',     role:'Opérateur de finition', comp:['finition'], statut:'Posté', charge:50 },
+      { id:'P20', name:'Stéphane',  role:'Opérateur réparation', comp:['réparation','finition'], statut:'Posté', charge:49 },
+      { id:'P21', name:'Fabrice',   role:'Maintenance', comp:['maintenance'], statut:'Posté', charge:40 },
+      { id:'P22', name:'Benoit',    role:'Conducteur couverturières (BDM, DA, Intégra)', comp:['montage couverture','découpe matière'], statut:'Posté', charge:83 },
+      { id:'P23', name:'Cindy',     role:'Opératrice contrôle emboîtage', comp:['contrôle emboîtage','finition'], statut:'Absent — congé', charge:0 },
+      { id:'P24', name:'Sandrine',  role:'Conducteur chaîne emboîtage', comp:['emboîtage 1','emboîtage 2','finition'], statut:'Posté', charge:68 },
+    ],
+    stocks: [
+      { id:'S1', name:'Papier offset 90g (bobine)', unite:'kg', qte:1240, seuil:800, statut:'ok' },
+      { id:'S2', name:'Couverture couchée 250g', unite:'feuilles', qte:3200, seuil:3000, statut:'warn' },
+      { id:'S3', name:'Colle thermofusible', unite:'kg', qte:64, seuil:80, statut:'danger' },
+      { id:'S4', name:'Fil de couture', unite:'bobines', qte:22, seuil:10, statut:'ok' },
+      { id:'S5', name:'Carton dos rigide', unite:'feuilles', qte:410, seuil:500, statut:'warn' },
+      { id:'S6', name:'Peaux (cuir reliure)', unite:'peaux', qte:86, seuil:100, statut:'warn' },
+    ],
+    ordres: [
+      { id:'OF-2214', produit:'Roi Arthur (GF 29)', client:'Éditions Pléiade', qte:6000, delai:'26/09', priorite:'haute', statut:'en cours', avancement:62 },
+      { id:'OF-2215', produit:'Trône de Fer 4', client:'Éditions Pléiade', qte:4500, delai:'29/09', priorite:'normale', statut:'planifié', avancement:0 },
+      { id:'OF-2216', produit:'Zola RM2', client:'Éditions Pléiade', qte:2000, delai:'25/09', priorite:'urgente', statut:'en cours', avancement:81 },
+      { id:'OF-2217', produit:'Foucault (D030)', client:'France O.', qte:3200, delai:'02/10', priorite:'normale', statut:'planifié', avancement:0 },
+      { id:'OF-2218', produit:'Mansfield (D035)', client:'France O.', qte:1500, delai:'30/09', priorite:'haute', statut:'en pause', avancement:34 },
+    ],
+    // planning: machineId -> liste de créneaux {day(0-6), ofId, statut}
+    planning: {
+      SIGLOCH:   [ {day:0, of:'OF-2214', statut:'ok'}, {day:1, of:'OF-2214', statut:'ok'} ],
+      KOLBUS:    [ {day:0, of:'OF-2216', statut:'ok'}, {day:3, of:'OF-2216', statut:'danger'} ],
+      BUFFALO:   [ {day:2, of:'OF-2217', statut:'ok'} ],
+      INVENTA_1: [ {day:1, of:'OF-2215', statut:'ok'} ],
+      DA:        [ {day:0, of:'OF-2214', statut:'ok'}, {day:4, of:'OF-2218', statut:'warn'} ],
+      BDM:       [ {day:2, of:'OF-2216', statut:'ok'} ],
+      PL_PL:     [ {day:3, of:'OF-2217', statut:'ok'} ],
+      PLUJADI:   [ {day:4, of:'OF-2218', statut:'warn'} ],
+      CRIF:      [ {day:1, of:'OF-2214', statut:'ok'}, {day:2, of:'OF-2215', statut:'ok'} ],
+      STAHL:     [ {day:0, of:'OF-2216', statut:'ok'} ],
+    }
+  };
+
+  // ---------- Semaine réelle (calculée), au lieu des libellés fixes de la démo ----------
+  function lundiDeLaSemaine(d) {
+    const date = new Date(d);
+    const jour = date.getUTCDay() || 7; // dimanche -> 7
+    date.setUTCDate(date.getUTCDate() - jour + 1);
+    return date;
+  }
+  const LUNDI = lundiDeLaSemaine(new Date());
+  const DAYS_ISO = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(LUNDI);
+    d.setUTCDate(d.getUTCDate() + i);
+    return d.toISOString().slice(0, 10);
+  });
+  const JOURS_ABREGES = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+  const DAYS = DAYS_ISO.map((iso, i) => `${JOURS_ABREGES[i]} ${iso.slice(8, 10)}`);
+  const AUJOURDHUI_ISO = new Date().toISOString().slice(0, 10);
+  const TODAY_IDX = Math.max(0, DAYS_ISO.indexOf(AUJOURDHUI_ISO));
+
+  const titles = {
+    planning: ['Planification', 'Semaine du 22 au 28 septembre 2026'],
+    ordres: ['Ordres de fabrication', "5 ordres actifs — 2 en cours, 2 planifiés, 1 en pause"],
+    personnel: ['Personnel', 'Affectation, compétences et charge par opérateur'],
+    stocks: ['Stocks & matières', 'Papier, colle, fil, couverture — suivi des seuils'],
+    reporting: ['Reporting', 'Indicateurs de production — semaine en cours'],
+  };
+
+  function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; }
+  function statutTag(s){
+    const map = { ok:'ok', warn:'warn', danger:'danger', 'en cours':'warn', 'planifié':'ok', 'en pause':'danger', 'Posté — Équipe A':'ok', 'Posté — Équipe B':'ok', 'Absent — congé':'danger' };
+    return map[s] || 'ok';
+  }
+  function prioColor(p){
+    if(p==='urgente') return 'var(--danger)';
+    if(p==='haute') return 'var(--accent-amber)';
+    return 'var(--accent-teal)';
+  }
+
+  // ---------- Rendus par onglet ----------
+  function renderPlanning(){
+    const wrap = el(`<div></div>`);
+
+    const legend = el(`
+      <div class="panel">
+        <div class="panel-head"><h2>Planning atelier — vue machines</h2>
+          <button class="btn primary" id="add-of-btn">+ Affecter un OF</button>
+        </div>
+        <div class="gantt-wrap"><table class="gantt" id="gantt-table"></table></div>
+        <div class="legend">
+          <span><i style="background:var(--accent-teal)"></i>Dans les temps</span>
+          <span><i style="background:var(--accent-amber)"></i>Tension (charge/matière)</span>
+          <span><i style="background:var(--danger)"></i>Retard / rupture</span>
+        </div>
+      </div>
+    `);
+    wrap.appendChild(legend);
+
+    const table = legend.querySelector('#gantt-table');
+    let thead = '<tr><th class="day" style="text-align:left; position:sticky; left:0; background:var(--paper-raised);">Machine</th>';
+    DAYS.forEach((d,i)=> thead += `<th class="day ${i===TODAY_IDX?'today':''}">${d}</th>`);
+    thead += '</tr>';
+    let rows = '';
+    state.machines.forEach(m=>{
+      rows += `<tr><td class="machine-cell"><div class="m-name">${m.name}</div><div class="m-sub">${m.code}</div></td>`;
+      for(let d=0; d<7; d++){
+        const slot = (state.planning[m.id]||[]).find(s=>s.day===d);
+        if(slot){
+          const of = state.ordres.find(o=>o.id===slot.of);
+          const color = slot.statut==='danger' ? 'var(--danger)' : slot.statut==='warn' ? 'var(--accent-amber)' : 'var(--accent-teal)';
+          rows += `<td class="slot"><div class="bar" style="background:${color}"><span class="b-of">${slot.of}</span><span class="b-name">${of?of.produit:''}</span></div></td>`;
+        } else {
+          rows += `<td class="slot"></td>`;
+        }
+      }
+      rows += `</tr>`;
+    });
+    table.innerHTML = thead + rows;
+
+    return wrap;
+  }
+
+  function renderOrdres(){
+    const wrap = el(`
+      <div class="panel">
+        <div class="panel-head"><h2>Ordres de fabrication</h2><button class="btn primary" id="new-of">+ Nouvel OF</button></div>
+        <table>
+          <thead><tr><th>OF</th><th>Produit</th><th>Client</th><th>Qté</th><th>Délai</th><th>Priorité</th><th>Statut</th><th>Avancement</th></tr></thead>
+          <tbody id="of-tbody"></tbody>
+        </table>
+      </div>
+    `);
+    const tbody = wrap.querySelector('#of-tbody');
+    state.ordres.forEach(o=>{
+      const fillClass = o.avancement>=70?'':(o.avancement>=30?'warn':'danger');
+      tbody.appendChild(el(`
+        <tr>
+          <td class="mono">${o.id}</td>
+          <td>${o.produit}</td>
+          <td>${o.client}</td>
+          <td>${o.qte.toLocaleString('fr-FR')}</td>
+          <td>${o.delai}</td>
+          <td><span style="color:${prioColor(o.priorite)}; font-weight:500; text-transform:capitalize;">${o.priorite}</span></td>
+          <td><span class="tag ${statutTag(o.statut)}">${o.statut}</span></td>
+          <td style="min-width:110px;">
+            <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--ink-500);"><span>${o.avancement}%</span></div>
+            <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${o.avancement}%"></div></div>
+          </td>
+        </tr>
+      `));
+    });
+    return wrap;
+  }
+
+  function renderPersonnel(){
+    const wrap = el(`
+      <div class="panel">
+        <div class="panel-head"><h2>Équipe atelier</h2></div>
+        <table>
+          <thead><tr><th>Opérateur</th><th>Poste</th><th>Compétences</th><th>Statut</th><th>Charge de la semaine</th></tr></thead>
+          <tbody id="pers-tbody"></tbody>
+        </table>
+      </div>
+    `);
+    const tbody = wrap.querySelector('#pers-tbody');
+    state.personnel.forEach(p=>{
+      const fillClass = p.charge>=85?'danger':(p.charge>=65?'warn':'');
+      tbody.appendChild(el(`
+        <tr>
+          <td>${p.name}</td>
+          <td>${p.role}</td>
+          <td>${p.comp.map(c=>`<span class="tag ok" style="margin-right:4px;">${c}</span>`).join('')}</td>
+          <td><span class="tag ${statutTag(p.statut)}">${p.statut}</span></td>
+          <td style="min-width:110px;">
+            <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--ink-500);"><span>${p.charge}%</span></div>
+            <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${p.charge}%"></div></div>
+          </td>
+        </tr>
+      `));
+    });
+    return wrap;
+  }
+
+  function renderStocks(){
+    const wrap = el(`
+      <div class="panel">
+        <div class="panel-head"><h2>Stocks matières premières</h2></div>
+        <table>
+          <thead><tr><th>Matière</th><th>Quantité</th><th>Seuil d'alerte</th><th>Statut</th></tr></thead>
+          <tbody id="stock-tbody"></tbody>
+        </table>
+      </div>
+    `);
+    const tbody = wrap.querySelector('#stock-tbody');
+    state.stocks.forEach(s=>{
+      const label = s.statut==='danger' ? 'Rupture proche' : s.statut==='warn' ? 'Sous le seuil cible' : 'Approvisionné';
+      tbody.appendChild(el(`
+        <tr>
+          <td>${s.name}</td>
+          <td class="mono">${s.qte.toLocaleString('fr-FR')} ${s.unite}</td>
+          <td class="mono">${s.seuil.toLocaleString('fr-FR')} ${s.unite}</td>
+          <td><span class="tag ${s.statut}">${label}</span></td>
+        </tr>
+      `));
+    });
+    return wrap;
+  }
+
+  function renderReporting(){
+    const enCours = state.ordres.filter(o=>o.statut==='en cours').length;
+    const enRetard = state.stocks.filter(s=>s.statut==='danger').length;
+    const chargeMoy = Math.round(state.personnel.filter(p=>p.charge>0).reduce((a,p)=>a+p.charge,0) / state.personnel.filter(p=>p.charge>0).length);
+
+    const wrap = el(`<div></div>`);
+    const kpis = el(`
+      <div class="kpis">
+        <div class="kpi"><div class="v">84%</div><div class="l">TRS moyen atelier</div></div>
+        <div class="kpi"><div class="v">${enCours}</div><div class="l">OF en cours</div></div>
+        <div class="kpi"><div class="v">${chargeMoy}%</div><div class="l">Charge moyenne équipe</div></div>
+        <div class="kpi ${enRetard?'warn':''}"><div class="v">${enRetard}</div><div class="l">Matières sous seuil critique</div></div>
+      </div>
+    `);
+    wrap.appendChild(kpis);
+
+    const trsByMachine = [
+      {name:'Relieuse dos carré', trs:88},
+      {name:'Plieuse Stahl', trs:91},
+      {name:'Massicot trilatéral', trs:76},
+      {name:'Encarteuse-piqueuse', trs:82},
+      {name:'Presse à chaud', trs:69},
+    ];
+    const panel = el(`<div class="panel"><div class="panel-head"><h2>TRS par machine — semaine en cours</h2></div></div>`);
+    const body = el(`<div style="padding:16px; display:flex; flex-direction:column; gap:12px;"></div>`);
+    trsByMachine.forEach(m=>{
+      const cls = m.trs>=85?'':(m.trs>=75?'warn':'danger');
+      body.appendChild(el(`
+        <div>
+          <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:4px;">
+            <span>${m.name}</span><span class="mono">${m.trs}%</span>
+          </div>
+          <div class="bar-track"><div class="bar-fill ${cls}" style="width:${m.trs}%"></div></div>
+        </div>
+      `));
+    });
+    panel.appendChild(body);
+    wrap.appendChild(panel);
+    return wrap;
+  }
+
+  const renderers = { planning: renderPlanning, ordres: renderOrdres, personnel: renderPersonnel, stocks: renderStocks, reporting: renderReporting };
+
+  function render(){
+    const content = document.getElementById('content');
+    content.innerHTML = '';
+    content.appendChild(renderers[state.tab]());
+    document.getElementById('page-title').textContent = titles[state.tab][0];
+    document.getElementById('page-sub').textContent = titles[state.tab][1];
+    document.querySelectorAll('.navbtn').forEach(b=> b.classList.toggle('active', b.dataset.tab===state.tab));
+
+    const addOfBtn = document.getElementById('add-of-btn');
+    const newOfBtn = document.getElementById('new-of');
+    [addOfBtn, newOfBtn].forEach(btn=>{
+      if(btn) btn.addEventListener('click', ()=>{
+        state.tab = 'ordres';
+        render();
+      });
+    });
+  }
+
+  document.querySelectorAll('.navbtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      state.tab = btn.dataset.tab;
+      document.getElementById('side').classList.remove('open');
+      render();
+    });
+  });
+
+  document.getElementById('menubtn').addEventListener('click', ()=>{
+    document.getElementById('side').classList.toggle('open');
+  });
+
+  document.getElementById('theme-toggle').addEventListener('click', ()=>{
+    const root = document.documentElement;
+    const current = root.getAttribute('data-theme');
+    root.setAttribute('data-theme', current==='dark' ? 'light' : 'dark');
+  });
+
+  // ---------- Chargement des données réelles (Supabase via Netlify Function) ----------
+  // En développement local sans backend branché, ou si l'appel échoue
+  // pour toute autre raison, on garde les données de démo ci-dessus
+  // plutôt que d'afficher un écran vide.
+  //
+  // Limites actuelles de ce branchement (à lever plus tard si besoin) :
+  //  - l'avancement (%) d'un OF n'existe pas encore en base : mis à 0.
+  //  - la charge du personnel est approximée (créneaux de la semaine
+  //    affichée / 5 jours), pas une vraie moyenne glissante.
+  async function chargerDonneesReelles() {
+    try {
+      const url = `/.netlify/functions/lecture-planning?date_debut=${DAYS_ISO[0]}&date_fin=${DAYS_ISO[6]}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      state.machines = data.machines.map(m => ({ id: m.code, name: m.nom, code: m.code }));
+
+      state.personnel = data.personnel.map(p => {
+        const creneauxSemaine = data.planning.filter(c => c.personnel_id === p.id).length;
+        return {
+          id: p.id, name: p.nom, role: p.poste || '',
+          comp: [...(p.competences || []), ...(p.machines_specifiques || []).map(m => `machine: ${m}`)],
+          charge: Math.round((creneauxSemaine / 5) * 100), // 5 jours ouvrés dans l'horizon affiché
+          statut: p.role_type === 'encadrement' ? 'Encadrement' : 'Posté',
+        };
+      });
+
+      state.ordres = data.ordres.map(o => ({
+        id: o.numero,
+        produit: o.titres ? o.titres.nom : '(titre non renseigné)',
+        client: o.titres ? o.titres.client : '',
+        qte: o.quantite, delai: o.delai, priorite: o.priorite,
+        statut: o.statut, avancement: 0,
+      }));
+
+      state.stocks = data.stocks.map(s => ({
+        id: s.id, name: s.nom, unite: s.unite, qte: s.quantite, seuil: s.seuil_alerte,
+        statut: s.quantite <= s.seuil_alerte * 0.5 ? 'danger' : (s.quantite <= s.seuil_alerte ? 'warn' : 'ok'),
+      }));
+
+      const planningParMachine = {};
+      data.planning.forEach(creneau => {
+        const machine = data.machines.find(m => m.id === creneau.machine_id);
+        if (!machine) return;
+        const dayIdx = DAYS_ISO.indexOf(creneau.date);
+        if (dayIdx === -1) return;
+        const of = data.ordres.find(o => o.id === creneau.of_id);
+        if (!planningParMachine[machine.code]) planningParMachine[machine.code] = [];
+        planningParMachine[machine.code].push({
+          day: dayIdx,
+          of: of ? of.numero : creneau.of_id,
+          statut: creneau.statut === 'retard' ? 'danger' : 'ok',
+        });
+      });
+      state.planning = planningParMachine;
+
+      render();
+    } catch (e) {
+      console.warn('Backend indisponible, affichage des données de démonstration.', e);
+      render();
+    }
+  }
+
+  chargerDonneesReelles();
+})();
+</script>
+</body>
+</html>
