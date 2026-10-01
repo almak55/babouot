@@ -750,7 +750,7 @@
       <div class="panel">
         <div class="panel-head"><h2>Parc machine</h2><button class="btn primary" id="new-machine"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvelle machine</button></div>
         <table>
-          <thead><tr><th>Code</th><th>Nom</th><th>Opération principale</th><th>Statut</th><th></th></tr></thead>
+          <thead><tr><th>Nom</th><th>Code</th><th>Opération principale</th><th>Statut</th><th></th></tr></thead>
           <tbody id="machines-tbody"><tr><td colspan="5" class="empty">Chargement…</td></tr></tbody>
         </table>
       </div>
@@ -772,8 +772,8 @@
       machines.forEach(m => {
         tbody.appendChild(el(`
           <tr>
-            <td class="mono">${m.code}</td>
             <td>${m.nom}</td>
+            <td class="mono">${m.code}</td>
             <td>${(m.operations && m.operations.length) ? m.operations.map(o=>`<span class="tag ok" style="margin-right:4px;">${o.nom}</span>`).join('') : '<span style="color:var(--ink-500)">— aucune —</span>'}</td>
             <td><span class="tag ${m.actif ? 'ok' : 'danger'}">${m.actif ? 'Active' : 'Inactive'}</span></td>
             <td><button class="btn edit-machine" data-id="${m.id}">Modifier</button></td>
