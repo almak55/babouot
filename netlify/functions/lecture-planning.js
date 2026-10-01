@@ -49,6 +49,34 @@ exports.handler = async (event) => {
       if (r.error) throw r.error;
     }
 
+    // Avancement d'un OF = part de ses étapes de gamme marquées
+    // 'terminé'. Calculé à la volée plutôt que stocké : toujours
+    // cohérent avec gammes_operatoires, pas de champ à resynchroniser.
+    const ofIds = ordresRes.data.map((o) => o.id);
+    let avancementParOf = {};
+    if (ofIds.length > 0) {
+      const { data: gammes, error: gammesError } = await supabase
+        .from('gammes_operatoires')
+        .select('of_id, statut')
+        .in('of_id', ofIds);
+      if (gammesError) throw gammesError;
+
+      const totauxParOf = {};
+      gammes.forEach((g) => {
+        (totauxParOf[g.of_id] ??= { total: 0, termine: 0 });
+        totauxParOf[g.of_id].total += 1;
+        if (g.statut === 'terminé') totauxParOf[g.of_id].termine += 1;
+      });
+      Object.entries(totauxParOf).forEach(([ofId, t]) => {
+        avancementParOf[ofId] = t.total > 0 ? Math.round((t.termine / t.total) * 100) : 0;
+      });
+    }
+
+    const ordresAvecAvancement = ordresRes.data.map((o) => ({
+      ...o,
+      avancement: avancementParOf[o.id] ?? 0,
+    }));
+
     // Regroupe compétences (par opération) et machines précises par personne.
     const competencesParPersonne = {};
     competencesRes.data.forEach((c) => {
@@ -72,7 +100,7 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         machines: machinesRes.data,
         personnel: personnelAvecCompetences,
-        ordres: ordresRes.data,
+        ordres: ordresAvecAvancement,
         stocks: stocksRes.data,
         planning: planningRes.data,
       }),
