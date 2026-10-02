@@ -227,6 +227,9 @@
   .tag.ok { background: var(--accent-teal); color: #fff; }
   .tag.warn { background: var(--accent-amber); color: #4A2E00; }
   .tag.danger { background: var(--danger); color: #fff; }
+  .statut-btn { background: none; border: none; padding: 0; cursor: pointer; }
+  .statut-btn .tag { transition: filter .12s var(--ease); }
+  .statut-btn:hover .tag { filter: brightness(0.93); }
 
   /* ---- Lignes de type "production" (accent + icône + menu ···) ---- */
   .row-icon-cell { width: 46px; }
@@ -601,8 +604,10 @@
   function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; }
   function svgIcon(inner){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`; }
   function statutTag(s){
-    const map = { ok:'ok', warn:'warn', danger:'danger', 'en cours':'warn', 'planifié':'ok', 'en pause':'danger', 'Posté — Équipe A':'ok', 'Posté — Équipe B':'ok', 'Absent — congé':'danger' };
-    return map[s] || 'ok';
+    const map = { ok:'ok', warn:'warn', danger:'danger', 'en cours':'warn', 'planifié':'ok', 'en pause':'danger', 'Disponible':'ok', 'En arrêt':'warn', 'Absent(e)':'danger' };
+    if (map[s]) return map[s];
+    if (s && s.startsWith('Disponible ')) return 'ok'; // "Disponible 9h00–13h00"
+    return 'ok';
   }
   function prioColor(p){
     if(p==='urgente') return 'var(--danger-text)';
@@ -826,7 +831,7 @@
           <td>${p.name}</td>
           <td>${p.role}</td>
           <td>${p.comp.map(c=>`<span class="tag ok" style="margin-right:4px;">${c}</span>`).join('')}</td>
-          <td><span class="tag ${statutTag(p.statut)}">${p.statut}</span></td>
+          <td><button class="statut-btn" data-id="${p.id}" data-action="dispo"><span class="tag ${statutTag(p.statut)}">${p.statut}</span></button></td>
           <td style="min-width:110px;">
             <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--ink-500);"><span>${p.charge}%</span></div>
             <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${p.charge}%"></div></div>
@@ -841,7 +846,88 @@
         ouvrirModaleCompetences(p);
       });
     });
+    tbody.querySelectorAll('[data-action="dispo"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const p = state.personnel.find(x => x.id === btn.dataset.id);
+        ouvrirModaleDisponibilite(p);
+      });
+    });
     return wrap;
+  }
+
+  async function ouvrirModaleDisponibilite(personne) {
+    afficherModale(`
+      <h3>Disponibilité — ${personne.name}</h3>
+      <div class="field"><label>Jour concerné</label><input id="d-date" type="date" value="${AUJOURDHUI_ISO}"></div>
+      <div class="field"><label>Statut</label>
+        <select id="d-statut">
+          <option value="disponible">Disponible</option>
+          <option value="en arrêt">En arrêt</option>
+          <option value="absent">Absent(e)</option>
+        </select>
+      </div>
+      <div class="field hidden" id="d-horaires-wrap">
+        <label><input type="checkbox" id="d-partiel"> Disponible seulement sur une plage horaire</label>
+        <div style="display:flex; gap:10px; margin-top:8px;">
+          <div class="field"><label>De</label><input id="d-heure-debut" type="time" value="09:00"></div>
+          <div class="field"><label>À</label><input id="d-heure-fin" type="time" value="17:00"></div>
+        </div>
+      </div>
+      <div id="m-msg"></div>
+      <div class="actions">
+        <button class="btn" id="d-reset">Réinitialiser (disponible)</button>
+        <button class="btn" id="m-cancel">Annuler</button>
+        <button class="btn primary" id="m-submit">Enregistrer</button>
+      </div>
+    `);
+
+    const statutSelect = document.getElementById('d-statut');
+    const horairesWrap = document.getElementById('d-horaires-wrap');
+    const partielCheckbox = document.getElementById('d-partiel');
+    function majAffichageHoraires() {
+      horairesWrap.classList.toggle('hidden', statutSelect.value !== 'disponible');
+    }
+    statutSelect.addEventListener('change', majAffichageHoraires);
+    majAffichageHoraires();
+
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+
+    document.getElementById('d-reset').addEventListener('click', async () => {
+      const date = document.getElementById('d-date').value;
+      const msg = document.getElementById('m-msg');
+      msg.innerHTML = `<div class="msg">Réinitialisation…</div>`;
+      try {
+        const res = await fetch(`${API}/gerer-disponibilite?personnel_id=${personne.id}&date=${date}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error((await res.json()).error || 'Erreur inconnue');
+        toast(`${personne.name} remis·e disponible pour le ${date}.`);
+        fermerModale(); chargerDonneesReelles();
+      } catch (e) {
+        msg.innerHTML = `<div class="msg error">${e.message}</div>`;
+      }
+    });
+
+    document.getElementById('m-submit').addEventListener('click', async () => {
+      const date = document.getElementById('d-date').value;
+      const statut = statutSelect.value;
+      const partiel = statut === 'disponible' && partielCheckbox.checked;
+      const heure_debut = partiel ? document.getElementById('d-heure-debut').value : null;
+      const heure_fin = partiel ? document.getElementById('d-heure-fin').value : null;
+      const msg = document.getElementById('m-msg');
+      msg.innerHTML = `<div class="msg">Enregistrement…</div>`;
+      try {
+        const res = await fetch(`${API}/gerer-disponibilite`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ personnel_id: personne.id, date, statut, heure_debut, heure_fin }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+        toast(`Disponibilité de ${personne.name} mise à jour pour le ${date}.`);
+        fermerModale(); chargerDonneesReelles();
+      } catch (e) {
+        msg.innerHTML = `<div class="msg error">${e.message}</div>`;
+      }
+    });
   }
 
   async function ouvrirModaleCompetences(personne) {
@@ -1183,11 +1269,22 @@
 
       state.personnel = data.personnel.map(p => {
         const creneauxSemaine = data.planning.filter(c => c.personnel_id === p.id).length;
+        const dispoAuj = (data.disponibilites || []).find(d => d.personnel_id === p.id && d.date === AUJOURDHUI_ISO);
+        let statutAffiche;
+        if (!dispoAuj || dispoAuj.statut === 'disponible') {
+          statutAffiche = (dispoAuj && dispoAuj.heure_debut)
+            ? `Disponible ${dispoAuj.heure_debut.slice(0,5)}–${dispoAuj.heure_fin.slice(0,5)}`
+            : 'Disponible';
+        } else if (dispoAuj.statut === 'en arrêt') {
+          statutAffiche = 'En arrêt';
+        } else {
+          statutAffiche = 'Absent(e)';
+        }
         return {
           id: p.id, name: p.nom, role: p.poste || '',
           comp: [...(p.competences || []), ...(p.machines_specifiques || []).map(m => `machine: ${m}`)],
           charge: Math.round((creneauxSemaine / 5) * 100), // 5 jours ouvrés dans l'horizon affiché
-          statut: p.role_type === 'encadrement' ? 'Encadrement' : 'Posté',
+          statut: statutAffiche,
         };
       });
 
