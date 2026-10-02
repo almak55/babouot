@@ -252,6 +252,7 @@
   .etat-amber { color: var(--accent-amber-text); }
   .etat-danger { color: var(--danger-text); }
   .etat-green { color: var(--accent-green); }
+  .etat-muted { color: var(--ink-500); }
   .row-menu-cell { width: 36px; }
   .row-menu-btn {
     width: 28px; height: 28px; border-radius: 50%; border: none; background: transparent; color: var(--ink-500);
@@ -384,6 +385,16 @@
   .modal .field label { margin-bottom: 4px; }
   .modal .field input, .modal .field select { width: 100%; }
   .modal .op-list { display: flex; flex-direction: column; gap: 7px; max-height: 160px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 9px; background: var(--field-bg); }
+  .import-box { margin-bottom: 16px; }
+  .import-label {
+    display: flex; align-items: center; gap: 12px; padding: 13px 14px; border: 1.5px dashed var(--line);
+    border-radius: var(--radius-md); cursor: pointer; background: var(--field-bg); transition: border-color .14s var(--ease), background .14s var(--ease);
+  }
+  .import-label:hover { border-color: var(--accent-teal); background: var(--accent-teal-soft); }
+  .import-label svg { width: 22px; height: 22px; color: var(--accent-teal); flex-shrink: 0; }
+  .import-label span { font-size: 12px; color: var(--ink-700); line-height: 1.4; }
+  .import-label strong { color: var(--ink-900); }
+  #import-status { margin-top: 8px; }
   .modal .op-list label { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-900); font-weight: 400; margin: 0; }
   .modal .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
   .modal .msg { font-size: 12px; margin-top: 8px; display: flex; align-items: center; gap: 6px; }
@@ -698,8 +709,8 @@
       haute:   '<path d="M12 19V5M5 12l7-7 7 7"/>',
       normale: '<circle cx="12" cy="12" r="8"/>',
     };
-    const ROW_ACCENT = { 'en cours': 'amber', 'planifié': 'teal', 'en pause': 'danger', 'terminé': 'green' };
-    const ETAT_LABEL = { 'en cours': 'En cours', 'planifié': 'Planifié', 'en pause': 'En pause', 'terminé': 'Terminé' };
+    const ROW_ACCENT = { 'en cours': 'amber', 'validé': 'teal', 'planifié': 'teal', 'en attente de validation': 'muted', 'en pause': 'danger', 'terminé': 'green' };
+    const ETAT_LABEL = { 'en cours': 'En cours', 'validé': 'Validé', 'planifié': 'Planifié', 'en attente de validation': 'En attente de validation', 'en pause': 'En pause', 'terminé': 'Terminé' };
 
     state.ordres.forEach(o=>{
       const fillClass = o.avancement>=70?'':(o.avancement>=30?'warn':'danger');
@@ -737,6 +748,7 @@
     document.querySelectorAll('.row-menu').forEach(m => m.remove());
     const menu = el(`
       <div class="row-menu">
+        <button data-action="valider">Valider l'OF</button>
         <button data-action="gamme">Voir la gamme opératoire</button>
         <button data-action="affecter">Affecter au planning</button>
       </div>
@@ -749,6 +761,27 @@
     menu.querySelector('[data-action="affecter"]').addEventListener('click', () => {
       menu.remove();
       ouvrirModaleAffectation({});
+    });
+    menu.querySelector('[data-action="valider"]').addEventListener('click', async () => {
+      menu.remove();
+      try {
+        const res = await fetch(`${API}/valider-of`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ of_id: ofUuid }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+        if (data.statut === 'validé') {
+          toast(`${ofNumero} validé — machines, matières et personnel disponibles.`);
+        } else {
+          const n = data.blocages.length;
+          toast(`${ofNumero} reste en attente — ${n} point${n>1?'s':''} bloquant${n>1?'s':''} (voir la gamme pour le détail).`, 'error');
+        }
+        chargerDonneesReelles();
+      } catch (e) {
+        toast(`Échec de la validation : ${e.message}`, 'error');
+      }
     });
     menu.querySelector('[data-action="gamme"]').addEventListener('click', async () => {
       menu.remove();
@@ -1236,6 +1269,14 @@
 
     afficherModale(`
       <h3>Nouvel ordre de fabrication</h3>
+      <div class="import-box" id="import-box">
+        <input type="file" id="m-import" accept=".jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,.xls,.xlsx" class="hidden">
+        <label for="m-import" class="import-label">
+          ${svgIcon('<path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M20 16v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3"/>')}
+          <span><strong>Importer une fiche</strong> — photo, PDF, Word ou Excel<br>remplit le formulaire automatiquement</span>
+        </label>
+        <div id="import-status"></div>
+      </div>
       <div class="field"><label>Titre / produit</label><input id="m-titre-nom" placeholder="ex: Trône de Fer 5"></div>
       <div class="field"><label>Client</label><input id="m-titre-client" placeholder="ex: Éditions Pléiade"></div>
       <div class="field"><label>Quantité</label><input id="m-qte" type="number" min="1" placeholder="2000"></div>
@@ -1247,6 +1288,42 @@
       <div id="m-msg"></div>
       <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">Créer l'OF</button></div>
     `);
+
+    document.getElementById('m-import').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const statusEl = document.getElementById('import-status');
+      statusEl.innerHTML = `<div class="msg">Analyse du document en cours…</div>`;
+      try {
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        const res = await fetch(`${API}/analyser-fiche`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file_base64: base64, file_name: file.name, mime_type: file.type }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+
+        if (data.titre) document.getElementById('m-titre-nom').value = data.titre;
+        if (data.client) document.getElementById('m-titre-client').value = data.client;
+        if (data.quantite) document.getElementById('m-qte').value = data.quantite;
+        if (data.delai) document.getElementById('m-delai').value = data.delai;
+        document.querySelectorAll('.op-list input[type="checkbox"]').forEach(cb => {
+          cb.checked = (data.operation_codes || []).includes(cb.value);
+        });
+
+        const confianceClasse = data.confiance === 'haute' ? 'ok' : data.confiance === 'basse' ? 'error' : '';
+        statusEl.innerHTML = `<div class="msg ${confianceClasse}">Extraction ${data.confiance || ''} — relisez les champs avant de créer l'OF.${data.notes ? ' ' + data.notes : ''}</div>`;
+        toast('Fiche analysée — vérifiez les champs pré-remplis.');
+      } catch (err) {
+        statusEl.innerHTML = `<div class="msg error">Échec de l'analyse : ${err.message}</div>`;
+      }
+    });
 
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
     document.getElementById('m-submit').addEventListener('click', async () => {
