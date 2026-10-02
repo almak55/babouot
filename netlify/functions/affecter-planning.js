@@ -36,10 +36,18 @@ exports.handler = async (event) => {
 
     const { data: gamme, error: gammeError } = await supabase
       .from('gammes_operatoires')
-      .select('id, of_id, operation_id, sequence')
+      .select('id, of_id, operation_id, sequence, ordres_fabrication(statut)')
       .eq('id', gamme_operatoire_id)
       .single();
     if (gammeError) throw gammeError;
+
+    const statutOf = gamme.ordres_fabrication ? gamme.ordres_fabrication.statut : null;
+    if (statutOf === 'en attente de validation') {
+      return {
+        statusCode: 409,
+        body: JSON.stringify({ error: 'Cet OF est en attente de validation — validez-le avant de l\'affecter au planning.', conflit: 'non_valide' }),
+      };
+    }
 
     // Respect du séquencement : les étapes précédentes de la même
     // gamme doivent déjà être planifiées à une date <= celle demandée.

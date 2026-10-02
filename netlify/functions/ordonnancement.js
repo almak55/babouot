@@ -45,7 +45,7 @@ exports.handler = async (event) => {
     const { data: ordres, error: ordresError } = await supabase
       .from('ordres_fabrication')
       .select('id, numero, priorite, delai, statut')
-      .in('statut', ['planifié', 'en cours']);
+      .in('statut', ['validé', 'en cours']); // un OF "en attente de validation" ne doit pas être auto-planifié
     if (ordresError) throw ordresError;
 
     ordres.sort((a, b) => {

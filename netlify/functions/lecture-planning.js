@@ -38,7 +38,7 @@ exports.handler = async (event) => {
       supabase.from('personnel_machines').select('personnel_id, machines(code, nom)'),
       supabase.from('ordres_fabrication')
         .select('id, numero, quantite, delai, priorite, statut, titres(nom, client)')
-        .in('statut', ['planifié', 'en cours', 'en pause']),
+        .in('statut', ['en attente de validation', 'validé', 'en cours', 'en pause']),
       supabase.from('stocks').select('id, nom, unite, quantite, seuil_alerte'),
       supabase.from('planning_jour')
         .select('id, date, machine_id, personnel_id, of_id, operation_id, statut')

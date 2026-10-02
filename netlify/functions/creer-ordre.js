@@ -85,7 +85,7 @@ exports.handler = async (event) => {
         quantite,
         delai: delai || null,
         priorite: priorite || 'normale',
-        statut: 'planifié',
+        statut: 'en attente de validation',
       })
       .select('id, numero')
       .single();
