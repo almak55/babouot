@@ -93,7 +93,7 @@ exports.handler = async (event) => {
         .eq('date', date)
         .maybeSingle();
       if (absError) throw absError;
-      if (absence && (absence.statut === 'absent' || absence.statut === 'congé')) {
+      if (absence && (absence.statut === 'absent' || absence.statut === 'en arrêt')) {
         return {
           statusCode: 409,
           body: JSON.stringify({ error: 'Cette personne est absente ce jour-là.', conflit: 'absence' }),

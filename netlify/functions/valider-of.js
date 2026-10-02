@@ -95,7 +95,7 @@ exports.handler = async (event) => {
     };
 
     const absentsAujourdhui = new Set(
-      absencesRes.data.filter((a) => a.statut === 'absent' || a.statut === 'congé').map((a) => a.personnel_id)
+      absencesRes.data.filter((a) => a.statut === 'absent' || a.statut === 'en arrêt').map((a) => a.personnel_id)
     );
     const personnelActifIds = new Set(personnelRes.data.map((p) => p.id));
 

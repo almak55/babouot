@@ -31,7 +31,7 @@ exports.handler = async (event) => {
 
     const supabase = getSupabase();
 
-    const [machinesRes, personnelRes, competencesRes, machinesPersRes, ordresRes, stocksRes, planningRes] = await Promise.all([
+    const [machinesRes, personnelRes, competencesRes, machinesPersRes, ordresRes, stocksRes, planningRes, dispoRes] = await Promise.all([
       supabase.from('machines').select('id, code, nom').eq('actif', true).order('code'),
       supabase.from('personnel').select('id, nom, poste, role_type').eq('actif', true).order('nom'),
       supabase.from('personnel_competences').select('personnel_id, operations(nom)'),
@@ -43,9 +43,12 @@ exports.handler = async (event) => {
       supabase.from('planning_jour')
         .select('id, date, machine_id, personnel_id, of_id, operation_id, statut')
         .gte('date', dateDebut).lte('date', dateFin),
+      supabase.from('personnel_planning_jour')
+        .select('personnel_id, date, statut, heure_debut, heure_fin')
+        .gte('date', dateDebut).lte('date', dateFin),
     ]);
 
-    for (const r of [machinesRes, personnelRes, competencesRes, machinesPersRes, ordresRes, stocksRes, planningRes]) {
+    for (const r of [machinesRes, personnelRes, competencesRes, machinesPersRes, ordresRes, stocksRes, planningRes, dispoRes]) {
       if (r.error) throw r.error;
     }
 
@@ -103,6 +106,7 @@ exports.handler = async (event) => {
         ordres: ordresAvecAvancement,
         stocks: stocksRes.data,
         planning: planningRes.data,
+        disponibilites: dispoRes.data, // { personnel_id, date, statut, heure_debut, heure_fin }[]
       }),
     };
   } catch (err) {

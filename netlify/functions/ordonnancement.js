@@ -90,7 +90,7 @@ exports.handler = async (event) => {
       planningRes.data.filter((p) => p.personnel_id).map((p) => `${p.personnel_id}__${p.date}`)
     );
     const absentSet = new Set(
-      absences.filter((a) => a.statut === 'absent' || a.statut === 'congé')
+      absences.filter((a) => a.statut === 'absent' || a.statut === 'en arrêt')
         .map((a) => `${a.personnel_id}__${a.date}`)
     );
 
