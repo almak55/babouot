@@ -39,7 +39,9 @@ planning papier existante).
 | `referentiels` | Données de référence légères (opérations, machines, personnel, titres) pour construire des formulaires |
 | `creer-ordre` | Crée un nouvel OF + sa gamme opératoire |
 | `gammes-ordre` | Liste les étapes de gamme d'un OF (pour choisir laquelle planifier) |
-| `affecter-planning` | Affecte une étape de gamme à une machine/personne/jour, avec contrôle de disponibilité et de séquencement |
+| `affecter-planning` | Affecte une étape de gamme à une machine/personne/jour, avec contrôle de disponibilité et de séquencement (refuse si l'OF n'est pas validé) |
+| `valider-of` | Vérifie machines opérationnelles + matières suffisantes + personnel disponible, et bascule l'OF en `validé` ou `en attente de validation` |
+| `analyser-fiche` | Extrait titre/client/quantité/délai/opérations depuis une fiche scannée (image, PDF, Word, Excel) via Claude |
 | `gerer-machines` | Liste, crée et modifie les machines du parc (code, nom, opération principale, actif/inactif) |
 
 ### Front
