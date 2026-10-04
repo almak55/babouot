@@ -395,6 +395,49 @@
   .modal .op-list { display: flex; flex-direction: column; gap: 7px; max-height: 160px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 9px; background: var(--field-bg); }
 
   .modal.large { max-width: 780px; }
+  .modal.xlarge { max-width: 1000px; }
+  .slot .stack { display: flex; flex-direction: column; gap: 2px; min-height: 100%; }
+  .bar.compact { border-radius: 7px; padding: 2px 8px; min-height: 17px; flex: 1; gap: 6px; font-size: 10px; align-items: center; }
+  .bar.compact .b-name { font-weight: 600; }
+  .bar.compact .b-time { font-family: "IBM Plex Mono", monospace; font-size: 9.5px; opacity: .9; flex-shrink: 0; }
+  .plan-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 14px; align-items: end; margin-bottom: 14px; }
+  .plan-controls .field { margin-bottom: 0; }
+  .plan-check label { display: flex; align-items: center; gap: 7px; font-weight: 400; color: var(--ink-700); margin: 0; }
+  .plan-resume { display: flex; flex-wrap: wrap; gap: 8px 28px; align-items: center; background: var(--paper-raised-2); border-radius: var(--radius-md); padding: 11px 15px; margin-bottom: 10px; }
+  .plan-resume .plan-k { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-500); }
+  .plan-resume strong { font-family: "Space Grotesk", sans-serif; font-size: 15px; }
+  .plan-note { font-size: 11.5px; color: var(--ink-500); font-weight: 400; }
+  .plan-alt { font-size: 12.5px; color: var(--ink-700); margin: 0 0 10px; padding: 8px 12px; border-left: 3px solid var(--accent-amber); background: var(--accent-amber-soft); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+  .plan-bloquants { font-size: 12.5px; color: var(--danger-text); background: var(--danger-soft); border-radius: var(--radius-sm); padding: 9px 13px; margin-bottom: 10px; }
+  .plan-bloquants ul { margin: 4px 0 0; padding-left: 18px; }
+  .plan-hint { font-size: 11.5px; color: var(--ink-500); margin: 12px 0 8px; }
+  .plan-step { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 11px 14px; margin-bottom: 10px; background: var(--paper-raised); }
+  .plan-step.fixe { padding: 8px 14px; background: var(--paper-raised-2); }
+  .pl-details summary { cursor: pointer; font-size: 13px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--field-bg); list-style: none; }
+  .pl-details[open] summary { margin-bottom: 6px; }
+  .gh-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--paper-raised); }
+  .gh { position: relative; }
+  .gh-head { display: flex; border-bottom: 1px solid var(--line); background: var(--paper-raised-2); }
+  .gh-head .gh-label { width: var(--label); flex-shrink: 0; }
+  .gh-day { text-align: center; font-size: 11px; font-weight: 600; padding: 7px 0; color: var(--ink-700); border-left: 1px solid var(--line); text-transform: capitalize; flex-shrink: 0; }
+  .gh-body { position: relative; }
+  .gh-grid { position: absolute; top: 0; bottom: 0; pointer-events: none; }
+  .gh-col { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--line); }
+  .gh-pause { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(135deg, transparent 0 4px, var(--line) 4px 5px); opacity: .7; }
+  .gh-row { display: flex; height: 28px; align-items: center; border-bottom: 1px dashed var(--line); position: relative; }
+  .gh-row:last-child { border-bottom: none; }
+  .gh-label { width: var(--label); flex-shrink: 0; padding: 0 10px; font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gh-label em { font-style: normal; color: var(--ink-500); }
+  .gh-track { position: relative; height: 100%; flex-shrink: 0; }
+  .gh-bar { position: absolute; top: 5px; height: 18px; border-radius: 5px; font-size: 9.5px; font-family: "IBM Plex Mono", monospace; color: #fff; display: flex; align-items: center; justify-content: center; overflow: hidden; white-space: nowrap; box-shadow: var(--shadow-sm); }
+  .gh-bar.machine { background: var(--accent-teal); }
+  .gh-bar.main { background: var(--accent-amber); color: #4A2E00; }
+  .gh-legend { display: flex; gap: 16px; font-size: 11px; color: var(--ink-500); margin: 7px 0 0; }
+  .gh-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  .gh-legend i.machine { background: var(--accent-teal); }
+  .gh-legend i.main { background: var(--accent-amber); }
+  .gh-legend i.pause { background: repeating-linear-gradient(135deg, transparent 0 2px, var(--ink-500) 2px 3px); }
+
   .step-card { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 13px 15px; margin-bottom: 12px; background: var(--paper-raised); }
   .step-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
   .step-source { font-size: 11.5px; color: var(--ink-500); margin-bottom: 10px; }
@@ -699,8 +742,18 @@
       const accent = actif ? 'teal' : 'muted';
       rows += `<tr><td class="machine-cell row-accent-${accent}"><div class="m-row"><span class="row-icon ${accent}">${svgIcon(ICON_MACHINE)}</span><div><div class="m-name">${m.name}</div><div class="m-sub">${m.code}</div></div></div></td>`;
       for(let d=0; d<7; d++){
-        const slot = (state.planning[m.id]||[]).find(s=>s.day===d);
-        if(slot){
+        const slotsJour = (state.planning[m.id]||[]).filter(s=>s.day===d);
+        const slot = slotsJour[0];
+        if (slotsJour.length > 1 || (slot && slot.debut)) {
+          // Créneaux horaires : une mini-barre par créneau, avec ses heures.
+          const barres = slotsJour.map(s => {
+            const col = s.statut==='danger' ? 'var(--danger)' : s.statut==='warn' ? 'var(--accent-amber)' : 'var(--accent-teal)';
+            const heures = s.debut ? `${s.debut}–${s.fin}` : 'journée';
+            const nom = s.phase ? `${s.of} · ${s.phase}` : s.of;
+            return `<div class="bar compact" style="background:${col}" title="${esc(nom)} — ${heures}${s.nbPers > 1 ? ' — ' + s.nbPers + ' pers.' : ''}"><span class="b-text"><span class="b-name">${esc(nom)}</span></span><span class="b-time">${heures}</span></div>`;
+          }).join('');
+          rows += `<td class="slot"><div class="stack">${barres}</div></td>`;
+        } else if(slot){
           const of = state.ordres.find(o=>o.id===slot.of);
           const color = slot.statut==='danger' ? 'var(--danger)' : slot.statut==='warn' ? 'var(--accent-amber)' : 'var(--accent-teal)';
           const pctBadge = of ? `<span class="b-pct">${of.avancement}%</span>` : '';
@@ -783,6 +836,7 @@
         <button data-action="valider">Valider l'OF</button>
         <button data-action="gamme">Voir la gamme opératoire</button>
         <button data-action="chiffrage">Chiffrage des temps</button>
+        <button data-action="planifier">Planifier à l'heure</button>
         <button data-action="affecter">Affecter au planning</button>
         <button data-action="supprimer" class="danger">Supprimer l'OF</button>
       </div>
@@ -792,6 +846,10 @@
     menu.style.top = `${r.bottom + window.scrollY + 4}px`;
     menu.style.left = `${r.right + window.scrollX - menu.offsetWidth}px`;
 
+    menu.querySelector('[data-action="planifier"]').addEventListener('click', () => {
+      menu.remove();
+      ouvrirModalePlanification(ofUuid, ofNumero);
+    });
     menu.querySelector('[data-action="affecter"]').addEventListener('click', () => {
       menu.remove();
       ouvrirModaleAffectation({});
@@ -1404,6 +1462,226 @@
     });
   }
 
+  // ---------- Planification à l'heure ----------
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  }
+  function maintenantLocal() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  function fmtDateHeure(isoLocal) {
+    if (!isoLocal) return '—';
+    const d = new Date(isoLocal);
+    return d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' }) + ' ' + isoLocal.slice(11, 16);
+  }
+  const minHeure = (t) => { const [h, m] = String(t).split(':'); return Number(h) * 60 + Number(m); };
+
+  // Gantt horaire : un jour par colonne, les heures en abscisse, une ligne par phase.
+  function ganttHoraire(plan) {
+    const lignes = [];
+    plan.etapes.filter(e => !e.fixe).forEach(e => e.phases.forEach(ph => lignes.push({ e, ph })));
+    const dates = Array.from(new Set(lignes.flatMap(l => l.ph.tranches.map(t => t.date)))).sort();
+    if (dates.length === 0) return '<div class="empty">Aucune phase à afficher.</div>';
+
+    const cal = plan.calendrier;
+    const axeDebut = Math.min(420, minHeure(cal.debut));
+    const axeFin = Math.max(1050, minHeure(cal.fin));
+    const W = 132;                       // largeur d'un jour (px)
+    const k = W / (axeFin - axeDebut);   // px par minute
+    const LABEL = 210;
+    const pauseG = (minHeure(cal.pause_debut) - axeDebut) * k;
+    const pauseW = Number(cal.pause_minutes) * k;
+
+    const entete = dates.map(dt => {
+      const d = new Date(dt + 'T00:00:00');
+      return `<div class="gh-day" style="width:${W}px">${d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit' })}</div>`;
+    }).join('');
+    const grille = dates.map((_, i) => `<div class="gh-col" style="left:${i * W}px; width:${W}px"><i class="gh-pause" style="left:${pauseG}px; width:${pauseW}px"></i></div>`).join('');
+
+    const rangees = lignes.map(({ e, ph }) => {
+      const barres = ph.tranches.map(t => {
+        const i = dates.indexOf(t.date);
+        const g = i * W + (minHeure(t.debut) - axeDebut) * k;
+        const l = Math.max(3, (minHeure(t.fin) - minHeure(t.debut)) * k);
+        const qui = ph.personnes.map(p => p.nom).join(', ') || 'personnel à affecter';
+        return `<div class="gh-bar ${ph.besoin_machine ? 'machine' : 'main'}" style="left:${g}px; width:${l}px" title="${esc(ph.nom)} — ${t.debut}–${t.fin} — ${esc(qui)}">${l > 52 ? `${t.debut}–${t.fin}` : ''}</div>`;
+      }).join('');
+      return `<div class="gh-row"><div class="gh-label" title="${esc(e.operation + ' — ' + ph.nom)}"><span class="mono">${e.sequence}.</span> ${esc(e.operation)} <em>${esc(ph.nom)}</em></div><div class="gh-track" style="width:${dates.length * W}px">${barres}</div></div>`;
+    }).join('');
+
+    return `
+      <div class="gh-wrap">
+        <div class="gh" style="min-width:${LABEL + dates.length * W}px; --label:${LABEL}px">
+          <div class="gh-head"><div class="gh-label"></div>${entete}</div>
+          <div class="gh-body">
+            <div class="gh-grid" style="left:${LABEL}px; width:${dates.length * W}px">${grille}</div>
+            ${rangees}
+          </div>
+        </div>
+      </div>
+      <div class="gh-legend"><span><i class="machine"></i>Phase sur machine</span><span><i class="main"></i>Phase manuelle (sans machine)</span><span><i class="pause"></i>Pause</span></div>`;
+  }
+
+  async function ouvrirModalePlanification(ofUuid, ofNumero, etat) {
+    etat = etat || { mode: 'avant', debut: maintenantLocal(), fin: '', horaires: 'normal', replanifier: false, imposes: {} };
+    let refs;
+    try { refs = await getReferentiels(); }
+    catch (e) { toast(`Backend indisponible : ${e.message}`, 'error'); return; }
+
+    afficherModale(`
+      <h3>Planifier ${esc(ofNumero)} à l'heure</h3>
+      <div class="plan-controls">
+        <div class="field"><label>Mode</label>
+          <select id="pl-mode">
+            <option value="avant" ${etat.mode === 'avant' ? 'selected' : ''}>Démarrer à partir de…</option>
+            <option value="arriere" ${etat.mode === 'arriere' ? 'selected' : ''}>Terminer au plus tard le…</option>
+          </select></div>
+        <div class="field" id="pl-debut-wrap"><label>Début souhaité</label><input id="pl-debut" type="datetime-local" value="${etat.debut}"></div>
+        <div class="field" id="pl-fin-wrap"><label>Fin au plus tard <span style="font-weight:400">(vide = délai de l'OF)</span></label><input id="pl-fin" type="datetime-local" value="${etat.fin}"></div>
+        <div class="field"><label>Horaires</label>
+          <select id="pl-horaires">
+            <option value="normal" ${etat.horaires === 'normal' ? 'selected' : ''}>Normaux</option>
+            <option value="heures_sup" ${etat.horaires === 'heures_sup' ? 'selected' : ''}>Avec heures supplémentaires</option>
+          </select></div>
+        <div class="field plan-check"><label><input type="checkbox" id="pl-replan" ${etat.replanifier ? 'checked' : ''}> Replanifier aussi les étapes déjà planifiées</label></div>
+        <div class="field plan-go"><button class="btn primary" id="pl-calc">Calculer</button></div>
+      </div>
+      <div id="pl-resultat"><div class="empty">Calcul en cours…</div></div>
+      <div id="m-msg"></div>
+      <div class="actions">
+        <button class="btn" id="m-cancel">Fermer</button>
+        <button class="btn primary" id="pl-appliquer" disabled>Appliquer au planning</button>
+      </div>
+    `, 'xlarge');
+
+    const $ = (id) => document.getElementById(id);
+    function majChamps() {
+      $('pl-debut-wrap').classList.toggle('hidden', $('pl-mode').value !== 'avant');
+      $('pl-fin-wrap').classList.toggle('hidden', $('pl-mode').value !== 'arriere');
+    }
+    $('pl-mode').addEventListener('change', majChamps);
+    majChamps();
+    $('m-cancel').addEventListener('click', fermerModale);
+
+    const corps = (appliquer) => {
+      const mode = $('pl-mode').value;
+      return {
+        of_id: ofUuid, mode, appliquer,
+        debut_souhaite: mode === 'avant' ? $('pl-debut').value : undefined,
+        fin_au_plus_tard: mode === 'arriere' && $('pl-fin').value ? $('pl-fin').value : undefined,
+        maintenant: maintenantLocal(),
+        horaires: $('pl-horaires').value,
+        replanifier: $('pl-replan').checked,
+        etapes_imposees: Object.entries(etat.imposes).map(([gamme_id, v]) => ({ gamme_id, ...v })),
+      };
+    };
+
+    let dernierPlan = null;
+    async function calculer() {
+      const zone = $('pl-resultat');
+      zone.innerHTML = '<div class="empty">Calcul en cours…</div>';
+      $('pl-appliquer').disabled = true;
+      $('m-msg').innerHTML = '';
+      try {
+        const res = await fetch(`${API}/planifier-of`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps(false)) });
+        const plan = await res.json();
+        if (!res.ok) throw new Error(plan.error || 'Erreur inconnue');
+        dernierPlan = plan;
+        afficherPlan(plan);
+      } catch (e) {
+        zone.innerHTML = `<div class="msg error">${esc(e.message)}</div>`;
+      }
+    }
+
+    function afficherPlan(plan) {
+      const r = plan.resume;
+      let delaiHtml = '';
+      if (r.delai) {
+        if (r.respecte_delai) {
+          delaiHtml = `<span class="tag ok">Délai respecté</span> <span class="plan-note">(${fmtDateHeure(r.delai)}${r.marge_min ? ', marge ' + fmtH(r.marge_min / 60) : ''})</span>`;
+        } else if (r.respecte_delai === false) {
+          const jours = Math.round(r.retard_min / 1440);
+          delaiHtml = `<span class="tag danger">Délai dépassé</span> <span class="plan-note">(${fmtDateHeure(r.delai)} — ${jours >= 1 ? '≈ ' + jours + ' jour(s) de retard' : 'moins d\'une journée de retard'})</span>`;
+        }
+      }
+      const alt = plan.alternative_heures_sup
+        ? `<div class="plan-alt">Avec heures supplémentaires : fin ${fmtDateHeure(plan.alternative_heures_sup.fin)} — ${plan.alternative_heures_sup.respecte_delai ? '<strong>le délai serait tenu</strong>' : 'le délai ne serait pas tenu non plus'}.</div>` : '';
+      const bloquants = plan.bloquants.length
+        ? `<div class="plan-bloquants"><strong>À corriger avant d'appliquer :</strong><ul>${plan.bloquants.map(b => `<li>Étape ${b.sequence} (${esc(b.operation)}) : ${esc(b.detail)}</li>`).join('')}</ul></div>` : '';
+
+      const etapesHtml = plan.etapes.map(e => {
+        if (e.fixe) return `<div class="plan-step fixe"><strong>${e.sequence}. ${esc(e.operation)}</strong> <span class="plan-note">— déjà planifiée (cochez « Replanifier » pour la reprendre)</span></div>`;
+        const choisis = Array.from(new Map(e.phases.flatMap(ph => ph.personnes).map(p => [p.id, p])).keys());
+        const imp = etat.imposes[e.gamme_id] || {};
+        const selectedPersons = imp.personnel_ids || choisis;
+        const machOpts = `<option value="">— Automatique —</option>` + e.machines_possibles.map(m => `<option value="${m.id}" ${(imp.machine_id || '') === m.id ? 'selected' : ''}>${esc(m.nom)}</option>`).join('');
+        const persHtml = refs.personnel.map(p => `<label><input type="checkbox" class="pl-pers" value="${p.id}" ${selectedPersons.includes(p.id) ? 'checked' : ''}> ${esc(p.nom)}</label>`).join('');
+        const phasesHtml = e.phases.map(ph => `
+          <li><span>${esc(ph.nom)}</span>
+              <span class="mono">${ph.tranches.map(t => `${t.date.slice(8)}/${t.date.slice(5, 7)} ${t.debut}–${t.fin}`).join(' · ')}</span>
+              <small>${ph.besoin_machine ? 'machine' : 'manuel'} — ${ph.personnes.length ? esc(ph.personnes.map(p => p.nom).join(', ')) : '<em>personnel à affecter</em>'}</small></li>`).join('');
+        const alertes = e.problemes.map(p => `<div class="msg ${p.bloquant ? 'error' : ''}" style="margin:4px 0 0; ${p.bloquant ? '' : 'color:var(--accent-amber-text);'}">${p.bloquant ? '⛔' : '⚠️'} ${esc(p.detail)}</div>`).join('');
+        return `
+          <div class="plan-step" data-gamme="${e.gamme_id}">
+            <div class="step-head"><strong><span class="mono" style="color:var(--ink-500)">${e.sequence}.</span> ${esc(e.operation)}</strong>
+              <span class="plan-note">${e.debut ? fmtDateHeure(e.debut) + ' → ' + fmtDateHeure(e.fin) : 'non planifiable'}</span></div>
+            <div class="step-grid">
+              <div class="field"><label>Machine${e.machine ? ' retenue : ' + esc(e.machine.nom) : ''}</label><select class="pl-machine">${machOpts}</select></div>
+              <div class="field"><label>Personnel (imposer)</label>
+                <details class="pl-details"><summary>${selectedPersons.length ? selectedPersons.length + ' personne(s)' : 'Automatique'}</summary><div class="op-list">${persHtml}</div></details></div>
+            </div>
+            <ul class="phase-list">${phasesHtml}</ul>${alertes}
+          </div>`;
+      }).join('');
+
+      $('pl-resultat').innerHTML = `
+        <div class="plan-resume">
+          <div><span class="plan-k">Début</span><strong>${fmtDateHeure(r.debut)}</strong></div>
+          <div><span class="plan-k">Fin</span><strong>${fmtDateHeure(r.fin)}</strong></div>
+          <div>${delaiHtml}</div>
+        </div>
+        ${alt}${bloquants}
+        ${ganttHoraire(plan)}
+        <div class="plan-hint">Pour imposer une machine ou du personnel, modifiez-les ci-dessous puis cliquez sur « Calculer ».</div>
+        ${etapesHtml}`;
+
+      // Mémoriser les choix manuels de machine / personnel
+      document.querySelectorAll('.plan-step[data-gamme]').forEach(bloc => {
+        const g = bloc.dataset.gamme;
+        bloc.querySelector('.pl-machine').addEventListener('change', (ev) => {
+          etat.imposes[g] = { ...(etat.imposes[g] || {}), machine_id: ev.target.value || undefined };
+        });
+        bloc.querySelectorAll('.pl-pers').forEach(cb => cb.addEventListener('change', () => {
+          const ids = Array.from(bloc.querySelectorAll('.pl-pers:checked')).map(x => x.value);
+          etat.imposes[g] = { ...(etat.imposes[g] || {}), personnel_ids: ids.length ? ids : undefined };
+          bloc.querySelector('summary').textContent = ids.length ? `${ids.length} personne(s)` : 'Automatique';
+        }));
+      });
+      $('pl-appliquer').disabled = !(plan.bloquants.length === 0 && r.complet);
+    }
+
+    $('pl-calc').addEventListener('click', calculer);
+    $('pl-appliquer').addEventListener('click', async () => {
+      const msg = $('m-msg');
+      msg.innerHTML = '<div class="msg">Application au planning…</div>';
+      $('pl-appliquer').disabled = true;
+      try {
+        const res = await fetch(`${API}/planifier-of`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps(true)) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+        toast(`${ofNumero} planifié : ${data.lignes_creees} ligne(s) de planning créée(s).`);
+        fermerModale(); chargerDonneesReelles();
+      } catch (e) {
+        msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`;
+        $('pl-appliquer').disabled = false;
+      }
+    });
+
+    calculer();
+  }
+
   // Chiffrage d'un OF : durée de chaque étape + total
   async function ouvrirModaleChiffrage(ofUuid, ofNumero, donnees) {
     let data = donnees;
@@ -1694,7 +1972,14 @@
       state.machines = data.machines.map(m => ({ id: m.code, uuid: m.id, name: m.nom, code: m.code }));
 
       state.personnel = data.personnel.map(p => {
-        const creneauxSemaine = data.planning.filter(c => (c.personnel_ids || []).includes(p.id)).length;
+        // Charge = heures affectées / 40 h (5 j × 8 h). Une ligne sans heures = journée entière (8 h).
+        const minutesDe = (t) => { const [h, m] = String(t).split(':'); return Number(h) * 60 + Number(m); };
+        const heuresSemaine = data.planning.filter(c => (c.personnel_ids || []).includes(p.id)).reduce((total, c) => {
+          if (!c.heure_debut || !c.heure_fin) return total + 8;
+          let min = minutesDe(c.heure_fin) - minutesDe(c.heure_debut);
+          if (minutesDe(c.heure_debut) < 720 && minutesDe(c.heure_fin) > 750) min -= 30; // pause du midi comprise dans la plage
+          return total + min / 60;
+        }, 0);
         const dispoAuj = (data.disponibilites || []).find(d => d.personnel_id === p.id && d.date === AUJOURDHUI_ISO);
         let statutAffiche;
         if (!dispoAuj || dispoAuj.statut === 'disponible') {
@@ -1709,7 +1994,7 @@
         return {
           id: p.id, name: p.nom, role: p.poste || '',
           comp: [...(p.competences || []), ...(p.machines_specifiques || []).map(m => `machine: ${m}`)],
-          charge: Math.round((creneauxSemaine / 5) * 100), // 5 jours ouvrés dans l'horizon affiché
+          charge: Math.round((heuresSemaine / 40) * 100),
           statut: statutAffiche,
         };
       });
@@ -1740,6 +2025,9 @@
           of: of ? of.numero : creneau.of_id,
           statut: creneau.statut === 'retard' ? 'danger' : 'ok',
           nbPers: (creneau.personnel_ids || []).length,
+          debut: creneau.heure_debut ? String(creneau.heure_debut).slice(0, 5) : null,
+          fin: creneau.heure_fin ? String(creneau.heure_fin).slice(0, 5) : null,
+          phase: creneau.phase || null,
         });
       });
       state.planning = planningParMachine;
