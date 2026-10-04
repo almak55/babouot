@@ -1,7 +1,7 @@
 // functions/valider-of.js
 //
 // POST /.netlify/functions/valider-of
-// body : { of_id: "uuid", forcer?: true }
+// body : { of_id: "uuid", forcer?: true, planifier?: false, maintenant?: "AAAA-MM-JJTHH:MM" }
 //
 // Vérifie les 3 conditions de validation d'un OF et met à jour son
 // statut en conséquence :
@@ -23,15 +23,56 @@
 // forcer = true : l'OF est validé MALGRÉ les points bloquants (décision de
 // l'utilisateur, qui les a vus). Les blocages sont quand même renvoyés.
 //
+// PLANIFICATION AUTOMATIQUE : dès que l'OF est validé (normalement ou de force),
+// ses étapes « à planifier » sont placées au planning au plus tôt, en horaires
+// normaux, par le planificateur à l'heure (planifier-of). `planifier: false`
+// désactive cette étape. `maintenant` = heure locale de l'atelier (défaut :
+// heure de Paris). Une planification impossible n'annule JAMAIS la validation :
+// le résultat est renvoyé dans `planification` :
+//   { statut: 'planifie', debut, fin, delai, respecte_delai, retard_min,
+//     lignes_creees, alternative_heures_sup }
+//   { statut: 'rien_a_planifier' }                    toutes les étapes l'étaient déjà
+//   { statut: 'bloquee', bloquants: [{sequence, operation, type, detail}] }
+//   { statut: 'erreur', message }
+//
 // Réponse :
 // {
 //   statut: 'validé' | 'en attente de validation',
 //   criteres: { machines: bool, matieres: bool, personnel: bool },
 //   blocages: [ { etape, type, detail } ],
-//   forcee: bool   // validé malgré des blocages
+//   forcee: bool,  // validé malgré des blocages
+//   planification: {...} | null   // voir ci-dessus (null si non validé)
 // }
 
 const { getSupabase } = require('./lib/supabaseclient');
+const planifierOf = require('./planifier-of');
+
+// Heure locale de l'atelier (Paris) au format AAAA-MM-JJTHH:MM.
+function maintenantParis() {
+  return new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Paris' }).slice(0, 16).replace(' ', 'T');
+}
+
+// Place au planning, au plus tôt, les étapes « à planifier » d'un OF qui vient d'être validé.
+async function planifierApresValidation(gammes, ofId, maintenant) {
+  if (!gammes.some((g) => g.statut === 'à planifier')) return { statut: 'rien_a_planifier' };
+  try {
+    const r = await planifierOf.handler({
+      httpMethod: 'POST',
+      body: JSON.stringify({ of_id: ofId, mode: 'avant', horaires: 'normal', appliquer: true, maintenant }),
+    });
+    const p = JSON.parse(r.body);
+    if (r.statusCode === 409) return { statut: 'bloquee', bloquants: p.bloquants || [], message: p.error };
+    if (r.statusCode !== 200) return { statut: 'erreur', message: p.error || `code ${r.statusCode}` };
+    return {
+      statut: 'planifie',
+      debut: p.resume.debut, fin: p.resume.fin, delai: p.resume.delai,
+      respecte_delai: p.resume.respecte_delai, retard_min: p.resume.retard_min,
+      lignes_creees: p.lignes_creees, alternative_heures_sup: p.alternative_heures_sup,
+    };
+  } catch (e) {
+    return { statut: 'erreur', message: e.message };
+  }
+}
 
 exports.handler = async (event) => {
   try {
@@ -54,7 +95,7 @@ exports.handler = async (event) => {
 
     const { data: gammes, error: gammesError } = await supabase
       .from('gammes_operatoires')
-      .select('id, sequence, operation_id, machine_id, operations(nom)')
+      .select('id, sequence, statut, operation_id, machine_id, operations(nom)')
       .eq('of_id', of_id).order('sequence');
     if (gammesError) throw gammesError;
 
@@ -157,6 +198,24 @@ exports.handler = async (event) => {
       .from('ordres_fabrication').update({ statut: nouveauStatut }).eq('id', of_id);
     if (updateError) throw updateError;
 
+    // OF validé : on le place directement au planning.
+    let planification = null;
+    if (nouveauStatut === 'validé' && body.planifier !== false) {
+      planification = await planifierApresValidation(gammes, of_id, body.maintenant || maintenantParis());
+    }
+
     return {
       statusCode: 200,
       body: JSON.stringify({
+        statut: nouveauStatut,
+        criteres: { machines: machinesOk, matieres: matieresOk, personnel: personnelOk },
+        blocages,
+        forcee: forcer && !tousOk,
+        planification,
+      }),
+    };
+  } catch (err) {
+    console.error('valider-of error:', err);
+    return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
+  }
+};
