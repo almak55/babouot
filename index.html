@@ -619,6 +619,27 @@
 
 
 <script>
+// Protection générale des appels au serveur : si une fonction répond par une PAGE WEB
+// (accès refusé, session expirée, site protégé, panne) au lieu de données, on affiche une
+// explication claire à la place de « Unexpected token '<' ... is not valid JSON ».
+(function () {
+  const original = window.fetch ? window.fetch.bind(window) : null;
+  if (!original) return;
+  window.fetch = async function (url, options) {
+    const res = await original(url, options);
+    try {
+      const type = (res && res.headers && res.headers.get && res.headers.get('content-type')) || '';
+      if (String(url).includes('/.netlify/functions/') && type.toLowerCase().includes('text/html')) {
+        const code = res.status;
+        const message = (code === 401 || code === 403)
+          ? `Accès refusé (code ${code}) : le serveur a répondu par une page de connexion ou de protection au lieu de données. Rechargez la page (Ctrl+F5) et réessayez ; si cela se reproduit, vérifiez la protection d'accès du site dans Netlify.`
+          : `Réponse inattendue du serveur (code ${code}, une page web au lieu de données). Réessayez dans un instant ; si cela persiste, consultez les journaux de la fonction dans Netlify.`;
+        return { ok: false, status: code, headers: res.headers, json: async () => ({ error: message }), text: async () => message };
+      }
+    } catch (e) { /* en cas de doute, on laisse passer la réponse d'origine */ }
+    return res;
+  };
+})();
 (function(){
 
   // ---------- Données réelles de l'atelier (référentiels validés) ----------
@@ -884,6 +905,52 @@
     return wrap;
   }
 
+  // Résultat d'une validation réussie : l'OF a aussi été placé au planning (ou on explique pourquoi pas).
+  function afficherResultatValidation(ofUuid, ofNumero, data) {
+    const p = data.planification;
+    const n = esc(ofNumero);
+    const nb = (data.blocages || []).length;
+    const forcee = data.forcee ? ` (malgré ${nb} point${nb > 1 ? 's' : ''} bloquant${nb > 1 ? 's' : ''})` : '';
+    if (!p) { toast(`${n} validé${forcee}.`); return; }
+    if (p.statut === 'rien_a_planifier') { toast(`${n} validé${forcee} — toutes ses étapes sont déjà planifiées.`); return; }
+
+    if (p.statut === 'planifie') {
+      if (p.respecte_delai === false) {
+        const alt = p.alternative_heures_sup;
+        afficherModale(`
+          <h3>${n} validé et planifié — délai non tenu</h3>
+          <div class="plan-resume">
+            <div><span class="plan-k">Début</span><strong>${fmtDateHeure(p.debut)}</strong></div>
+            <div><span class="plan-k">Fin prévue</span><strong>${fmtDateHeure(p.fin)}</strong></div>
+            <div><span class="plan-k">Délai</span><strong>${fmtDateHeure(p.delai)}</strong></div>
+            <div><span class="plan-k">Retard</span><strong style="color:var(--danger-text);">${fmtH(p.retard_min / 60)}</strong></div>
+          </div>
+          <p style="font-size:13px; color:var(--ink-700); margin:0 0 6px;">Le planning <strong>au plus tôt, en horaires normaux</strong>, a été appliqué : c'est déjà le plus rapide possible, mais il dépasse le délai de l'OF.</p>
+          ${alt ? `<p style="font-size:13px; color:var(--ink-700); margin:0 0 6px;">Avec des <strong>heures supplémentaires</strong> : fin le ${fmtDateHeure(alt.fin)} — ${alt.respecte_delai ? '<strong>délai tenu</strong>' : 'délai toujours non tenu'}.</p>` : ''}
+          <div class="plan-note">« Ouvrir la planification » permet de replanifier avec les heures supplémentaires.</div>
+          <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="m-ouvrir-plan">Ouvrir la planification…</button></div>`);
+        document.getElementById('m-cancel').addEventListener('click', fermerModale);
+        document.getElementById('m-ouvrir-plan').addEventListener('click', () => ouvrirModalePlanification(ofUuid, ofNumero));
+        return;
+      }
+      toast(`${n} validé${forcee} et planifié : ${fmtDateHeure(p.debut)} → ${fmtDateHeure(p.fin)}${p.respecte_delai ? ' — délai tenu' : ''}.`);
+      return;
+    }
+
+    if (p.statut === 'bloquee') {
+      afficherModale(`
+        <h3>${n} validé, mais pas encore planifié</h3>
+        <div class="plan-bloquants"><strong>À corriger pour pouvoir le planifier :</strong>
+          <ul>${(p.bloquants || []).map(b => `<li><span class="mono">Étape ${b.sequence}</span> — ${esc(b.operation)} : ${esc(b.detail)}</li>`).join('')}</ul></div>
+        <div class="plan-note" style="margin-top:8px;">L'OF est bien validé. Corrigez ces points (par exemple chiffrez l'étape), puis lancez « Planifier à l'heure » ou revalidez l'OF.</div>
+        <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="m-ouvrir-chiffrage">Ouvrir le chiffrage…</button></div>`);
+      document.getElementById('m-cancel').addEventListener('click', fermerModale);
+      document.getElementById('m-ouvrir-chiffrage').addEventListener('click', () => ouvrirModaleChiffrage(ofUuid, ofNumero));
+      return;
+    }
+    toast(`${n} validé${forcee}, mais la planification a échoué : ${esc(p.message || 'erreur inconnue')}.`, 'error');
+  }
+
   // Détail d'une validation refusée : chaque blocage, la façon de le lever, et le choix de valider quand même.
   function ouvrirModaleBlocages(ofUuid, ofNumero, data) {
     const GROUPES = [
@@ -916,11 +983,11 @@
       const msg = document.getElementById('m-msg');
       msg.innerHTML = '<div class="msg">Validation…</div>';
       try {
-        const res = await fetch(`${API}/valider-of`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: ofUuid, forcer: true }) });
+        const res = await fetch(`${API}/valider-of`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: ofUuid, forcer: true, maintenant: maintenantLocal() }) });
         const d = await res.json();
         if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
-        toast(`${esc(ofNumero)} validé malgré ${n} point${n > 1 ? 's' : ''} bloquant${n > 1 ? 's' : ''}.`);
         fermerModale(); chargerDonneesReelles();
+        afficherResultatValidation(ofUuid, ofNumero, d);
       } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
     });
   }
@@ -1016,12 +1083,12 @@
         const res = await fetch(`${API}/valider-of`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ of_id: ofUuid }),
+          body: JSON.stringify({ of_id: ofUuid, maintenant: maintenantLocal() }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
         if (data.statut === 'validé') {
-          toast(`${ofNumero} validé — machines, matières et personnel disponibles.`);
+          afficherResultatValidation(ofUuid, ofNumero, data);
         } else {
           ouvrirModaleBlocages(ofUuid, ofNumero, data);
         }
@@ -2128,7 +2195,11 @@
           bloc.querySelector('summary').textContent = ids.length ? `${ids.length} personne(s)` : 'Automatique';
         }));
       });
-      $('pl-appliquer').disabled = !(plan.bloquants.length === 0 && r.complet);
+      const rienAPlanifier = plan.etapes.length > 0 && plan.etapes.every(e => e.fixe);
+      $('pl-appliquer').disabled = !(plan.bloquants.length === 0 && r.complet) || rienAPlanifier;
+      $('m-msg').innerHTML = rienAPlanifier
+        ? `<div class="msg">Toutes les étapes de cet OF sont <strong>déjà planifiées</strong> : il n'y a rien à appliquer. Pour les replanifier, cochez « Replanifier aussi les étapes déjà planifiées » puis recalculez, ou retirez-les du planning avec « Déplanifier l'OF » (menu ···).</div>`
+        : '';
     }
 
     $('pl-calc').addEventListener('click', calculer);
