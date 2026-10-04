@@ -14,6 +14,17 @@
 //   -> modifie une machine existante. Si operation_codes est fourni,
 //      remplace entièrement l'ensemble de ses opérations (liste vide
 //      = plus aucune opération rattachée).
+//
+// DELETE /.netlify/functions/gerer-machines?id=uuid[&force=true]
+//   -> supprime une machine. Ses liens avec les opérations, les
+//      compétences machine du personnel et ses maintenances partent
+//      avec elle. Si elle est encore utilisée par des affectations
+//      planning ou des étapes de gamme, la suppression est REFUSÉE
+//      (409, avec le détail) — sauf avec force=true, qui retire ces
+//      affectations : les étapes de gamme concernées repassent "à
+//      planifier". Alternative moins destructive : la désactiver
+//      (PUT actif=false), elle disparaît des plannings mais reste
+//      en base.
 
 const { getSupabase } = require('./lib/supabaseclient');
 
@@ -133,6 +144,69 @@ exports.handler = async (event) => {
       if (readError) throw readError;
 
       return { statusCode: 200, body: JSON.stringify(data) };
+    }
+
+    if (event.httpMethod === 'DELETE') {
+      const params = event.queryStringParameters || {};
+      const id = params.id;
+      const force = params.force === 'true';
+      if (!id) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'Paramètre id requis.' }) };
+      }
+
+      const { data: machine, error: machineError } = await supabase
+        .from('machines').select('id, code, nom').eq('id', id).maybeSingle();
+      if (machineError) throw machineError;
+      if (!machine) {
+        return { statusCode: 404, body: JSON.stringify({ error: 'Machine introuvable (déjà supprimée ?).' }) };
+      }
+
+      const [planRes, gammeRes] = await Promise.all([
+        supabase.from('planning_jour').select('id', { count: 'exact', head: true }).eq('machine_id', id),
+        supabase.from('gammes_operatoires').select('id', { count: 'exact', head: true }).eq('machine_id', id),
+      ]);
+      if (planRes.error) throw planRes.error;
+      if (gammeRes.error) throw gammeRes.error;
+      const nbAffectations = planRes.count || 0;
+      const nbEtapes = gammeRes.count || 0;
+
+      if ((nbAffectations > 0 || nbEtapes > 0) && !force) {
+        return {
+          statusCode: 409,
+          body: JSON.stringify({
+            error: `${machine.nom} est encore utilisée (${nbAffectations} affectation(s) planning, ${nbEtapes} étape(s) de gamme).`,
+            utilisee: { affectations: nbAffectations, etapes_gamme: nbEtapes },
+            nom: machine.nom,
+          }),
+        };
+      }
+
+      if (nbAffectations > 0 || nbEtapes > 0) {
+        // Suppression forcée : retirer d'abord ce qui référence la machine.
+        const { error: delPlanError } = await supabase.from('planning_jour').delete().eq('machine_id', id);
+        if (delPlanError) throw delPlanError;
+
+        const { error: resetError } = await supabase
+          .from('gammes_operatoires').update({ statut: 'à planifier', machine_id: null })
+          .eq('machine_id', id).eq('statut', 'planifié');
+        if (resetError) throw resetError;
+        const { error: nullGammeError } = await supabase
+          .from('gammes_operatoires').update({ machine_id: null }).eq('machine_id', id);
+        if (nullGammeError) throw nullGammeError;
+      }
+
+      // Simple référence indicative dans les déclarations de disponibilité.
+      const { error: dispoError } = await supabase
+        .from('personnel_planning_jour').update({ machine_id: null }).eq('machine_id', id);
+      if (dispoError) throw dispoError;
+
+      const { error: delError } = await supabase.from('machines').delete().eq('id', id);
+      if (delError) throw delError;
+
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ ok: true, nom: machine.nom, affectations_retirees: force ? nbAffectations : 0 }),
+      };
     }
 
     return { statusCode: 405, body: JSON.stringify({ error: 'Méthode non autorisée.' }) };
