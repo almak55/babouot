@@ -6,14 +6,17 @@
 //   gamme_operatoire_id: "uuid",   // l'étape précise à planifier
 //   date: "2026-10-06",
 //   machine_id: "uuid",
-//   personnel_id: "uuid"
+//   personnel_ids: ["uuid", ...]   // une ou plusieurs personnes (optionnel)
+//   personnel_id: "uuid"           // ancien format, toujours accepté
 // }
 //
-// Affecte une étape de gamme opératoire à une machine, une personne
-// et un jour donnés. Refuse l'affectation (409) si la machine ou la
-// personne est déjà prise ce jour-là, ou si la personne est absente.
+// Affecte une étape de gamme opératoire à une machine, à UNE ou
+// PLUSIEURS personnes, et à un jour donné. Refuse l'affectation (409)
+// si la machine est déjà prise ce jour-là, ou si l'une des personnes
+// est déjà prise ce jour-là ou absente (le message nomme la personne).
 //
-// Réponse : { planning_jour_id } ou { error, conflit: 'machine'|'personnel'|'absence' }
+// Réponse : { planning_jour_id, personnel_ids } ou
+//           { error, conflit: 'machine'|'personnel'|'absence' }
 
 const { getSupabase } = require('./lib/supabaseclient');
 
@@ -23,7 +26,11 @@ exports.handler = async (event) => {
       return { statusCode: 405, body: JSON.stringify({ error: 'Méthode non autorisée, utiliser POST.' }) };
     }
     const body = JSON.parse(event.body || '{}');
-    const { gamme_operatoire_id, date, machine_id, personnel_id } = body;
+    const { gamme_operatoire_id, date, machine_id } = body;
+    const personnelIds = Array.from(new Set([
+      ...(Array.isArray(body.personnel_ids) ? body.personnel_ids : []),
+      ...(body.personnel_id ? [body.personnel_id] : []),
+    ].filter(Boolean)));
 
     if (!gamme_operatoire_id || !date || !machine_id) {
       return {
@@ -90,34 +97,39 @@ exports.handler = async (event) => {
       };
     }
 
-    if (personnel_id) {
-      // Absence ce jour-là ?
-      const { data: absence, error: absError } = await supabase
+    if (personnelIds.length > 0) {
+      const { data: personnes, error: persNomError } = await supabase
+        .from('personnel').select('id, nom').in('id', personnelIds);
+      if (persNomError) throw persNomError;
+      const nomDe = (id) => (personnes.find((p) => p.id === id) || {}).nom || 'Une personne';
+
+      // Absences ce jour-là
+      const { data: absences, error: absError } = await supabase
         .from('personnel_planning_jour')
-        .select('statut')
-        .eq('personnel_id', personnel_id)
-        .eq('date', date)
-        .maybeSingle();
+        .select('personnel_id, statut')
+        .in('personnel_id', personnelIds)
+        .eq('date', date);
       if (absError) throw absError;
-      if (absence && (absence.statut === 'absent' || absence.statut === 'en arrêt')) {
+      const absent = absences.find((a) => a.statut === 'absent' || a.statut === 'en arrêt');
+      if (absent) {
         return {
           statusCode: 409,
-          body: JSON.stringify({ error: 'Cette personne est absente ce jour-là.', conflit: 'absence' }),
+          body: JSON.stringify({ error: `${nomDe(absent.personnel_id)} est absent(e) ou en arrêt ce jour-là.`, conflit: 'absence' }),
         };
       }
 
-      // Déjà affectée ailleurs ce jour-là ?
-      const { data: persOccupee, error: persError } = await supabase
-        .from('planning_jour')
-        .select('id')
-        .eq('personnel_id', personnel_id)
-        .eq('date', date)
-        .neq('statut', 'annulé');
+      // Déjà affectées ailleurs ce jour-là ? (via la table de liaison)
+      const { data: occupees, error: persError } = await supabase
+        .from('planning_jour_personnel')
+        .select('personnel_id, planning_jour!inner(date, statut)')
+        .in('personnel_id', personnelIds)
+        .eq('planning_jour.date', date)
+        .neq('planning_jour.statut', 'annulé');
       if (persError) throw persError;
-      if (persOccupee.length > 0) {
+      if (occupees.length > 0) {
         return {
           statusCode: 409,
-          body: JSON.stringify({ error: 'Cette personne est déjà affectée ailleurs ce jour-là.', conflit: 'personnel' }),
+          body: JSON.stringify({ error: `${nomDe(occupees[0].personnel_id)} est déjà affecté(e) ailleurs ce jour-là.`, conflit: 'personnel' }),
         };
       }
     }
@@ -125,7 +137,7 @@ exports.handler = async (event) => {
     const { data: creneau, error: insertError } = await supabase
       .from('planning_jour')
       .insert({
-        date, machine_id, personnel_id: personnel_id || null,
+        date, machine_id, personnel_id: personnelIds[0] || null, // 1re personne = référente (compatibilité)
         of_id: gamme.of_id,
         operation_id: gamme.operation_id,
         gamme_operatoire_id: gamme.id,
@@ -135,13 +147,20 @@ exports.handler = async (event) => {
       .single();
     if (insertError) throw insertError;
 
+    if (personnelIds.length > 0) {
+      const { error: linkError } = await supabase
+        .from('planning_jour_personnel')
+        .insert(personnelIds.map((pid) => ({ planning_jour_id: creneau.id, personnel_id: pid })));
+      if (linkError) throw linkError;
+    }
+
     const { error: updateError } = await supabase
       .from('gammes_operatoires')
       .update({ statut: 'planifié', machine_id })
       .eq('id', gamme.id);
     if (updateError) throw updateError;
 
-    return { statusCode: 200, body: JSON.stringify({ planning_jour_id: creneau.id }) };
+    return { statusCode: 200, body: JSON.stringify({ planning_jour_id: creneau.id, personnel_ids: personnelIds }) };
   } catch (err) {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
