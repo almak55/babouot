@@ -3,7 +3,7 @@
 // GET  /.netlify/functions/calculer-durees?of_id=uuid
 //   -> calcule la durée de chaque étape de gamme de l'OF et le total.
 // POST /.netlify/functions/calculer-durees
-//   body : { of_id, etapes: [ { gamme_id, machine_id?, parametres?, duree_manuelle_h?, predecesseurs? } ] }
+//   body : { of_id, caracteristiques?: { largeur_mm: 210, ... }, etapes: [ { gamme_id, machine_id?, parametres?, duree_manuelle_h?, predecesseurs? } ] }
 //   predecesseurs : numéros des étapes à terminer avant celle-ci (null = l'étape
 //   précédente ; [] = aucune dépendance). Seules des étapes de numéro inférieur sont acceptées.
 //   dependances : { "<n° d'étape>": { mode: "progressif", seuil_pct } } — l'étape démarre dès que
@@ -11,6 +11,10 @@
 //   -> enregistre d'abord les réglages des étapes (machine prévue,
 //      paramètres, durée manuelle), puis recalcule et mémorise la
 //      durée estimée de chaque étape (gammes_operatoires.duree_estimee_min).
+//
+//   caracteristiques : valeurs du PRODUIT, saisies une fois pour tout l'OF et reprises par
+//   toutes ses étapes (une valeur vide efface la caractéristique). Une étape peut
+//   toujours avoir sa propre valeur (parametres) qui prime sur celle de l'OF.
 //
 // La logique de calcul elle-même est dans lib/durees.js (partagée avec
 // la planification à l'heure).
@@ -31,6 +35,29 @@ exports.handler = async (event) => {
       const body = JSON.parse(event.body || '{}');
       ofId = body.of_id;
       if (!ofId) return { statusCode: 400, body: JSON.stringify({ error: 'of_id requis.' }) };
+
+      // Caractéristiques du produit (niveau OF) : fusionnées avec l'existant.
+      if (body.caracteristiques && typeof body.caracteristiques === 'object') {
+        const [{ data: ofRow, error: ofErr }, { data: cat, error: catErr }] = await Promise.all([
+          supabase.from('ordres_fabrication').select('caracteristiques').eq('id', ofId).maybeSingle(),
+          supabase.from('caracteristiques_produit').select('cle, type'),
+        ]);
+        if (ofErr) throw ofErr;
+        if (catErr) throw catErr;
+        const types = Object.fromEntries((cat || []).map((c) => [c.cle, c.type]));
+        const actuel = { ...((ofRow && ofRow.caracteristiques) || {}) };
+        Object.entries(body.caracteristiques).forEach(([cle, val]) => {
+          if (!/^[a-z][a-z0-9_]*$/.test(cle)) return;
+          if (val === null || val === undefined || String(val).trim() === '') { delete actuel[cle]; return; }
+          const n = nombreOuNull(val);
+          if (types[cle] === 'texte') actuel[cle] = String(val).trim();
+          else if (n !== null) actuel[cle] = n;
+          else if (types[cle] === 'nombre') avertissements.push(`« ${cle} » : valeur non numérique ignorée (« ${val} »).`);
+          else actuel[cle] = String(val).trim();
+        });
+        const { error: majErr } = await supabase.from('ordres_fabrication').update({ caracteristiques: actuel }).eq('id', ofId);
+        if (majErr) throw majErr;
+      }
 
       const { data: existantes, error: exError } = await supabase
         .from('gammes_operatoires').select('id, statut, sequence').eq('of_id', ofId);
@@ -98,7 +125,16 @@ exports.handler = async (event) => {
 
     const calcul = await calculerEtapes(supabase, ofId);
     if (!calcul) return { statusCode: 404, body: JSON.stringify({ error: 'OF introuvable.' }) };
-    const { of, etapes, calendrier } = calcul;
+    const { of, etapes, calendrier, catalogue } = calcul;
+
+    // Caractéristiques à renseigner pour cet OF : celles dont ses étapes ont besoin, dédoublonnées.
+    const produitRequis = [];
+    etapes.forEach((e) => e.parametres_requis.forEach((r) => {
+      if (!produitRequis.some((x) => x.cle === r.cle)) {
+        const v = of.caracteristiques[r.cle];
+        produitRequis.push({ ...r, valeur: v === undefined ? null : v });
+      }
+    }));
 
     if (sauvegarde) {
       for (const e of etapes) {
@@ -112,7 +148,9 @@ exports.handler = async (event) => {
     return {
       statusCode: 200,
       body: JSON.stringify({
-        of: { id: of.id, numero: of.numero, quantite: of.quantite },
+        of: { id: of.id, numero: of.numero, quantite: of.quantite, caracteristiques: of.caracteristiques },
+        catalogue,
+        produit_requis: produitRequis,
         etapes,
         totaux: {
           total_h: totalH,

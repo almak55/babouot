@@ -15,7 +15,12 @@
 //   par_element = duree_h x paramètre de l'étape (ex: nb_fers)
 //   cadence     = quantité / cadence_par_h  (quantité = paramètre
 //                 "quantite" de l'étape, sinon quantité de l'OF)
+//   formule     = résultat de la formule (en heures), avec les caractéristiques
+//                 du produit (largeur, nombre de pages…) et la quantité
+// Valeur d'une caractéristique : celle de l'étape si elle en a une, sinon celle de l'OF.
 // Une durée manuelle sur l'étape remplace le total calculé.
+
+const { analyser, evaluer } = require('./formules');
 
 const arrondi = (x) => Math.round(x * 100) / 100;
 const heures = (t) => { const [h, m] = String(t).split(':'); return Number(h) + Number(m) / 60; };
@@ -29,7 +34,7 @@ function nombreOuNull(v) {
 // Retourne { of, etapes, calendrier } ou null si l'OF n'existe pas.
 async function calculerEtapes(supabase, ofId) {
   const { data: of, error: ofError } = await supabase
-    .from('ordres_fabrication').select('id, numero, quantite, delai').eq('id', ofId).maybeSingle();
+    .from('ordres_fabrication').select('id, numero, quantite, delai, caracteristiques').eq('id', ofId).maybeSingle();
   if (ofError) throw ofError;
   if (!of) return null;
 
@@ -40,15 +45,21 @@ async function calculerEtapes(supabase, ofId) {
   if (gammesError) throw gammesError;
 
   const opIds = Array.from(new Set(gammes.map((g) => g.operation_id)));
-  const [phasesRes, machinesRes, machinesOpsRes, calRes] = await Promise.all([
+  const [phasesRes, machinesRes, machinesOpsRes, calRes, catalogueRes] = await Promise.all([
     opIds.length
       ? supabase.from('phases_standard').select('*').in('operation_id', opIds)
       : Promise.resolve({ data: [] }),
     supabase.from('machines').select('id, nom, operation_id').eq('actif', true),
     supabase.from('machines_operations').select('machine_id, operation_id'),
     supabase.from('calendrier_travail').select('*'),
+    supabase.from('caracteristiques_produit').select('cle, libelle, type, unite'),
   ]);
-  for (const r of [phasesRes, machinesRes, machinesOpsRes, calRes]) if (r.error) throw r.error;
+  for (const r of [phasesRes, machinesRes, machinesOpsRes, calRes, catalogueRes]) if (r.error) throw r.error;
+
+  const catalogue = catalogueRes.data || [];
+  const parCle = Object.fromEntries(catalogue.map((c) => [c.cle, c]));
+  const typesCar = Object.fromEntries(catalogue.map((c) => [c.cle, c.type]));
+  const caracteristiquesOf = of.caracteristiques || {};
 
   const etapes = gammes.map((g) => {
     const parametres = g.parametres || {};
@@ -61,22 +72,58 @@ async function calculerEtapes(supabase, ofId) {
     const quantiteEtape = nombreOuNull(parametres.quantite);
     const quantite = quantiteEtape !== null && quantiteEtape > 0 ? quantiteEtape : of.quantite;
 
+    // Valeur d'une caractéristique : propre à l'étape, sinon celle de l'OF.
+    const valeurDe = (cle) => {
+      const brut = parametres[cle] !== undefined && parametres[cle] !== null && String(parametres[cle]).trim() !== ''
+        ? parametres[cle] : caracteristiquesOf[cle];
+      return brut === undefined || brut === null || String(brut).trim() === '' ? null : brut;
+    };
+
     const manquants = [];
     const requis = [];
+    const erreursFormule = [];
+    const ajouterRequis = (cle, libelle, type, unite) => {
+      if (!requis.some((r) => r.cle === cle)) requis.push({ cle, libelle, type: type || 'nombre', unite: unite || null });
+    };
     const phases = utilisees.map((p) => {
       let d = 0; let detail = '';
       if (p.type_calcul === 'fixe') {
         d = Number(p.duree_h);
         detail = 'forfait';
       } else if (p.type_calcul === 'par_element') {
-        const valeur = nombreOuNull(parametres[p.element_param]);
-        if (!requis.some((r) => r.cle === p.element_param)) requis.push({ cle: p.element_param, libelle: p.element_label || p.element_param });
+        const valeur = nombreOuNull(valeurDe(p.element_param));
+        ajouterRequis(p.element_param, (parCle[p.element_param] && parCle[p.element_param].libelle) || p.element_label || p.element_param, 'nombre', parCle[p.element_param] && parCle[p.element_param].unite);
         if (valeur === null) {
           if (!manquants.includes(p.element_param)) manquants.push(p.element_param);
           detail = `${p.element_label || p.element_param} : non renseigné`;
         } else {
           d = Number(p.duree_h) * valeur;
           detail = `${p.duree_h} h × ${valeur} ${p.element_label || p.element_param}`;
+        }
+      } else if (p.type_calcul === 'formule') {
+        const a = analyser(p.formule);
+        if (!a.ok) {
+          erreursFormule.push({ phase: p.nom, message: a.erreur });
+          detail = `formule invalide : ${a.erreur}`;
+        } else {
+          const valeurs = {};
+          a.variables.forEach((v) => {
+            const info = v === 'quantite' ? { libelle: 'Quantité (exemplaires)', type: 'nombre', unite: null } : (parCle[v] || { libelle: v, type: 'nombre', unite: null });
+            if (v === 'quantite') valeurs[v] = quantite;
+            else { const val = valeurDe(v); if (val !== null) valeurs[v] = val; }
+            ajouterRequis(v, info.libelle, info.type, info.unite);
+          });
+          const r = evaluer(p.formule, valeurs, { ...typesCar, quantite: 'nombre' });
+          if (!r.ok) {
+            erreursFormule.push({ phase: p.nom, message: r.erreur });
+            detail = `erreur : ${r.erreur}`;
+          } else if (r.manquantes.length) {
+            r.manquantes.forEach((v) => { if (!manquants.includes(v)) manquants.push(v); });
+            detail = `${p.formule} — à renseigner : ${r.manquantes.join(', ')}`;
+          } else {
+            d = r.valeur;
+            detail = `${p.formule}  [${a.variables.map((v) => `${v} = ${valeurs[v]}`).join(', ')}]`;
+          }
         }
       } else {
         d = quantite / Number(p.cadence_par_h);
@@ -117,7 +164,8 @@ async function calculerEtapes(supabase, ofId) {
       source, phases,
       parametres, parametres_requis: requis, parametres_manquants: manquants,
       duree_manuelle_h: manuelle,
-      chiffre: source !== 'aucune' || manuelle !== null,
+      erreurs_formule: erreursFormule,
+      chiffre: (source !== 'aucune' && erreursFormule.length === 0) || manuelle !== null,
       total_h: arrondi(total),
       heures_machine: arrondi(heuresMachine),
       heures_personnes: arrondi(heuresPersonnes),
@@ -134,7 +182,7 @@ async function calculerEtapes(supabase, ofId) {
     };
   });
 
-  return { of, etapes, calendrier };
+  return { of: { ...of, caracteristiques: caracteristiquesOf }, etapes, calendrier, catalogue };
 }
 
 module.exports = { calculerEtapes, arrondi, nombreOuNull };

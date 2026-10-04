@@ -7,66 +7,26 @@
 // PUT    /.netlify/functions/gerer-temps-standards     (modification, id requis)
 //   body : {
 //     id?, operation_id, machine_id?, nom, ordre?,
-//     type_calcul: 'fixe' | 'par_element' | 'cadence',
+//     type_calcul: 'fixe' | 'par_element' | 'cadence' | 'formule',
 //     duree_h?,          // fixe : durée totale ; par_element : durée PAR élément
 //     cadence_par_h?,    // cadence : unités par heure
 //     element_param?, element_label?,   // par_element : clé + libellé du paramètre
+//     formule?,          // formule : expression donnant des HEURES (voir lib/formules.js)
 //     occupe_machine?, nb_personnes?
 //   }
+// POST   { action: 'copier', operation_id, source_machine_id?, cibles: [machine_id], remplacer? }
+//   -> copie les phases d'une machine (ou du standard de l'opération) vers d'autres
+//      machines, pour ne pas tout ressaisir. Une machine qui a déjà des phases pour
+//      cette opération est ignorée sauf si remplacer = true.
 // DELETE /.netlify/functions/gerer-temps-standards?id=uuid
 
 const { getSupabase } = require('./lib/supabaseclient');
+const { valider } = require('./lib/phases');
 
-const TYPES = ['fixe', 'par_element', 'cadence'];
-
-function nombre(v) {
-  if (v === null || v === undefined || v === '') return null;
-  const n = Number(String(v).replace(',', '.'));
-  return Number.isFinite(n) ? n : NaN;
-}
-
-function cleParam(s) {
-  return String(s || '').trim().toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-}
-
-// Valide et normalise le corps de la requête. Retourne { erreur } ou { valeurs }.
-function valider(body) {
-  const nom = String(body.nom || '').trim();
-  if (!body.operation_id) return { erreur: 'operation_id requis.' };
-  if (!nom) return { erreur: 'Le nom de la phase est requis.' };
-  if (!TYPES.includes(body.type_calcul)) return { erreur: `type_calcul invalide (${TYPES.join(', ')}).` };
-
-  const v = {
-    operation_id: body.operation_id,
-    machine_id: body.machine_id || null,
-    nom,
-    ordre: Number.isInteger(Number(body.ordre)) && Number(body.ordre) > 0 ? Number(body.ordre) : 1,
-    type_calcul: body.type_calcul,
-    duree_h: null, cadence_par_h: null, element_param: null, element_label: null,
-    occupe_machine: body.occupe_machine === undefined ? true : !!body.occupe_machine,
-    nb_personnes: Math.max(1, parseInt(body.nb_personnes, 10) || 1),
-  };
-
-  if (body.type_calcul === 'fixe') {
-    const d = nombre(body.duree_h);
-    if (d === null || Number.isNaN(d) || d < 0) return { erreur: 'Une durée (en heures, ≥ 0) est requise pour un forfait.' };
-    v.duree_h = d;
-  } else if (body.type_calcul === 'par_element') {
-    const d = nombre(body.duree_h);
-    if (d === null || Number.isNaN(d) || d < 0) return { erreur: 'Une durée par élément (en heures, ≥ 0) est requise.' };
-    const cle = cleParam(body.element_param || body.element_label);
-    if (!cle) return { erreur: 'Indiquez ce que l\'on compte (ex: « Nombre de fers »).' };
-    v.duree_h = d;
-    v.element_param = cle;
-    v.element_label = String(body.element_label || '').trim() || body.element_param;
-  } else {
-    const c = nombre(body.cadence_par_h);
-    if (c === null || Number.isNaN(c) || c <= 0) return { erreur: 'Une cadence (unités par heure, > 0) est requise.' };
-    v.cadence_par_h = c;
-  }
-  return { valeurs: v };
+async function cataloguePhases(supabase) {
+  const { data, error } = await supabase.from('caracteristiques_produit').select('cle');
+  if (error) throw error;
+  return new Set(data.map((c) => c.cle));
 }
 
 exports.handler = async (event) => {
@@ -88,7 +48,39 @@ exports.handler = async (event) => {
 
     if (event.httpMethod === 'POST' || event.httpMethod === 'PUT') {
       const body = JSON.parse(event.body || '{}');
-      const { erreur, valeurs } = valider(body);
+
+      // ---- Copie de réglages d'une machine vers d'autres ----
+      if (event.httpMethod === 'POST' && body.action === 'copier') {
+        const { operation_id, source_machine_id = null, remplacer = false } = body;
+        const cibles = Array.from(new Set(Array.isArray(body.cibles) ? body.cibles : [])).filter((m) => m && m !== source_machine_id);
+        if (!operation_id) return { statusCode: 400, body: JSON.stringify({ error: 'operation_id requis.' }) };
+        if (cibles.length === 0) return { statusCode: 400, body: JSON.stringify({ error: 'Choisissez au moins une machine de destination.' }) };
+
+        let q = supabase.from('phases_standard').select('*').eq('operation_id', operation_id);
+        q = source_machine_id ? q.eq('machine_id', source_machine_id) : q.is('machine_id', null);
+        const { data: source, error: srcError } = await q;
+        if (srcError) throw srcError;
+        if (source.length === 0) return { statusCode: 400, body: JSON.stringify({ error: 'Aucune phase à copier pour cette source.' }) };
+
+        const copiees = []; const ignorees = [];
+        for (const cible of cibles) {
+          const { data: existantes, error: exError } = await supabase
+            .from('phases_standard').select('id').eq('operation_id', operation_id).eq('machine_id', cible);
+          if (exError) throw exError;
+          if (existantes.length > 0 && !remplacer) { ignorees.push({ machine_id: cible, raison: 'a déjà des phases pour cette opération' }); continue; }
+          if (existantes.length > 0) {
+            const { error: delError } = await supabase.from('phases_standard').delete().eq('operation_id', operation_id).eq('machine_id', cible);
+            if (delError) throw delError;
+          }
+          const lignes = source.map(({ id, created_at, ...reste }) => ({ ...reste, machine_id: cible }));
+          const { error: insError } = await supabase.from('phases_standard').insert(lignes);
+          if (insError) throw insError;
+          copiees.push({ machine_id: cible, nb: lignes.length });
+        }
+        return { statusCode: 200, body: JSON.stringify({ copiees, ignorees }) };
+      }
+
+      const { erreur, valeurs } = valider(body, await cataloguePhases(supabase));
       if (erreur) return { statusCode: 400, body: JSON.stringify({ error: erreur }) };
 
       if (event.httpMethod === 'POST') {

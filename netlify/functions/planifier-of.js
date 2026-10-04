@@ -186,6 +186,7 @@ exports.handler = async (event) => {
         liens: liensDe(e),
         non_chiffre: !e.chiffre,
         parametres_manquants: e.parametres_manquants,
+        bloquants_chiffrage: (e.erreurs_formule || []).map((x) => ({ type: 'formule_erreur', detail: `${x.phase} : ${x.message}` })),
         phases,
         machine_imposee: imp.machine_id || e.machine_id || null,
         machines_candidates: e.machines_compatibles.map((m) => m.id),

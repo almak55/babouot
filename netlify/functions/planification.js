@@ -218,9 +218,13 @@ function simulerEtape(etape, machineId, curseur, ctx, charge) {
 function planifierEtape(etape, curseur, ctx, charge) {
   const vide = (problemes) => ({ index: etape.index, machine_id: null, phases: [], debut_min: null, fin_min: null, problemes });
   if (etape.non_chiffre) {
-    return vide([{ type: 'non_chiffre', bloquant: true, detail: 'Étape non chiffrée : aucun temps standard ni durée manuelle.' }]);
+    // Si on connaît la vraie cause (ex: formule invalide), on l'affiche plutôt que le message générique.
+    const causes = (etape.bloquants_chiffrage || []).map((b) => ({ type: b.type, bloquant: true, detail: b.detail }));
+    return vide(causes.length ? causes : [{ type: 'non_chiffre', bloquant: true, detail: 'Étape non chiffrée : aucun temps standard ni durée manuelle.' }]);
   }
   const problemes = [];
+  // Erreurs de chiffrage détectées en amont (ex: formule invalide) : bloquantes.
+  (etape.bloquants_chiffrage || []).forEach((b) => problemes.push({ type: b.type, bloquant: true, detail: b.detail }));
   if (etape.parametres_manquants && etape.parametres_manquants.length) {
     problemes.push({ type: 'parametres_manquants', bloquant: true, detail: 'Paramètres de chiffrage à renseigner : la durée est sous-estimée.' });
   }
