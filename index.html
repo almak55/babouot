@@ -432,6 +432,30 @@
   .gh-bar { position: absolute; top: 5px; height: 18px; border-radius: 5px; font-size: 9.5px; font-family: "IBM Plex Mono", monospace; color: #fff; display: flex; align-items: center; justify-content: center; overflow: hidden; white-space: nowrap; box-shadow: var(--shadow-sm); }
   .gh-bar.machine { background: var(--accent-teal); }
   .gh-bar.main { background: var(--accent-amber); color: #4A2E00; }
+  .formule-cell { font-size: 11.5px; color: var(--ink-700); }
+  .modal textarea { width: 100%; font-family: "IBM Plex Mono", monospace; font-size: 12.5px; padding: 9px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--field-bg); color: var(--ink-900); resize: vertical; }
+  .modal textarea:focus { border-color: var(--accent-teal); box-shadow: 0 0 0 3px var(--accent-teal-soft); outline: none; }
+  .chips { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 7px; }
+  .chips-label { font-size: 11px; color: var(--ink-500); margin-right: 2px; }
+  .chip-btn { border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink-900); border-radius: 999px; padding: 2px 9px; font-size: 11.5px; cursor: pointer; font-family: "IBM Plex Mono", monospace; }
+  .chip-btn:hover { border-color: var(--accent-teal); color: var(--accent-teal); }
+  .chip-btn.fn { background: var(--paper-raised-2); }
+  .chip-btn.ex { font-family: "IBM Plex Sans", sans-serif; font-style: italic; }
+  .aide-formule { margin-top: 8px; font-size: 12px; color: var(--ink-700); }
+  .aide-formule summary { cursor: pointer; color: var(--ink-500); }
+  .aide-formule p { margin: 6px 0 0; }
+  .aide-formule code { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; background: var(--paper-raised-2); padding: 1px 5px; border-radius: 4px; }
+  .apercu { margin-top: 10px; border: 1px dashed var(--line); border-radius: var(--radius-md); padding: 10px 12px; background: var(--paper-raised-2); }
+  .apercu-titre { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-500); margin-bottom: 6px; }
+  .apercu-champs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 12px; }
+  .apercu-champ { font-size: 11.5px; color: var(--ink-700); font-weight: 400; margin: 0; }
+  .apercu-champ input { width: 100%; margin-top: 3px; padding: 5px 8px; font-size: 12.5px; }
+  .apercu-note { font-size: 12px; color: var(--ink-500); margin-top: 6px; }
+  .apercu-res { font-size: 15px; margin-top: 8px; font-family: "Space Grotesk", sans-serif; }
+  .apercu-res span { font-size: 11.5px; color: var(--ink-500); font-family: "IBM Plex Sans", sans-serif; }
+  .produit-box { border: 1px solid var(--accent-teal); background: var(--accent-teal-soft); border-radius: var(--radius-md); padding: 11px 14px; margin-bottom: 12px; }
+  .produit-titre { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+  .import-lignes { max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-md); margin-top: 10px; }
   .pred-list { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--field-bg); }
   .pred-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
   .pred-name { font-size: 12.5px; min-width: 150px; }
@@ -1318,30 +1342,55 @@
   function decrirePhase(p) {
     if (p.type_calcul === 'fixe') return `Forfait ${fmtH(Number(p.duree_h))}`;
     if (p.type_calcul === 'par_element') return `${fmtH(Number(p.duree_h))} × ${p.element_label || p.element_param}`;
+    if (p.type_calcul === 'formule') return `<span class="mono formule-cell" title="${esc(p.formule)}">${esc(tronque(p.formule, 46))}</span>`;
     return `${Number(p.cadence_par_h)} / heure`;
   }
+  const etatTS = { phases: [] };   // phases affichées dans « Temps standards » (pour la copie de réglages)
 
   function renderTempsStandards() {
     const wrap = el(`
+      <div>
       <div class="panel">
         <div class="panel-head">
           <h2>Phases de travail standard</h2>
-          <div style="display:flex; gap:10px; align-items:center;">
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
             <select id="ts-filtre" style="min-width:170px;"><option value="">Toutes les opérations</option></select>
+            <button class="btn" id="ts-copie" title="Copier les réglages d'une machine vers d'autres machines">Copier vers…</button>
+            <button class="btn" id="ts-export" title="Exporter au format Excel (sert aussi de modèle à remplir)">Exporter Excel</button>
+            <button class="btn" id="ts-import" title="Importer un fichier Excel">Importer Excel</button>
+            <input type="file" id="ts-import-file" accept=".xlsx" class="hidden">
             <button class="btn primary" id="ts-new">${svgIcon('<path d="M12 5v14M5 12h14"/>')}Nouvelle phase</button>
           </div>
         </div>
         <div style="padding:12px 18px; font-size:12px; color:var(--ink-500); border-bottom:1px solid var(--line);">
-          Une phase <strong>sans machine</strong> est le standard de l'opération. Une phase <strong>rattachée à une machine</strong> la remplace pour cette machine (chaque machine a ses propres réglages et cadences).
+          Une phase <strong>sans machine</strong> est le standard de l'opération. Une phase <strong>rattachée à une machine</strong> la remplace pour cette machine. Chaque phase se calcule en <strong>forfait</strong>, <strong>durée × un nombre</strong>, <strong>cadence</strong> ou par <strong>formule</strong> selon les caractéristiques du produit (largeur, nombre de pages, grammage…).
         </div>
         <table>
           <thead><tr><th>Opération</th><th>Machine</th><th>Phase</th><th>Calcul</th><th>Occupe la machine</th><th>Pers.</th><th></th></tr></thead>
           <tbody id="ts-tbody"><tr><td colspan="7" class="empty">Chargement…</td></tr></tbody>
         </table>
       </div>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Caractéristiques produit <span class="plan-note">— variables utilisables dans les formules</span></h2>
+          <button class="btn primary" id="car-new">${svgIcon('<path d="M12 5v14M5 12h14"/>')}Nouvelle caractéristique</button>
+        </div>
+        <table>
+          <thead><tr><th>Clé (dans les formules)</th><th>Libellé</th><th>Type</th><th>Unité</th><th></th></tr></thead>
+          <tbody id="car-tbody"><tr><td colspan="5" class="empty">Chargement…</td></tr></tbody>
+        </table>
+      </div>
+      </div>
     `);
     wrap.querySelector('#ts-new').addEventListener('click', () => ouvrirModalePhase(null));
+    wrap.querySelector('#ts-copie').addEventListener('click', () => ouvrirModaleCopie());
+    wrap.querySelector('#ts-export').addEventListener('click', () => exporterExcel());
+    const fichier = wrap.querySelector('#ts-import-file');
+    wrap.querySelector('#ts-import').addEventListener('click', () => fichier.click());
+    fichier.addEventListener('change', () => { const f = fichier.files[0]; fichier.value = ''; if (f) ouvrirModaleImport(f); });
+    wrap.querySelector('#car-new').addEventListener('click', () => ouvrirModaleCaracteristique(null));
     chargerPhases(wrap);
+    chargerCaracteristiques(wrap);
     return wrap;
   }
 
@@ -1352,6 +1401,7 @@
       const res = await fetch(`${API}/gerer-temps-standards`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const phases = await res.json();
+      etatTS.phases = phases;
 
       const ops = Array.from(new Map(phases.map(p => [p.operation_id, p.operations.nom])).entries())
         .sort((a, b) => a[1].localeCompare(b[1], 'fr'));
@@ -1410,65 +1460,132 @@
   }
 
   async function ouvrirModalePhase(phase) {
-    let refs;
-    try { refs = await getReferentiels(); }
-    catch (e) { toast(`Backend indisponible : ${e.message}`, 'error'); return; }
+    let refs; let catalogue = [];
+    try {
+      refs = await getReferentiels();
+      const rc = await fetch(`${API}/gerer-caracteristiques`);
+      if (rc.ok) { const j = await rc.json(); catalogue = Array.isArray(j) ? j : []; }
+    } catch (e) { toast(`Backend indisponible : ${e.message}`, 'error'); return; }
 
     const estEdition = !!phase;
-    const opOptions = refs.operations.map(o => `<option value="${o.id}" ${phase && phase.operation_id === o.id ? 'selected' : ''}>${o.nom}</option>`).join('');
+    const opOptions = refs.operations.map(o => `<option value="${o.id}" ${phase && phase.operation_id === o.id ? 'selected' : ''}>${esc(o.nom)}</option>`).join('');
     const machOptions = `<option value="">— Standard de l'opération (toutes machines) —</option>` +
       refs.machines.slice().sort((a, b) => a.nom.localeCompare(b.nom, 'fr'))
-        .map(m => `<option value="${m.id}" ${phase && phase.machine_id === m.id ? 'selected' : ''}>${m.nom}</option>`).join('');
+        .map(m => `<option value="${m.id}" ${phase && phase.machine_id === m.id ? 'selected' : ''}>${esc(m.nom)}</option>`).join('');
     const type = phase ? phase.type_calcul : 'fixe';
+
+    const chipsVariables = [{ cle: 'quantite', libelle: 'Quantité (exemplaires)', unite: null }, ...catalogue]
+      .map(v => `<button type="button" class="chip-btn" data-ins="${v.cle}" title="${esc(v.libelle)}${v.unite ? ' (' + esc(v.unite) + ')' : ''}">${v.cle}</button>`).join('');
+    const chipsFonctions = [['si(condition; si_vrai; si_faux)', 'si'], ['min(a; b)', 'min'], ['max(a; b)', 'max'], ['arrondi(x; 2)', 'arrondi'], ['plafond(x; 0,25)', 'plafond'], ['plancher(x; 1)', 'plancher']]
+      .map(([t, n]) => `<button type="button" class="chip-btn fn" data-ins="${esc(t)}" title="${esc(t)}">${n}( )</button>`).join('');
+    const exemples = [['0,5 + 0,002 * largeur_mm', 'forfait + par mm'], ['si(largeur_mm > 300; 1; 0,75)', 'selon une condition'], ['quantite / si(grammage_g > 150; 6000; 9000)', 'cadence variable'], ['max(0,5; quantite / 2000)', 'avec un minimum']]
+      .map(([t, n]) => `<button type="button" class="chip-btn ex" data-ex="${esc(t)}" title="${esc(t)}">${n}</button>`).join('');
 
     afficherModale(`
       <h3>${estEdition ? 'Modifier la phase' : 'Nouvelle phase de travail'}</h3>
       <div class="field"><label>Opération</label><select id="ph-op">${opOptions}</select></div>
       <div class="field"><label>Machine concernée</label><select id="ph-machine">${machOptions}</select></div>
-      <div class="field"><label>Nom de la phase</label><input id="ph-nom" value="${phase ? phase.nom : ''}" placeholder="ex: Mise en route, Réglage, Roulage, Nettoyage"></div>
+      <div class="field"><label>Nom de la phase</label><input id="ph-nom" value="${esc(phase ? phase.nom : '')}" placeholder="ex: Mise en route, Réglage, Roulage, Nettoyage"></div>
       <div class="field"><label>Ordre dans l'opération</label><input id="ph-ordre" type="number" min="1" value="${phase ? phase.ordre : 1}"></div>
       <div class="field"><label>Mode de calcul</label>
         <select id="ph-type">
           <option value="fixe" ${type === 'fixe' ? 'selected' : ''}>Forfait (durée fixe)</option>
           <option value="par_element" ${type === 'par_element' ? 'selected' : ''}>Durée × un nombre (ex: par fer)</option>
           <option value="cadence" ${type === 'cadence' ? 'selected' : ''}>Cadence (unités par heure)</option>
+          <option value="formule" ${type === 'formule' ? 'selected' : ''}>Formule (selon les caractéristiques du produit)</option>
         </select>
       </div>
       <div class="field" id="ph-duree-wrap"><label id="ph-duree-label">Durée (heures)</label><input id="ph-duree" type="number" min="0" step="any" value="${phase && phase.duree_h !== null ? phase.duree_h : ''}" placeholder="ex: 0.5 pour 30 min"></div>
-      <div class="field" id="ph-element-wrap"><label>Ce que l'on compte</label><input id="ph-element" value="${phase && phase.element_label ? phase.element_label : ''}" placeholder="ex: Nombre de fers"></div>
+      <div class="field" id="ph-element-wrap"><label>Ce que l'on compte</label><input id="ph-element" value="${esc(phase && phase.element_label ? phase.element_label : '')}" placeholder="ex: Nombre de fers"></div>
       <div class="field" id="ph-cadence-wrap"><label>Cadence (unités par heure)</label><input id="ph-cadence" type="number" min="0" step="any" value="${phase && phase.cadence_par_h !== null ? phase.cadence_par_h : ''}" placeholder="ex: 400"></div>
+      <div class="field" id="ph-formule-wrap">
+        <label>Formule — le résultat est une durée en <strong>heures</strong></label>
+        <textarea id="ph-formule" rows="3" spellcheck="false" placeholder="ex : 0,5 + 0,002 * largeur_mm">${esc(phase && phase.formule ? phase.formule : '')}</textarea>
+        <div class="chips"><span class="chips-label">Caractéristiques :</span>${chipsVariables}</div>
+        <div class="chips"><span class="chips-label">Fonctions :</span>${chipsFonctions}</div>
+        <div class="chips"><span class="chips-label">Exemples :</span>${exemples}</div>
+        <details class="aide-formule"><summary>Aide sur les formules</summary>
+          <p>Opérateurs <code>+ - * / %</code>, comparaisons <code>== != &lt; &lt;= &gt; &gt;=</code>, logique <code>et ou non</code>. Les arguments se séparent par <code>;</code>. Le texte se met entre guillemets : <code>si(papier == "couché"; 1; 0,5)</code> (casse et accents ignorés).</p>
+          <p><code>si(condition; si_vrai; si_faux)</code> · <code>min(…)</code> · <code>max(…)</code> · <code>abs(x)</code> · <code>arrondi(x; décimales)</code> · <code>plafond(x; pas)</code> · <code>plancher(x; pas)</code></p>
+          <p>Les caractéristiques (largeur, grammage…) se créent dans le panneau « Caractéristiques produit » ; <code>quantite</code> est le nombre d'exemplaires.</p>
+        </details>
+        <div class="apercu"><div class="apercu-titre">Aperçu — essayez des valeurs</div><div id="ph-apercu-champs" class="apercu-champs"></div><div id="ph-resultat"></div></div>
+      </div>
       <div class="field"><label>Nombre de personnes requises</label><input id="ph-pers" type="number" min="1" value="${phase ? phase.nb_personnes : 1}"></div>
       <div class="field"><label><input type="checkbox" id="ph-occupe" ${!phase || phase.occupe_machine ? 'checked' : ''}> Cette phase occupe la machine</label></div>
       <div id="m-msg"></div>
       <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">${estEdition ? 'Enregistrer' : 'Créer'}</button></div>
-    `);
+    `, 'large');
 
-    const typeSel = document.getElementById('ph-type');
+    const $ = (id) => document.getElementById(id);
+    const typeSel = $('ph-type');
+    const ta = $('ph-formule');
     function majChamps() {
       const t = typeSel.value;
-      document.getElementById('ph-duree-wrap').classList.toggle('hidden', t === 'cadence');
-      document.getElementById('ph-element-wrap').classList.toggle('hidden', t !== 'par_element');
-      document.getElementById('ph-cadence-wrap').classList.toggle('hidden', t !== 'cadence');
-      document.getElementById('ph-duree-label').textContent = t === 'par_element' ? 'Durée pour chaque élément (heures)' : 'Durée (heures)';
+      $('ph-duree-wrap').classList.toggle('hidden', t === 'cadence' || t === 'formule');
+      $('ph-element-wrap').classList.toggle('hidden', t !== 'par_element');
+      $('ph-cadence-wrap').classList.toggle('hidden', t !== 'cadence');
+      $('ph-formule-wrap').classList.toggle('hidden', t !== 'formule');
+      $('ph-duree-label').textContent = t === 'par_element' ? 'Durée pour chaque élément (heures)' : 'Durée (heures)';
+      if (t === 'formule') planifierApercu();
     }
+
+    // ----- Aperçu en direct de la formule -----
+    const valeursApercu = {};
+    let clesAffichees = null; let minuterie = null; let compteur = 0;
+    function planifierApercu() { clearTimeout(minuterie); minuterie = setTimeout(majApercu, 300); }
+    async function majApercu() {
+      if (!document.getElementById('ph-formule')) return;
+      const f = ta.value.trim();
+      const champs = $('ph-apercu-champs'); const resultat = $('ph-resultat');
+      if (!f) { champs.innerHTML = ''; clesAffichees = null; resultat.innerHTML = '<div class="apercu-note">Saisissez une formule pour voir le résultat.</div>'; return; }
+      const mon = ++compteur;
+      let d;
+      try {
+        const res = await fetch(`${API}/evaluer-formule`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ formule: f, valeurs: valeursApercu }) });
+        d = await res.json();
+        if (!res.ok) throw new Error(d.error || 'Erreur');
+      } catch (e) { if (mon === compteur) resultat.innerHTML = `<div class="msg error">Aperçu indisponible : ${esc(e.message)}</div>`; return; }
+      if (mon !== compteur || !document.getElementById('ph-formule')) return;   // réponse périmée
+      const cles = d.variables.map(v => v.cle).join();
+      if (cles !== clesAffichees) {
+        clesAffichees = cles;
+        champs.innerHTML = d.variables.map(v => `
+          <label class="apercu-champ">${esc(v.libelle)}${v.unite ? ' (' + esc(v.unite) + ')' : ''}${v.connue ? '' : ' <em>— inconnue</em>'}
+            <input data-cle="${v.cle}" type="${v.type === 'texte' ? 'text' : 'text'}" inputmode="${v.type === 'texte' ? 'text' : 'decimal'}" value="${esc(valeursApercu[v.cle] ?? '')}"></label>`).join('');
+        champs.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => { valeursApercu[inp.dataset.cle] = inp.value; planifierApercu(); }));
+      }
+      if (d.erreur) resultat.innerHTML = `<div class="msg error">${esc(d.erreur)}</div>`;
+      else if (d.valeur_h === null) resultat.innerHTML = '<div class="apercu-note">Renseignez les valeurs ci-dessus pour voir le résultat.</div>';
+      else resultat.innerHTML = `<div class="apercu-res">= <strong>${fmtH(d.valeur_h)}</strong> <span>(${d.valeur_h.toLocaleString('fr-FR')} h)</span></div>`;
+    }
+    ta.addEventListener('input', planifierApercu);
+    document.querySelectorAll('.chip-btn[data-ins]').forEach(b => b.addEventListener('click', () => {
+      const t = b.dataset.ins; const d = ta.selectionStart ?? ta.value.length; const f = ta.selectionEnd ?? d;
+      ta.value = ta.value.slice(0, d) + t + ta.value.slice(f);
+      ta.focus(); ta.selectionStart = ta.selectionEnd = d + t.length; planifierApercu();
+    }));
+    document.querySelectorAll('.chip-btn[data-ex]').forEach(b => b.addEventListener('click', () => { ta.value = b.dataset.ex; ta.focus(); planifierApercu(); }));
+
     typeSel.addEventListener('change', majChamps);
     majChamps();
 
-    document.getElementById('m-cancel').addEventListener('click', fermerModale);
-    document.getElementById('m-submit').addEventListener('click', async () => {
-      const msg = document.getElementById('m-msg');
+    $('m-cancel').addEventListener('click', fermerModale);
+    $('m-submit').addEventListener('click', async () => {
+      const msg = $('m-msg');
       const payload = {
         id: phase ? phase.id : undefined,
-        operation_id: document.getElementById('ph-op').value,
-        machine_id: document.getElementById('ph-machine').value || null,
-        nom: document.getElementById('ph-nom').value.trim(),
-        ordre: document.getElementById('ph-ordre').value,
+        operation_id: $('ph-op').value,
+        machine_id: $('ph-machine').value || null,
+        nom: $('ph-nom').value.trim(),
+        ordre: $('ph-ordre').value,
         type_calcul: typeSel.value,
-        duree_h: document.getElementById('ph-duree').value,
-        cadence_par_h: document.getElementById('ph-cadence').value,
-        element_label: document.getElementById('ph-element').value.trim(),
-        nb_personnes: document.getElementById('ph-pers').value,
-        occupe_machine: document.getElementById('ph-occupe').checked,
+        duree_h: $('ph-duree').value,
+        cadence_par_h: $('ph-cadence').value,
+        element_label: $('ph-element').value.trim(),
+        formule: ta.value.trim(),
+        nb_personnes: $('ph-pers').value,
+        occupe_machine: $('ph-occupe').checked,
       };
       msg.innerHTML = `<div class="msg">Enregistrement…</div>`;
       try {
@@ -1482,9 +1599,219 @@
         toast(estEdition ? 'Phase mise à jour.' : 'Phase créée.');
         fermerModale(); render();
       } catch (e) {
-        msg.innerHTML = `<div class="msg error">${e.message}</div>`;
+        msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`;
       }
     });
+  }
+
+  // ----- Caractéristiques produit -----
+  async function chargerCaracteristiques(wrap) {
+    const tbody = wrap.querySelector('#car-tbody');
+    try {
+      const res = await fetch(`${API}/gerer-caracteristiques`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const liste = await res.json();
+      if (liste.length === 0) { tbody.innerHTML = '<tr><td colspan="5" class="empty">Aucune caractéristique. Créez-en pour pouvoir les utiliser dans des formules.</td></tr>'; return; }
+      tbody.innerHTML = '';
+      liste.forEach(c => {
+        tbody.appendChild(el(`
+          <tr>
+            <td class="mono">${esc(c.cle)}</td><td>${esc(c.libelle)}</td>
+            <td><span class="chip">${c.type === 'texte' ? 'Texte' : 'Nombre'}</span></td><td>${esc(c.unite || '—')}</td>
+            <td style="white-space:nowrap;">
+              <button class="btn car-edit" data-cle="${c.cle}">Modifier</button>
+              <button class="btn btn-icon-danger car-del" data-cle="${c.cle}" aria-label="Supprimer ${esc(c.libelle)}">${svgIcon('<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/>')}</button>
+            </td>
+          </tr>`));
+      });
+      tbody.querySelectorAll('.car-edit').forEach(b => b.addEventListener('click', () => ouvrirModaleCaracteristique(liste.find(x => x.cle === b.dataset.cle))));
+      tbody.querySelectorAll('.car-del').forEach(b => b.addEventListener('click', () => {
+        const c = liste.find(x => x.cle === b.dataset.cle);
+        afficherModale(`
+          <h3>Supprimer « ${esc(c.libelle)} » ?</h3>
+          <p style="font-size:13px; color:var(--ink-700); margin:0;">La caractéristique <span class="mono">${esc(c.cle)}</span> sera retirée. Elle ne peut pas être supprimée tant qu'une phase l'utilise.</p>
+          <div id="m-msg"></div>
+          <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn danger-btn" id="m-confirm-delete">Supprimer</button></div>`);
+        document.getElementById('m-cancel').addEventListener('click', fermerModale);
+        document.getElementById('m-confirm-delete').addEventListener('click', async () => {
+          const msg = document.getElementById('m-msg');
+          try {
+            const r = await fetch(`${API}/gerer-caracteristiques?cle=${encodeURIComponent(c.cle)}`, { method: 'DELETE' });
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error || 'Erreur inconnue');
+            toast('Caractéristique supprimée.'); fermerModale(); render();
+          } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+        });
+      }));
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="5" class="empty">Backend indisponible. (${esc(e.message)})</td></tr>`;
+    }
+  }
+
+  const cleDepuisLibelle = (s) => {
+    let k = String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    return /^[0-9]/.test(k) ? 'c_' + k : k;
+  };
+
+  function ouvrirModaleCaracteristique(car) {
+    const edition = !!car;
+    afficherModale(`
+      <h3>${edition ? 'Modifier la caractéristique' : 'Nouvelle caractéristique produit'}</h3>
+      <div class="field"><label>Libellé</label><input id="car-libelle" value="${esc(car ? car.libelle : '')}" placeholder="ex : Largeur de couverture"></div>
+      <div class="field"><label>Clé — nom utilisé dans les formules</label>
+        <input id="car-cle" value="${esc(car ? car.cle : '')}" ${edition ? 'disabled' : ''} placeholder="déduite du libellé (ex : largeur_de_couverture)">
+        <small style="color:var(--ink-500); font-size:11px; margin-top:3px;">${edition ? 'La clé ne peut pas être modifiée (des formules peuvent l\'utiliser).' : 'Lettres minuscules, chiffres et « _ ». Laissez vide pour la déduire du libellé.'}</small></div>
+      <div class="field"><label>Type</label>
+        <select id="car-type"><option value="nombre" ${!car || car.type === 'nombre' ? 'selected' : ''}>Nombre (largeur, pages, grammage…)</option><option value="texte" ${car && car.type === 'texte' ? 'selected' : ''}>Texte (papier, finition…)</option></select></div>
+      <div class="field"><label>Unité (facultatif)</label><input id="car-unite" value="${esc(car && car.unite ? car.unite : '')}" placeholder="ex : mm, g, pages"></div>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">${edition ? 'Enregistrer' : 'Créer'}</button></div>`);
+    const lib = document.getElementById('car-libelle'); const cle = document.getElementById('car-cle');
+    if (!edition) lib.addEventListener('input', () => { if (!cle.dataset.touche) cle.placeholder = cleDepuisLibelle(lib.value) || 'déduite du libellé'; });
+    cle.addEventListener('input', () => { cle.dataset.touche = '1'; });
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.getElementById('m-submit').addEventListener('click', async () => {
+      const msg = document.getElementById('m-msg');
+      const corps = { libelle: lib.value.trim(), type: document.getElementById('car-type').value, unite: document.getElementById('car-unite').value.trim() };
+      if (edition) corps.cle = car.cle; else if (cle.value.trim()) corps.cle = cle.value.trim();
+      msg.innerHTML = '<div class="msg">Enregistrement…</div>';
+      try {
+        const res = await fetch(`${API}/gerer-caracteristiques`, { method: edition ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        toast(edition ? 'Caractéristique mise à jour.' : `Caractéristique « ${d.cle} » créée.`); fermerModale(); render();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
+  }
+
+  // ----- Copier les réglages d'une machine vers d'autres -----
+  async function ouvrirModaleCopie() {
+    let refs;
+    try { refs = await getReferentiels(); } catch (e) { toast(`Backend indisponible : ${e.message}`, 'error'); return; }
+    const phases = etatTS.phases;
+    if (!phases.length) { toast('Aucune phase à copier : créez d\'abord des phases.', 'error'); return; }
+    const ops = Array.from(new Map(phases.map(p => [p.operation_id, p.operations.nom])).entries()).sort((a, b) => a[1].localeCompare(b[1], 'fr'));
+
+    afficherModale(`
+      <h3>Copier des réglages vers d'autres machines</h3>
+      <p style="font-size:12.5px; color:var(--ink-700); margin:0 0 12px;">Reprend toutes les phases d'une opération pour une machine (ou le standard de l'opération) et les recopie sur les machines choisies, où vous pourrez ensuite les ajuster.</p>
+      <div class="field"><label>Opération</label><select id="cp-op">${ops.map(([id, nom]) => `<option value="${id}">${esc(nom)}</option>`).join('')}</select></div>
+      <div class="field"><label>Copier les phases de…</label><select id="cp-source"></select></div>
+      <div class="field"><label>…vers ces machines</label><div class="op-list" id="cp-cibles"></div></div>
+      <div class="field"><label><input type="checkbox" id="cp-remplacer"> Remplacer les phases déjà définies sur les machines de destination</label></div>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">Copier</button></div>`);
+    const $ = (id) => document.getElementById(id);
+    const nomMachine = (id) => (refs.machines.find(m => m.id === id) || { nom: '?' }).nom;
+    function majSources() {
+      const op = $('cp-op').value;
+      const ids = Array.from(new Set(phases.filter(p => p.operation_id === op).map(p => p.machine_id || '')));
+      $('cp-source').innerHTML = ids.sort().map(id => `<option value="${id}">${id === '' ? 'Standard de l\'opération' : esc(nomMachine(id))}</option>`).join('');
+      majCibles();
+    }
+    function majCibles() {
+      const op = $('cp-op').value; const src = $('cp-source').value;
+      $('cp-cibles').innerHTML = refs.machines.filter(m => m.id !== src).sort((a, b) => a.nom.localeCompare(b.nom, 'fr')).map(m => {
+        const deja = phases.some(p => p.operation_id === op && p.machine_id === m.id);
+        return `<label><input type="checkbox" class="cp-cible" value="${m.id}"> ${esc(m.nom)}${deja ? ' <em style="color:var(--ink-500)">— a déjà des phases</em>' : ''}</label>`;
+      }).join('');
+    }
+    $('cp-op').addEventListener('change', majSources);
+    $('cp-source').addEventListener('change', majCibles);
+    majSources();
+    $('m-cancel').addEventListener('click', fermerModale);
+    $('m-submit').addEventListener('click', async () => {
+      const msg = $('m-msg');
+      const cibles = Array.from(document.querySelectorAll('.cp-cible:checked')).map(i => i.value);
+      if (!cibles.length) { msg.innerHTML = '<div class="msg error">Choisissez au moins une machine de destination.</div>'; return; }
+      msg.innerHTML = '<div class="msg">Copie en cours…</div>';
+      try {
+        const res = await fetch(`${API}/gerer-temps-standards`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'copier', operation_id: $('cp-op').value, source_machine_id: $('cp-source').value || null, cibles, remplacer: $('cp-remplacer').checked }) });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        const ign = d.ignorees.length ? ` ${d.ignorees.length} ignorée(s) (déjà des phases : ${d.ignorees.map(x => esc(nomMachine(x.machine_id))).join(', ')}).` : '';
+        toast(`Phases copiées vers ${d.copiees.length} machine(s).${ign}`, d.copiees.length ? 'ok' : 'error');
+        fermerModale(); render();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
+  }
+
+  // ----- Export / import Excel -----
+  async function exporterExcel() {
+    try {
+      const res = await fetch(`${API}/exporter-temps-standards`);
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+      const bin = atob(d.fichier_base64); const octets = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) octets[i] = bin.charCodeAt(i);
+      const blob = new Blob([octets], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = d.nom;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      toast(`Fichier « ${d.nom} » téléchargé.`);
+    } catch (e) { toast(`Export impossible : ${e.message}`, 'error'); }
+  }
+
+  async function ouvrirModaleImport(fichier) {
+    afficherModale(`<h3>Import Excel — ${esc(fichier.name)}</h3><div class="empty">Analyse du fichier…</div>`, 'large');
+    let base64;
+    const appeler = async (options) => {
+      const res = await fetch(`${API}/importer-temps-standards`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fichier_base64: base64, ...options }) });
+      return { ok: res.ok, status: res.status, data: await res.json() };
+    };
+    try {
+      base64 = await fichierEnBase64(fichier);
+      const { ok: ok_, data } = await appeler({ appliquer: false });
+      if (!ok_) throw new Error(data.error || 'Erreur inconnue');
+      const r = data.resume;
+      const lignes = [...data.caracteristiques.map(x => ({ ...x, feuille: 'Caractéristiques' })), ...data.phases.map(x => ({ ...x, feuille: 'Phases' }))];
+      const enErreur = lignes.filter(x => x.statut === 'erreur');
+      const STATUT = { creation: ['ok', 'À créer'], mise_a_jour: ['warn', 'À mettre à jour'], inchangee: ['', 'Inchangée'], erreur: ['danger', 'Erreur'] };
+      const aImporter = r.creations + r.mises_a_jour;
+      afficherModale(`
+        <h3>Import Excel — ${esc(fichier.name)}</h3>
+        <div class="plan-resume">
+          <div><span class="plan-k">À créer</span><strong>${r.creations}</strong></div>
+          <div><span class="plan-k">À mettre à jour</span><strong>${r.mises_a_jour}</strong></div>
+          <div><span class="plan-k">Inchangées</span><strong>${r.inchangees}</strong></div>
+          <div><span class="plan-k">En erreur</span><strong style="color:${r.erreurs ? 'var(--danger-text)' : 'inherit'}">${r.erreurs}</strong></div>
+        </div>
+        ${enErreur.length ? `<div class="plan-bloquants"><strong>À corriger dans le fichier :</strong><ul>${enErreur.slice(0, 40).map(x => `<li>${esc(x.feuille)}, ligne ${x.ligne} — ${esc(x.resume)} : ${esc(x.erreur)}</li>`).join('')}</ul>${enErreur.length > 40 ? `<div>… et ${enErreur.length - 40} autre(s).</div>` : ''}</div>` : ''}
+        <div class="import-lignes"><table>
+          <thead><tr><th>Feuille</th><th>Ligne</th><th>Contenu</th><th>Statut</th></tr></thead>
+          <tbody>${lignes.filter(x => x.statut !== 'erreur').slice(0, 60).map(x => `<tr><td>${esc(x.feuille)}</td><td class="mono">${x.ligne}</td><td>${esc(x.resume)}</td><td><span class="tag ${STATUT[x.statut][0]}" ${x.statut === 'inchangee' ? 'style="background:var(--paper-raised-2); color:var(--ink-700);"' : ''}>${STATUT[x.statut][1]}</span></td></tr>`).join('') || '<tr><td colspan="4" class="empty">Aucune ligne valide.</td></tr>'}</tbody>
+        </table></div>
+        ${data.phases_tronquees ? '<div class="plan-note" style="margin-top:6px;">Aperçu limité aux 400 premières phases ; le bilan ci-dessus porte sur tout le fichier.</div>' : ''}
+        <div class="plan-note" style="margin-top:8px;">Rien n'est supprimé : les phases absentes du fichier restent en place.</div>
+        <div id="m-msg"></div>
+        <div class="actions">
+          <button class="btn" id="m-cancel">Annuler</button>
+          ${r.erreurs > 0 && aImporter > 0 ? `<button class="btn" id="imp-valides">Importer seulement les lignes valides (${aImporter})</button>` : ''}
+          <button class="btn primary" id="imp-appliquer" ${r.erreurs > 0 || aImporter === 0 ? 'disabled' : ''}>Appliquer l'import</button>
+        </div>`, 'large');
+      document.getElementById('m-cancel').addEventListener('click', fermerModale);
+      const lancer = (options) => async () => {
+        const msg = document.getElementById('m-msg');
+        msg.innerHTML = '<div class="msg">Import en cours…</div>';
+        document.querySelectorAll('.actions .btn').forEach(b => { b.disabled = true; });
+        try {
+          const rep = await appeler({ appliquer: true, ...options });
+          if (!rep.ok) throw new Error(rep.data.error || 'Erreur inconnue');
+          toast(`Import terminé : ${rep.data.resume.creations} créée(s), ${rep.data.resume.mises_a_jour} mise(s) à jour.`);
+          fermerModale(); render();
+        } catch (e) {
+          msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`;
+          document.querySelectorAll('.actions .btn').forEach(b => { b.disabled = false; });
+        }
+      };
+      document.getElementById('imp-appliquer').addEventListener('click', lancer({}));
+      const bv = document.getElementById('imp-valides'); if (bv) bv.addEventListener('click', lancer({ ignorer_erreurs: true }));
+    } catch (e) {
+      afficherModale(`<h3>Import Excel</h3><div class="msg error">${esc(e.message)}</div><div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`);
+      document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    }
   }
 
   // ---------- Planification à l'heure ----------
@@ -1781,11 +2108,12 @@
       const verrou = e.statut !== 'à planifier';
       const machOptions = `<option value="">— Standard de l'opération —</option>` + e.machines_compatibles
         .map(m => `<option value="${m.id}" ${m.id === e.machine_id ? 'selected' : ''}>${m.nom}${m.temps_specifiques ? ' ✓' : ''}</option>`).join('');
-      const paramsHtml = e.parametres_requis.map(p => `
-        <div class="field"><label>${p.libelle}</label>
-          <input class="s-param" data-cle="${p.cle}" type="number" min="0" step="any" value="${e.parametres[p.cle] ?? ''}"></div>`).join('');
+      const valeurProduit = (cle) => { const v = (data.of.caracteristiques || {})[cle]; return v === undefined || v === null ? '' : v; };
+      const paramsHtml = e.parametres_requis.filter(p => p.cle !== 'quantite').map(p => `
+        <div class="field"><label>${esc(p.libelle)}${p.unite ? ' (' + esc(p.unite) + ')' : ''} <span class="plan-note">— vide = valeur du produit</span></label>
+          <input class="s-param" data-cle="${p.cle}" type="${p.type === 'texte' ? 'text' : 'number'}" ${p.type === 'texte' ? '' : 'min="0" step="any"'} placeholder="${esc(valeurProduit(p.cle))}" value="${esc(e.parametres[p.cle] ?? '')}"></div>`).join('');
       const phasesHtml = e.phases.length ? `<ul class="phase-list">${e.phases.map(p => `
-        <li><span>${p.nom}${p.occupe_machine ? '' : ' <em>(sans machine)</em>'}</span><span class="mono">${fmtH(p.duree_h)}</span><small>${p.detail}</small></li>`).join('')}</ul>` : '';
+        <li><span>${esc(p.nom)}${p.occupe_machine ? '' : ' <em>(sans machine)</em>'}</span><span class="mono">${fmtH(p.duree_h)}</span><small>${esc(p.detail)}</small></li>`).join('')}</ul>` : '';
       const avant = data.etapes.filter(x => x.sequence < e.sequence);
       const actuels = e.predecesseurs ?? (avant.length ? [avant[avant.length - 1].sequence] : []);
       const lignesPred = avant.map(x => {
@@ -1807,7 +2135,8 @@
           <div class="pred-list">${lignesPred}</div>
           <small><strong>Aucun lien</strong> : l'étape peut démarrer en parallèle (ex. les feuilles sont déjà à la plieuse). <strong>Attendre la fin</strong> : elle démarre quand l'étape est terminée. <strong>Démarrage progressif</strong> : elle démarre dès qu'une part de l'étape est faite (ex. la pliure dès que des feuilles refendues sont prêtes), mais ne peut pas finir avant elle.</small></div>` : '';
       const manquants = e.parametres_manquants.length
-        ? `<div class="msg error" style="margin:6px 0 0;">À renseigner : ${e.parametres_requis.filter(p => e.parametres_manquants.includes(p.cle)).map(p => p.libelle).join(', ')}.</div>` : '';
+        ? `<div class="msg error" style="margin:6px 0 0;">À renseigner : ${e.parametres_requis.filter(p => e.parametres_manquants.includes(p.cle)).map(p => esc(p.libelle)).join(', ')}.</div>` : '';
+      const erreursF = (e.erreurs_formule || []).map(x => `<div class="msg error" style="margin:6px 0 0;">Formule « ${esc(x.phase)} » : ${esc(x.message)}</div>`).join('');
       return `
         <div class="step-card" data-gamme="${e.gamme_id}" data-verrou="${verrou ? 1 : 0}">
           <div class="step-head">
@@ -1821,9 +2150,19 @@
             ${paramsHtml}
             <div class="field"><label>Durée manuelle (h) — remplace le calcul</label><input class="s-manuel" type="number" min="0" step="any" value="${e.duree_manuelle_h ?? ''}"></div>
           </div>
-          ${predHtml}${manquants}${phasesHtml}
+          ${predHtml}${manquants}${erreursF}${phasesHtml}
         </div>`;
     }).join('');
+
+    // Caractéristiques du produit : saisies UNE fois ici, reprises par toutes les étapes de l'OF.
+    const requisProduit = (data.produit_requis || []).filter(r => r.cle !== 'quantite');
+    const produitHtml = requisProduit.length ? `
+      <div class="produit-box">
+        <div class="produit-titre">Caractéristiques du produit <span class="plan-note">— saisies une fois, utilisées par toutes les étapes</span></div>
+        <div class="step-grid">${requisProduit.map(r => `
+          <div class="field"><label>${esc(r.libelle)}${r.unite ? ' (' + esc(r.unite) + ')' : ''}</label>
+            <input class="s-car" data-cle="${r.cle}" type="${r.type === 'texte' ? 'text' : 'number'}" ${r.type === 'texte' ? '' : 'min="0" step="any"'} value="${esc(r.valeur ?? '')}"></div>`).join('')}</div>
+      </div>` : '';
 
     const t = data.totaux;
     const joursHtml = t.jours_equivalents.map(j => `${j.jours.toLocaleString('fr-FR')} j (${j.libelle.toLowerCase()})`).join(' · ');
@@ -1832,6 +2171,7 @@
     afficherModale(`
       <h3>Chiffrage — ${ofNumero} <span style="font-weight:400; color:var(--ink-500); font-size:13px;">(${data.of.quantite.toLocaleString('fr-FR')} ex.)</span></h3>
       ${data.avertissements.map(a => `<div class="msg error">${a}</div>`).join('')}
+      ${produitHtml}
       ${etapesHtml || '<div class="empty">Cet OF n\'a aucune étape de gamme.</div>'}
       <div class="totaux-box">
         <div><span>Temps total (étapes en séquence)</span><strong>${fmtH(t.total_h)}</strong></div>
@@ -1852,6 +2192,8 @@
     document.getElementById('m-submit').addEventListener('click', async () => {
       const msg = document.getElementById('m-msg');
       msg.innerHTML = `<div class="msg">Calcul en cours…</div>`;
+      const caracteristiques = {};
+      document.querySelectorAll('.s-car').forEach(i => { caracteristiques[i.dataset.cle] = i.value.trim(); });   // vide = effacer
       const etapes = Array.from(document.querySelectorAll('.step-card')).map(card => {
         const parametres = {};
         const q = card.querySelector('.s-qte').value;
@@ -1883,7 +2225,7 @@
       try {
         const res = await fetch(`${API}/calculer-durees`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ of_id: ofUuid, etapes }),
+          body: JSON.stringify({ of_id: ofUuid, caracteristiques, etapes }),
         });
         const nouveau = await res.json();
         if (!res.ok) throw new Error(nouveau.error || 'Erreur inconnue');
