@@ -393,6 +393,23 @@
   .modal .field label { margin-bottom: 4px; }
   .modal .field input, .modal .field select { width: 100%; }
   .modal .op-list { display: flex; flex-direction: column; gap: 7px; max-height: 160px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 9px; background: var(--field-bg); }
+
+  .modal.large { max-width: 780px; }
+  .step-card { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 13px 15px; margin-bottom: 12px; background: var(--paper-raised); }
+  .step-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .step-source { font-size: 11.5px; color: var(--ink-500); margin-bottom: 10px; }
+  .step-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+  .step-grid .field { margin-bottom: 0; }
+  .phase-list { list-style: none; margin: 10px 0 0; padding: 0; border-top: 1px dashed var(--line); }
+  .phase-list li { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 6px 0; font-size: 12.5px; border-bottom: 1px dashed var(--line); }
+  .phase-list li:last-child { border-bottom: none; }
+  .phase-list li small { grid-column: 1 / -1; color: var(--ink-500); font-size: 11px; }
+  .phase-list li em { color: var(--ink-500); font-style: normal; font-size: 11px; }
+  .totaux-box { background: var(--paper-raised-2); border-radius: var(--radius-md); padding: 12px 15px; margin-top: 4px; }
+  .totaux-box > div { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; }
+  .totaux-box strong { font-family: "Space Grotesk", sans-serif; }
+  .totaux-box .totaux-jours { color: var(--ink-700); font-size: 12px; justify-content: flex-start; }
+  .totaux-box .totaux-note { color: var(--ink-500); font-size: 11px; display: block; margin-top: 4px; }
   .import-box { margin-bottom: 16px; }
   .import-label {
     display: flex; align-items: center; gap: 12px; padding: 13px 14px; border: 1.5px dashed var(--line);
@@ -452,6 +469,10 @@
     <button class="navbtn" data-tab="machines">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13.5a1.8 1.8 0 0 0 .36 2l.04.04a2.2 2.2 0 1 1-3.1 3.1l-.04-.04a1.8 1.8 0 0 0-2-.36 1.8 1.8 0 0 0-1.1 1.65v.1a2.2 2.2 0 1 1-4.4 0v-.06a1.8 1.8 0 0 0-1.17-1.63 1.8 1.8 0 0 0-2 .36l-.04.04a2.2 2.2 0 1 1-3.1-3.1l.04-.04a1.8 1.8 0 0 0 .36-2 1.8 1.8 0 0 0-1.65-1.1h-.1a2.2 2.2 0 1 1 0-4.4h.06a1.8 1.8 0 0 0 1.63-1.17 1.8 1.8 0 0 0-.36-2l-.04-.04a2.2 2.2 0 1 1 3.1-3.1l.04.04a1.8 1.8 0 0 0 2 .36h.1a1.8 1.8 0 0 0 1.1-1.65v-.1a2.2 2.2 0 1 1 4.4 0v.06a1.8 1.8 0 0 0 1.1 1.64h.1a1.8 1.8 0 0 0 2-.36l.04-.04a2.2 2.2 0 1 1 3.1 3.1l-.04.04a1.8 1.8 0 0 0-.36 2v.1a1.8 1.8 0 0 0 1.65 1.1h.1a2.2 2.2 0 1 1 0 4.4h-.06a1.8 1.8 0 0 0-1.64 1.1z"/></svg>
       Machines
+    </button>
+    <button class="navbtn" data-tab="temps">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      Temps standards
     </button>
     <button class="navbtn" data-tab="stocks">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>
@@ -602,6 +623,7 @@
     ordres: ['Ordres de fabrication', "5 ordres actifs — 2 en cours, 2 planifiés, 1 en pause"],
     personnel: ['Personnel', 'Affectation, compétences et charge par opérateur'],
     machines: ['Machines', 'Parc machine — créer, modifier, rattacher à une opération'],
+    temps: ['Temps standards', 'Mise en route, réglages, cadences et nettoyage — par opération et par machine'],
     stocks: ['Stocks & matières', 'Papier, colle, fil, couverture — suivi des seuils'],
     reporting: ['Reporting', 'Indicateurs de production — semaine en cours'],
   };
@@ -760,6 +782,7 @@
       <div class="row-menu">
         <button data-action="valider">Valider l'OF</button>
         <button data-action="gamme">Voir la gamme opératoire</button>
+        <button data-action="chiffrage">Chiffrage des temps</button>
         <button data-action="affecter">Affecter au planning</button>
         <button data-action="supprimer" class="danger">Supprimer l'OF</button>
       </div>
@@ -831,6 +854,10 @@
       } catch (e) {
         toast(`Échec de la validation : ${e.message}`, 'error');
       }
+    });
+    menu.querySelector('[data-action="chiffrage"]').addEventListener('click', () => {
+      menu.remove();
+      ouvrirModaleChiffrage(ofUuid, ofNumero);
     });
     menu.querySelector('[data-action="gamme"]').addEventListener('click', async () => {
       menu.remove();
@@ -1197,6 +1224,287 @@
     });
   }
 
+  // ---------- Temps standards & chiffrage ----------
+  function fmtH(h) {
+    if (h === null || h === undefined || isNaN(h)) return '—';
+    const m = Math.round(h * 60);
+    const hh = Math.floor(m / 60), mm = m % 60;
+    if (hh === 0) return `${mm} min`;
+    return mm === 0 ? `${hh} h` : `${hh} h ${String(mm).padStart(2, '0')}`;
+  }
+  function decrirePhase(p) {
+    if (p.type_calcul === 'fixe') return `Forfait ${fmtH(Number(p.duree_h))}`;
+    if (p.type_calcul === 'par_element') return `${fmtH(Number(p.duree_h))} × ${p.element_label || p.element_param}`;
+    return `${Number(p.cadence_par_h)} / heure`;
+  }
+
+  function renderTempsStandards() {
+    const wrap = el(`
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Phases de travail standard</h2>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <select id="ts-filtre" style="min-width:170px;"><option value="">Toutes les opérations</option></select>
+            <button class="btn primary" id="ts-new">${svgIcon('<path d="M12 5v14M5 12h14"/>')}Nouvelle phase</button>
+          </div>
+        </div>
+        <div style="padding:12px 18px; font-size:12px; color:var(--ink-500); border-bottom:1px solid var(--line);">
+          Une phase <strong>sans machine</strong> est le standard de l'opération. Une phase <strong>rattachée à une machine</strong> la remplace pour cette machine (chaque machine a ses propres réglages et cadences).
+        </div>
+        <table>
+          <thead><tr><th>Opération</th><th>Machine</th><th>Phase</th><th>Calcul</th><th>Occupe la machine</th><th>Pers.</th><th></th></tr></thead>
+          <tbody id="ts-tbody"><tr><td colspan="7" class="empty">Chargement…</td></tr></tbody>
+        </table>
+      </div>
+    `);
+    wrap.querySelector('#ts-new').addEventListener('click', () => ouvrirModalePhase(null));
+    chargerPhases(wrap);
+    return wrap;
+  }
+
+  async function chargerPhases(wrap) {
+    const tbody = wrap.querySelector('#ts-tbody');
+    const filtre = wrap.querySelector('#ts-filtre');
+    try {
+      const res = await fetch(`${API}/gerer-temps-standards`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const phases = await res.json();
+
+      const ops = Array.from(new Map(phases.map(p => [p.operation_id, p.operations.nom])).entries())
+        .sort((a, b) => a[1].localeCompare(b[1], 'fr'));
+      filtre.innerHTML = `<option value="">Toutes les opérations</option>` + ops.map(([id, nom]) => `<option value="${id}">${nom}</option>`).join('');
+
+      const afficher = () => {
+        const sel = filtre.value;
+        const lignes = phases.filter(p => !sel || p.operation_id === sel);
+        if (lignes.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="7" class="empty">${phases.length ? 'Aucune phase pour cette opération.' : 'Aucune phase définie pour l\'instant. Cliquez sur « Nouvelle phase » pour saisir vos premiers temps standards.'}</td></tr>`;
+          return;
+        }
+        tbody.innerHTML = '';
+        lignes.forEach(p => {
+          tbody.appendChild(el(`
+            <tr>
+              <td>${p.operations.nom}</td>
+              <td>${p.machines ? p.machines.nom : '<span class="chip">Standard</span>'}</td>
+              <td><span class="mono" style="color:var(--ink-500); margin-right:6px;">${p.ordre}.</span>${p.nom}</td>
+              <td>${decrirePhase(p)}</td>
+              <td>${p.occupe_machine ? 'Oui' : '<span style="color:var(--ink-500)">Non</span>'}</td>
+              <td>${p.nb_personnes}</td>
+              <td style="white-space:nowrap;">
+                <button class="btn ts-edit" data-id="${p.id}">Modifier</button>
+                <button class="btn btn-icon-danger ts-del" data-id="${p.id}" aria-label="Supprimer">${svgIcon('<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/>')}</button>
+              </td>
+            </tr>
+          `));
+        });
+        tbody.querySelectorAll('.ts-edit').forEach(b => b.addEventListener('click', () => ouvrirModalePhase(phases.find(x => x.id === b.dataset.id))));
+        tbody.querySelectorAll('.ts-del').forEach(b => b.addEventListener('click', () => {
+          const p = phases.find(x => x.id === b.dataset.id);
+          afficherModale(`
+            <h3>Supprimer cette phase ?</h3>
+            <p style="font-size:13px; color:var(--ink-700); margin:0;">« ${p.nom} » — ${p.operations.nom}${p.machines ? ' (' + p.machines.nom + ')' : ' (standard de l\'opération)'}. Les OF déjà chiffrés ne seront recalculés qu'à leur prochain chiffrage.</p>
+            <div id="m-msg"></div>
+            <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn danger-btn" id="m-confirm-delete">Supprimer</button></div>
+          `);
+          document.getElementById('m-cancel').addEventListener('click', fermerModale);
+          document.getElementById('m-confirm-delete').addEventListener('click', async () => {
+            const msg = document.getElementById('m-msg');
+            try {
+              const r = await fetch(`${API}/gerer-temps-standards?id=${p.id}`, { method: 'DELETE' });
+              if (!r.ok) throw new Error((await r.json()).error || 'Erreur inconnue');
+              toast('Phase supprimée.');
+              fermerModale(); render();
+            } catch (e) { msg.innerHTML = `<div class="msg error">${e.message}</div>`; }
+          });
+        }));
+      };
+      filtre.addEventListener('change', afficher);
+      afficher();
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="7" class="empty">Backend indisponible. (${e.message})</td></tr>`;
+    }
+  }
+
+  async function ouvrirModalePhase(phase) {
+    let refs;
+    try { refs = await getReferentiels(); }
+    catch (e) { toast(`Backend indisponible : ${e.message}`, 'error'); return; }
+
+    const estEdition = !!phase;
+    const opOptions = refs.operations.map(o => `<option value="${o.id}" ${phase && phase.operation_id === o.id ? 'selected' : ''}>${o.nom}</option>`).join('');
+    const machOptions = `<option value="">— Standard de l'opération (toutes machines) —</option>` +
+      refs.machines.slice().sort((a, b) => a.nom.localeCompare(b.nom, 'fr'))
+        .map(m => `<option value="${m.id}" ${phase && phase.machine_id === m.id ? 'selected' : ''}>${m.nom}</option>`).join('');
+    const type = phase ? phase.type_calcul : 'fixe';
+
+    afficherModale(`
+      <h3>${estEdition ? 'Modifier la phase' : 'Nouvelle phase de travail'}</h3>
+      <div class="field"><label>Opération</label><select id="ph-op">${opOptions}</select></div>
+      <div class="field"><label>Machine concernée</label><select id="ph-machine">${machOptions}</select></div>
+      <div class="field"><label>Nom de la phase</label><input id="ph-nom" value="${phase ? phase.nom : ''}" placeholder="ex: Mise en route, Réglage, Roulage, Nettoyage"></div>
+      <div class="field"><label>Ordre dans l'opération</label><input id="ph-ordre" type="number" min="1" value="${phase ? phase.ordre : 1}"></div>
+      <div class="field"><label>Mode de calcul</label>
+        <select id="ph-type">
+          <option value="fixe" ${type === 'fixe' ? 'selected' : ''}>Forfait (durée fixe)</option>
+          <option value="par_element" ${type === 'par_element' ? 'selected' : ''}>Durée × un nombre (ex: par fer)</option>
+          <option value="cadence" ${type === 'cadence' ? 'selected' : ''}>Cadence (unités par heure)</option>
+        </select>
+      </div>
+      <div class="field" id="ph-duree-wrap"><label id="ph-duree-label">Durée (heures)</label><input id="ph-duree" type="number" min="0" step="any" value="${phase && phase.duree_h !== null ? phase.duree_h : ''}" placeholder="ex: 0.5 pour 30 min"></div>
+      <div class="field" id="ph-element-wrap"><label>Ce que l'on compte</label><input id="ph-element" value="${phase && phase.element_label ? phase.element_label : ''}" placeholder="ex: Nombre de fers"></div>
+      <div class="field" id="ph-cadence-wrap"><label>Cadence (unités par heure)</label><input id="ph-cadence" type="number" min="0" step="any" value="${phase && phase.cadence_par_h !== null ? phase.cadence_par_h : ''}" placeholder="ex: 400"></div>
+      <div class="field"><label>Nombre de personnes requises</label><input id="ph-pers" type="number" min="1" value="${phase ? phase.nb_personnes : 1}"></div>
+      <div class="field"><label><input type="checkbox" id="ph-occupe" ${!phase || phase.occupe_machine ? 'checked' : ''}> Cette phase occupe la machine</label></div>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">${estEdition ? 'Enregistrer' : 'Créer'}</button></div>
+    `);
+
+    const typeSel = document.getElementById('ph-type');
+    function majChamps() {
+      const t = typeSel.value;
+      document.getElementById('ph-duree-wrap').classList.toggle('hidden', t === 'cadence');
+      document.getElementById('ph-element-wrap').classList.toggle('hidden', t !== 'par_element');
+      document.getElementById('ph-cadence-wrap').classList.toggle('hidden', t !== 'cadence');
+      document.getElementById('ph-duree-label').textContent = t === 'par_element' ? 'Durée pour chaque élément (heures)' : 'Durée (heures)';
+    }
+    typeSel.addEventListener('change', majChamps);
+    majChamps();
+
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.getElementById('m-submit').addEventListener('click', async () => {
+      const msg = document.getElementById('m-msg');
+      const payload = {
+        id: phase ? phase.id : undefined,
+        operation_id: document.getElementById('ph-op').value,
+        machine_id: document.getElementById('ph-machine').value || null,
+        nom: document.getElementById('ph-nom').value.trim(),
+        ordre: document.getElementById('ph-ordre').value,
+        type_calcul: typeSel.value,
+        duree_h: document.getElementById('ph-duree').value,
+        cadence_par_h: document.getElementById('ph-cadence').value,
+        element_label: document.getElementById('ph-element').value.trim(),
+        nb_personnes: document.getElementById('ph-pers').value,
+        occupe_machine: document.getElementById('ph-occupe').checked,
+      };
+      msg.innerHTML = `<div class="msg">Enregistrement…</div>`;
+      try {
+        const res = await fetch(`${API}/gerer-temps-standards`, {
+          method: estEdition ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+        toast(estEdition ? 'Phase mise à jour.' : 'Phase créée.');
+        fermerModale(); render();
+      } catch (e) {
+        msg.innerHTML = `<div class="msg error">${e.message}</div>`;
+      }
+    });
+  }
+
+  // Chiffrage d'un OF : durée de chaque étape + total
+  async function ouvrirModaleChiffrage(ofUuid, ofNumero, donnees) {
+    let data = donnees;
+    if (!data) {
+      afficherModale(`<h3>Chiffrage — ${ofNumero}</h3><div class="empty">Calcul en cours…</div>`, 'large');
+      try {
+        const res = await fetch(`${API}/calculer-durees?of_id=${ofUuid}`);
+        data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+      } catch (e) {
+        afficherModale(`<h3>Chiffrage — ${ofNumero}</h3><div class="msg error">${e.message}</div>`, 'large');
+        return;
+      }
+    }
+
+    const SOURCES = {
+      machine: 'Temps spécifiques à la machine',
+      operation: 'Temps standard de l\'opération',
+      aucune: 'Aucun temps standard défini pour cette opération — renseignez-le dans « Temps standards », ou saisissez une durée manuelle.',
+    };
+
+    const etapesHtml = data.etapes.map(e => {
+      const verrou = e.statut !== 'à planifier';
+      const machOptions = `<option value="">— Standard de l'opération —</option>` + e.machines_compatibles
+        .map(m => `<option value="${m.id}" ${m.id === e.machine_id ? 'selected' : ''}>${m.nom}${m.temps_specifiques ? ' ✓' : ''}</option>`).join('');
+      const paramsHtml = e.parametres_requis.map(p => `
+        <div class="field"><label>${p.libelle}</label>
+          <input class="s-param" data-cle="${p.cle}" type="number" min="0" step="any" value="${e.parametres[p.cle] ?? ''}"></div>`).join('');
+      const phasesHtml = e.phases.length ? `<ul class="phase-list">${e.phases.map(p => `
+        <li><span>${p.nom}${p.occupe_machine ? '' : ' <em>(sans machine)</em>'}</span><span class="mono">${fmtH(p.duree_h)}</span><small>${p.detail}</small></li>`).join('')}</ul>` : '';
+      const manquants = e.parametres_manquants.length
+        ? `<div class="msg error" style="margin:6px 0 0;">À renseigner : ${e.parametres_requis.filter(p => e.parametres_manquants.includes(p.cle)).map(p => p.libelle).join(', ')}.</div>` : '';
+      return `
+        <div class="step-card" data-gamme="${e.gamme_id}" data-verrou="${verrou ? 1 : 0}">
+          <div class="step-head">
+            <strong><span class="mono" style="color:var(--ink-500);">${e.sequence}.</span> ${e.operation}</strong>
+            <span class="tag ${e.chiffre ? 'ok' : 'warn'}">${e.chiffre ? fmtH(e.total_h) : 'Non chiffré'}</span>
+          </div>
+          <div class="step-source">${SOURCES[e.source]}${e.duree_manuelle_h !== null ? ' — <strong>durée manuelle appliquée</strong>' : ''}</div>
+          <div class="step-grid">
+            <div class="field"><label>Machine prévue ${verrou ? '(planifiée — non modifiable ici)' : ''}</label><select class="s-machine" ${verrou ? 'disabled' : ''}>${machOptions}</select></div>
+            <div class="field"><label>Quantité (vide = ${data.of.quantite})</label><input class="s-qte" type="number" min="1" value="${e.parametres.quantite ?? ''}"></div>
+            ${paramsHtml}
+            <div class="field"><label>Durée manuelle (h) — remplace le calcul</label><input class="s-manuel" type="number" min="0" step="any" value="${e.duree_manuelle_h ?? ''}"></div>
+          </div>
+          ${manquants}${phasesHtml}
+        </div>`;
+    }).join('');
+
+    const t = data.totaux;
+    const joursHtml = t.jours_equivalents.map(j => `${j.jours.toLocaleString('fr-FR')} j (${j.libelle.toLowerCase()})`).join(' · ');
+    const calHtml = data.calendrier.map(c => `${c.libelle} : ${c.heure_debut}–${c.heure_fin}, ${fmtH(c.heures_utiles_par_jour)} utiles/jour`).join(' — ');
+
+    afficherModale(`
+      <h3>Chiffrage — ${ofNumero} <span style="font-weight:400; color:var(--ink-500); font-size:13px;">(${data.of.quantite.toLocaleString('fr-FR')} ex.)</span></h3>
+      ${data.avertissements.map(a => `<div class="msg error">${a}</div>`).join('')}
+      ${etapesHtml || '<div class="empty">Cet OF n\'a aucune étape de gamme.</div>'}
+      <div class="totaux-box">
+        <div><span>Temps total (étapes en séquence)</span><strong>${fmtH(t.total_h)}</strong></div>
+        <div><span>Heures machine</span><strong>${fmtH(t.heures_machine)}</strong></div>
+        <div><span>Heures-personnes</span><strong>${fmtH(t.heures_personnes)}</strong></div>
+        <div class="totaux-jours">≈ ${joursHtml}</div>
+        ${t.etapes_non_chiffrees > 0 ? `<div class="msg error" style="margin:6px 0 0;">${t.etapes_non_chiffrees} étape(s) non chiffrée(s) : le total est incomplet.</div>` : ''}
+        <div class="totaux-note">${calHtml}. Le parallélisme entre étapes n'est pas encore pris en compte (total en séquence).</div>
+      </div>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="m-submit">Recalculer et enregistrer</button></div>
+    `, 'large');
+
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.getElementById('m-submit').addEventListener('click', async () => {
+      const msg = document.getElementById('m-msg');
+      msg.innerHTML = `<div class="msg">Calcul en cours…</div>`;
+      const etapes = Array.from(document.querySelectorAll('.step-card')).map(card => {
+        const parametres = {};
+        const q = card.querySelector('.s-qte').value;
+        if (q !== '') parametres.quantite = q;
+        card.querySelectorAll('.s-param').forEach(i => { if (i.value !== '') parametres[i.dataset.cle] = i.value; });
+        const etape = {
+          gamme_id: card.dataset.gamme,
+          parametres,
+          duree_manuelle_h: card.querySelector('.s-manuel').value,
+        };
+        if (card.dataset.verrou !== '1') etape.machine_id = card.querySelector('.s-machine').value || null;
+        return etape;
+      });
+      try {
+        const res = await fetch(`${API}/calculer-durees`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ of_id: ofUuid, etapes }),
+        });
+        const nouveau = await res.json();
+        if (!res.ok) throw new Error(nouveau.error || 'Erreur inconnue');
+        toast('Chiffrage enregistré.');
+        ouvrirModaleChiffrage(ofUuid, ofNumero, nouveau);
+      } catch (e) {
+        msg.innerHTML = `<div class="msg error">${e.message}</div>`;
+      }
+    });
+  }
+
   function renderStocks(){
     const wrap = el(`
       <div class="panel">
@@ -1305,7 +1613,7 @@
     return wrap;
   }
 
-  const renderers = { planning: renderPlanning, ordres: renderOrdres, personnel: renderPersonnel, machines: renderMachines, stocks: renderStocks, reporting: renderReporting };
+  const renderers = { planning: renderPlanning, ordres: renderOrdres, personnel: renderPersonnel, machines: renderMachines, temps: renderTempsStandards, stocks: renderStocks, reporting: renderReporting };
 
   function render(){
     const content = document.getElementById('content');
@@ -1459,9 +1767,9 @@
     document.getElementById('modal-root').innerHTML = '';
   }
 
-  function afficherModale(contenuHtml) {
+  function afficherModale(contenuHtml, classe) {
     const root = document.getElementById('modal-root');
-    root.innerHTML = `<div class="modal-overlay" id="modal-overlay"><div class="modal"><button class="modal-close" id="modal-x" aria-label="Fermer">
+    root.innerHTML = `<div class="modal-overlay" id="modal-overlay"><div class="modal ${classe || ''}"><button class="modal-close" id="modal-x" aria-label="Fermer">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
     </button>${contenuHtml}</div></div>`;
     root.querySelector('#modal-overlay').addEventListener('click', (e) => {
