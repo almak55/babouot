@@ -274,6 +274,8 @@
   .row-menu button:hover { background: var(--paper-raised-2); }
   .row-menu button.danger { color: var(--danger-text); border-top: 1px solid var(--line); }
   .btn.danger-btn { background: var(--danger); color: #fff; border-color: transparent; font-weight: 600; }
+  .btn.btn-icon-danger { padding: 8px 10px; color: var(--danger-text); }
+  .btn.btn-icon-danger:hover { background: var(--danger-soft); }
   .btn.danger-btn:hover { box-shadow: 0 0 0 1px rgba(240,86,75,0.45), 0 0 22px rgba(240,86,75,0.25), var(--shadow-md); }
 
   .btn {
@@ -1047,7 +1049,10 @@
             <td class="mono">${m.code}</td>
             <td>${(m.operations && m.operations.length) ? m.operations.map(o=>`<span class="tag ok" style="margin-right:4px;">${o.nom}</span>`).join('') : '<span style="color:var(--ink-500)">— aucune —</span>'}</td>
             <td><span class="tag ${m.actif ? 'ok' : 'danger'}">${m.actif ? 'Active' : 'Inactive'}</span></td>
-            <td><button class="btn edit-machine" data-id="${m.id}">Modifier</button></td>
+            <td style="white-space:nowrap;">
+              <button class="btn edit-machine" data-id="${m.id}">Modifier</button>
+              <button class="btn btn-icon-danger delete-machine" data-id="${m.id}" title="Supprimer cette machine" aria-label="Supprimer ${m.nom}">${svgIcon('<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/>')}</button>
+            </td>
           </tr>
         `));
       });
@@ -1057,8 +1062,79 @@
           ouvrirModaleMachine(m);
         });
       });
+      tbody.querySelectorAll('.delete-machine').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const m = machines.find(x => x.id === btn.dataset.id);
+          ouvrirModaleSuppressionMachine(m);
+        });
+      });
     } catch (e) {
       tbody.innerHTML = `<tr><td colspan="5" class="empty">Backend indisponible — impossible de charger le parc machine réel. (${e.message})</td></tr>`;
+    }
+  }
+
+  function ouvrirModaleSuppressionMachine(machine) {
+    afficherModale(`
+      <h3>Supprimer ${machine.nom} ?</h3>
+      <p style="font-size:13px; color:var(--ink-700); margin:0;">Cette action est <strong>définitive</strong>. La machine sera retirée du parc, de la liste des opérations qu'elle réalise et des compétences machine du personnel.</p>
+      <div id="m-msg"></div>
+      <div class="actions">
+        <button class="btn" id="m-cancel">Annuler</button>
+        <button class="btn danger-btn" id="m-confirm-delete">Supprimer</button>
+      </div>
+    `);
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.getElementById('m-confirm-delete').addEventListener('click', () => supprimerMachine(machine, false));
+  }
+
+  async function supprimerMachine(machine, force) {
+    const msg = document.getElementById('m-msg');
+    msg.innerHTML = `<div class="msg">Suppression en cours…</div>`;
+    try {
+      const res = await fetch(`${API}/gerer-machines?id=${machine.id}${force ? '&force=true' : ''}`, { method: 'DELETE' });
+      const data = await res.json();
+
+      if (res.status === 409 && data.utilisee) {
+        // Machine encore utilisée : proposer la désactivation, ou la suppression forcée.
+        const { affectations, etapes_gamme } = data.utilisee;
+        afficherModale(`
+          <h3>${machine.nom} est encore utilisée</h3>
+          <p style="font-size:13px; color:var(--ink-700); margin:0 0 8px;">
+            Elle est référencée par <strong>${affectations} affectation(s) planning</strong>
+            et <strong>${etapes_gamme} étape(s) de gamme</strong>.
+          </p>
+          <p style="font-size:13px; color:var(--ink-700); margin:0 0 4px;"><strong>Désactiver</strong> la machine la retire des plannings sans rien perdre — c'est l'option la plus sûre.</p>
+          <p style="font-size:13px; color:var(--ink-700); margin:0;"><strong>Supprimer quand même</strong> retire ses affectations du planning ; les étapes de gamme concernées repasseront « à planifier ».</p>
+          <div id="m-msg"></div>
+          <div class="actions">
+            <button class="btn" id="m-cancel">Annuler</button>
+            <button class="btn" id="m-desactiver">Désactiver à la place</button>
+            <button class="btn danger-btn" id="m-force-delete">Supprimer quand même</button>
+          </div>
+        `);
+        document.getElementById('m-cancel').addEventListener('click', fermerModale);
+        document.getElementById('m-force-delete').addEventListener('click', () => supprimerMachine(machine, true));
+        document.getElementById('m-desactiver').addEventListener('click', async () => {
+          const m2 = document.getElementById('m-msg');
+          try {
+            const r = await fetch(`${API}/gerer-machines`, {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: machine.id, actif: false }),
+            });
+            if (!r.ok) throw new Error((await r.json()).error || 'Erreur inconnue');
+            toast(`${machine.nom} désactivée.`);
+            fermerModale(); chargerDonneesReelles();
+          } catch (e) { m2.innerHTML = `<div class="msg error">${e.message}</div>`; }
+        });
+        return;
+      }
+
+      if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+      const suffixe = data.affectations_retirees > 0 ? ` (${data.affectations_retirees} affectation(s) retirée(s))` : '';
+      toast(`${data.nom} supprimée${suffixe}.`);
+      fermerModale(); chargerDonneesReelles();
+    } catch (e) {
+      msg.innerHTML = `<div class="msg error">${e.message}</div>`;
     }
   }
 
