@@ -680,7 +680,7 @@
           const of = state.ordres.find(o=>o.id===slot.of);
           const color = slot.statut==='danger' ? 'var(--danger)' : slot.statut==='warn' ? 'var(--accent-amber)' : 'var(--accent-teal)';
           const pctBadge = of ? `<span class="b-pct">${of.avancement}%</span>` : '';
-          rows += `<td class="slot"><div class="bar" style="background:${color}"><span class="b-text"><span class="b-of">${slot.of}</span><span class="b-name">${of?of.produit:''}</span></span>${pctBadge}</div></td>`;
+          rows += `<td class="slot"><div class="bar" style="background:${color}"><span class="b-text"><span class="b-of">${slot.of}${slot.nbPers > 1 ? ` · ${slot.nbPers} pers.` : ''}</span><span class="b-name">${of?of.produit:''}</span></span>${pctBadge}</div></td>`;
         } else {
           rows += `<td class="slot clickable" data-machine-uuid="${m.uuid||''}" data-machine-name="${m.name}" data-day="${d}"></td>`;
         }
@@ -1310,7 +1310,7 @@
       state.machines = data.machines.map(m => ({ id: m.code, uuid: m.id, name: m.nom, code: m.code }));
 
       state.personnel = data.personnel.map(p => {
-        const creneauxSemaine = data.planning.filter(c => c.personnel_id === p.id).length;
+        const creneauxSemaine = data.planning.filter(c => (c.personnel_ids || []).includes(p.id)).length;
         const dispoAuj = (data.disponibilites || []).find(d => d.personnel_id === p.id && d.date === AUJOURDHUI_ISO);
         let statutAffiche;
         if (!dispoAuj || dispoAuj.statut === 'disponible') {
@@ -1355,6 +1355,7 @@
           day: dayIdx,
           of: of ? of.numero : creneau.of_id,
           statut: creneau.statut === 'retard' ? 'danger' : 'ok',
+          nbPers: (creneau.personnel_ids || []).length,
         });
       });
       state.planning = planningParMachine;
@@ -1548,7 +1549,7 @@
     const dateIso = dayIdx != null ? DAYS_ISO[dayIdx] : DAYS_ISO[0];
     const ofOptions = state.ordres.map(o => `<option value="${o.uuid}">${o.id} — ${o.produit}</option>`).join('');
     const machineOptions = state.machines.map(m => `<option value="${m.uuid}" ${m.uuid===machineUuid?'selected':''}>${m.name}</option>`).join('');
-    const persOptions = refs.personnel.map(p => `<option value="${p.id}">${p.nom}${p.poste ? ' — ' + p.poste : ''}</option>`).join('');
+    const persCases = refs.personnel.map(p => `<label><input type="checkbox" value="${p.id}"> ${p.nom}${p.poste ? ' <span style="color:var(--ink-500);">— ' + p.poste + '</span>' : ''}</label>`).join('');
 
     afficherModale(`
       <h3>Affecter un OF au planning</h3>
@@ -1556,7 +1557,7 @@
       <div class="field"><label>Étape de gamme</label><select id="m-etape"><option>Choisir un OF d'abord…</option></select></div>
       <div class="field"><label>Machine</label><select id="m-machine">${machineOptions}</select></div>
       <div class="field"><label>Jour</label><input id="m-date" type="date" value="${dateIso}"></div>
-      <div class="field"><label>Personnel (optionnel)</label><select id="m-personnel"><option value="">— non assigné —</option>${persOptions}</select></div>
+      <div class="field"><label>Personnel (optionnel — cocher une ou plusieurs personnes)</label><div class="op-list" id="m-personnel-list">${persCases}</div></div>
       <div id="m-msg"></div>
       <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">Affecter</button></div>
     `);
@@ -1587,7 +1588,7 @@
       const gamme_operatoire_id = document.getElementById('m-etape').value;
       const machine_id = document.getElementById('m-machine').value;
       const date = document.getElementById('m-date').value;
-      const personnel_id = document.getElementById('m-personnel').value || null;
+      const personnel_ids = Array.from(document.querySelectorAll('#m-personnel-list input:checked')).map(i => i.value);
       const msg = document.getElementById('m-msg');
 
       if (!gamme_operatoire_id || !machine_id || !date) {
@@ -1599,7 +1600,7 @@
         const res = await fetch(`${API}/affecter-planning`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gamme_operatoire_id, machine_id, date, personnel_id }),
+          body: JSON.stringify({ gamme_operatoire_id, machine_id, date, personnel_ids }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
