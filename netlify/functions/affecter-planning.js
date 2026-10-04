@@ -41,13 +41,19 @@ exports.handler = async (event) => {
       .single();
     if (gammeError) throw gammeError;
 
-    const statutOf = gamme.ordres_fabrication ? gamme.ordres_fabrication.statut : null;
-    if (statutOf === 'en attente de validation') {
-      return {
-        statusCode: 409,
-        body: JSON.stringify({ error: 'Cet OF est en attente de validation — validez-le avant de l\'affecter au planning.', conflit: 'non_valide' }),
-      };
-    }
+    // Contrôle du statut de validation de l'OF désactivé pour
+    // l'instant (mise en pause demandée) — affectation possible même
+    // si l'OF est encore "en attente de validation". `valider-of`
+    // reste disponible et fonctionnel, simplement plus bloquant ici.
+    // Pour réactiver : décommenter le bloc ci-dessous.
+    //
+    // const statutOf = gamme.ordres_fabrication ? gamme.ordres_fabrication.statut : null;
+    // if (statutOf === 'en attente de validation') {
+    //   return {
+    //     statusCode: 409,
+    //     body: JSON.stringify({ error: 'Cet OF est en attente de validation — validez-le avant de l\'affecter au planning.', conflit: 'non_valide' }),
+    //   };
+    // }
 
     // Respect du séquencement : les étapes précédentes de la même
     // gamme doivent déjà être planifiées à une date <= celle demandée.
@@ -120,6 +126,7 @@ exports.handler = async (event) => {
       .from('planning_jour')
       .insert({
         date, machine_id, personnel_id: personnel_id || null,
+        of_id: gamme.of_id,
         operation_id: gamme.operation_id,
         gamme_operatoire_id: gamme.id,
         statut: 'planifié',
