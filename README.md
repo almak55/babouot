@@ -44,6 +44,7 @@ planning papier existante).
 | `analyser-fiche` | Extrait titre/client/quantité/délai/opérations depuis une fiche scannée (image, PDF, Word, Excel) via Claude |
 | `gerer-temps-standards` | Phases de travail standard par opération et par machine (forfait, durée × nombre, cadence) |
 | `calculer-durees` | Calcule la durée de chaque étape d'un OF et le total (temps standard, paramètres de l'étape, durée manuelle) ; mémorise la durée estimée |
+| `planifier-of` | Planification à l'heure d'un OF, phase par phase (horaires, pauses, week-ends, machines, maintenance, compétences, absences, plages de disponibilité). Mode « à partir de » ou « au plus tard le », proposition puis application |
 | `supprimer-ordre` | Supprime définitivement un OF avec ses étapes de gamme et ses affectations planning (historique de stock conservé) |
 | `gerer-disponibilite` | Déclare/consulte la disponibilité journalière d'une personne : disponible (éventuellement sur une plage horaire), en arrêt, absent(e) |
 | `gerer-machines` | Liste, crée, modifie et supprime les machines du parc (suppression refusée si encore utilisée, sauf option forcée) |
@@ -73,3 +74,11 @@ planning papier existante).
 
 - Interpréter la légende de couleurs une fois sa signification confirmée
 - Bascule progressive depuis la feuille papier (une ou deux machines pilotes avant généralisation)
+
+## Modules partagés (`netlify/functions/lib/`)
+
+| Fichier | Rôle |
+|---|---|
+| `supabaseclient.js` | Connexion Supabase |
+| `durees.js` | Calcul des durées d'un OF (partagé par `calculer-durees` et `planifier-of`) |
+| `planification.js` | Moteur de planification à l'heure (fonctions pures, sans base de données) |
