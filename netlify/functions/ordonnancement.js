@@ -45,7 +45,10 @@ exports.handler = async (event) => {
     const { data: ordres, error: ordresError } = await supabase
       .from('ordres_fabrication')
       .select('id, numero, priorite, delai, statut')
-      .in('statut', ['validé', 'en cours']); // un OF "en attente de validation" ne doit pas être auto-planifié
+      // Contrôle de validation mis en pause : on reprend tous les OF
+      // actifs, validés ou non (pour réactiver, retirer 'en attente
+      // de validation' de cette liste).
+      .in('statut', ['en attente de validation', 'validé', 'en cours']);
     if (ordresError) throw ordresError;
 
     ordres.sort((a, b) => {
@@ -157,6 +160,7 @@ exports.handler = async (event) => {
           occPersonnel.add(`${place.personnelId}__${place.jour}`);
           jourMin = place.jour; // l'étape suivante ne peut pas démarrer avant ce jour
           propositions.push({
+            of_id: of.id,
             of_numero: of.numero,
             gamme_operatoire_id: etape.id,
             operation_id: etape.operation_id,
@@ -181,6 +185,7 @@ exports.handler = async (event) => {
       const { error: insertError } = await supabase.from('planning_jour').insert(
         propositions.map((p) => ({
           date: p.date,
+          of_id: p.of_id,
           machine_id: p.machine_id,
           operation_id: p.operation_id,
           gamme_operatoire_id: p.gamme_operatoire_id,
