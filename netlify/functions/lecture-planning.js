@@ -12,7 +12,7 @@
 //   personnel: [...],   // chaque personne inclut `competences: [nom d'opération, ...]`
 //   ordres: [...],
 //   stocks: [...],
-//   planning: [...]   // créneaux planning_jour de la période demandée
+//   planning: [...]   // créneaux planning_jour de la période demandée, chacun avec `personnel_ids` (toutes les personnes affectées)
 // }
 
 const { getSupabase } = require('./lib/supabaseclient');
@@ -98,6 +98,20 @@ exports.handler = async (event) => {
       machines_specifiques: machinesParPersonne[p.id] || [],
     }));
 
+    // Toutes les personnes affectées à chaque créneau (table de liaison).
+    const planningIds = planningRes.data.map((p) => p.id);
+    const personnesParCreneau = {};
+    if (planningIds.length > 0) {
+      const { data: liens, error: liensError } = await supabase
+        .from('planning_jour_personnel').select('planning_jour_id, personnel_id').in('planning_jour_id', planningIds);
+      if (liensError) throw liensError;
+      liens.forEach((l) => { (personnesParCreneau[l.planning_jour_id] ??= []).push(l.personnel_id); });
+    }
+    const planningAvecPersonnel = planningRes.data.map((p) => ({
+      ...p,
+      personnel_ids: personnesParCreneau[p.id] || (p.personnel_id ? [p.personnel_id] : []),
+    }));
+
     return {
       statusCode: 200,
       body: JSON.stringify({
@@ -105,7 +119,7 @@ exports.handler = async (event) => {
         personnel: personnelAvecCompetences,
         ordres: ordresAvecAvancement,
         stocks: stocksRes.data,
-        planning: planningRes.data,
+        planning: planningAvecPersonnel,
         disponibilites: dispoRes.data, // { personnel_id, date, statut, heure_debut, heure_fin }[]
       }),
     };
