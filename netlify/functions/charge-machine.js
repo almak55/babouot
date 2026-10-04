@@ -47,9 +47,11 @@ exports.handler = async (event) => {
     const joursOuvres = countJoursOuvres(dateDebut, dateFin);
 
     const resultat = machines.map((m) => {
-      const occupes = creneaux.filter(
-        (c) => c.machine_id === m.id && c.statut !== 'annulé'
-      ).length;
+      // Jours distincts occupés : plusieurs lignes horaires le même jour
+      // (ex: 08:00-10:00 puis 10:00-14:00) ne comptent que pour une journée.
+      const occupes = new Set(
+        creneaux.filter((c) => c.machine_id === m.id && c.statut !== 'annulé').map((c) => c.date)
+      ).size;
       const chargePct = joursOuvres > 0
         ? Math.round((occupes / joursOuvres) * 100)
         : 0;

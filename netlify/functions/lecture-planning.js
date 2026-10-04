@@ -41,8 +41,9 @@ exports.handler = async (event) => {
         .in('statut', ['en attente de validation', 'validé', 'en cours', 'en pause']),
       supabase.from('stocks').select('id, nom, unite, quantite, seuil_alerte'),
       supabase.from('planning_jour')
-        .select('id, date, machine_id, personnel_id, of_id, operation_id, statut')
-        .gte('date', dateDebut).lte('date', dateFin),
+        .select('id, date, heure_debut, heure_fin, phase, machine_id, personnel_id, of_id, operation_id, statut, planning_jour_personnel(personnel_id)')
+        .gte('date', dateDebut).lte('date', dateFin)
+        .order('date').order('heure_debut', { nullsFirst: true }),
       supabase.from('personnel_planning_jour')
         .select('personnel_id, date, statut, heure_debut, heure_fin')
         .gte('date', dateDebut).lte('date', dateFin),
@@ -98,19 +99,13 @@ exports.handler = async (event) => {
       machines_specifiques: machinesParPersonne[p.id] || [],
     }));
 
-    // Toutes les personnes affectées à chaque créneau (table de liaison).
-    const planningIds = planningRes.data.map((p) => p.id);
-    const personnesParCreneau = {};
-    if (planningIds.length > 0) {
-      const { data: liens, error: liensError } = await supabase
-        .from('planning_jour_personnel').select('planning_jour_id, personnel_id').in('planning_jour_id', planningIds);
-      if (liensError) throw liensError;
-      liens.forEach((l) => { (personnesParCreneau[l.planning_jour_id] ??= []).push(l.personnel_id); });
-    }
-    const planningAvecPersonnel = planningRes.data.map((p) => ({
-      ...p,
-      personnel_ids: personnesParCreneau[p.id] || (p.personnel_id ? [p.personnel_id] : []),
-    }));
+    // Toutes les personnes affectées à chaque créneau (table de liaison,
+    // récupérée en même temps que le créneau : pas de longue liste d'identifiants
+    // dans l'URL de la requête).
+    const planningAvecPersonnel = planningRes.data.map(({ planning_jour_personnel: liens, ...p }) => {
+      const ids = (liens || []).map((l) => l.personnel_id);
+      return { ...p, personnel_ids: ids.length ? ids : (p.personnel_id ? [p.personnel_id] : []) };
+    });
 
     return {
       statusCode: 200,
