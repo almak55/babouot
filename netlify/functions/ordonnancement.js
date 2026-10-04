@@ -60,7 +60,7 @@ exports.handler = async (event) => {
     // 2. Charger tout ce qui est nécessaire une seule fois (évite les
     // allers-retours répétés à Supabase dans la boucle).
     const [gammesRes, machinesRes, machinesOpsRes, competencesRes, persMachinesRes,
-           personnelRes, absencesRes, planningRes] = await Promise.all([
+           personnelRes, absencesRes, planningRes, occupationRes] = await Promise.all([
       supabase.from('gammes_operatoires').select('*').order('sequence'),
       supabase.from('machines').select('id, code, operation_id').eq('actif', true),
       supabase.from('machines_operations').select('machine_id, operation_id'),
@@ -72,9 +72,14 @@ exports.handler = async (event) => {
       supabase.from('planning_jour').select('machine_id, personnel_id, date')
         .gte('date', dateDebut).lte('date', horizon[horizon.length - 1])
         .neq('statut', 'annulé'),
+      // Toutes les personnes déjà affectées (une tâche peut en avoir plusieurs)
+      supabase.from('planning_jour_personnel')
+        .select('personnel_id, planning_jour!inner(date, statut)')
+        .gte('planning_jour.date', dateDebut).lte('planning_jour.date', horizon[horizon.length - 1])
+        .neq('planning_jour.statut', 'annulé'),
     ]);
     for (const r of [gammesRes, machinesRes, machinesOpsRes, competencesRes,
-                      persMachinesRes, personnelRes, absencesRes, planningRes]) {
+                      persMachinesRes, personnelRes, absencesRes, planningRes, occupationRes]) {
       if (r.error) throw r.error;
     }
 
@@ -89,9 +94,10 @@ exports.handler = async (event) => {
     // Occupation courante (machine, jour) et (personne, jour) —
     // mise à jour au fil des affectations simulées dans cette run.
     const occMachine = new Set(planningRes.data.map((p) => `${p.machine_id}__${p.date}`));
-    const occPersonnel = new Set(
-      planningRes.data.filter((p) => p.personnel_id).map((p) => `${p.personnel_id}__${p.date}`)
-    );
+    const occPersonnel = new Set([
+      ...planningRes.data.filter((p) => p.personnel_id).map((p) => `${p.personnel_id}__${p.date}`),
+      ...occupationRes.data.map((o) => `${o.personnel_id}__${o.planning_jour.date}`),
+    ]);
     const absentSet = new Set(
       absences.filter((a) => a.statut === 'absent' || a.statut === 'en arrêt')
         .map((a) => `${a.personnel_id}__${a.date}`)
@@ -182,7 +188,7 @@ exports.handler = async (event) => {
     // 3. Écrire les propositions retenues dans planning_jour et mettre
     // à jour le statut des étapes de gamme correspondantes.
     if (propositions.length > 0) {
-      const { error: insertError } = await supabase.from('planning_jour').insert(
+      const { data: crees, error: insertError } = await supabase.from('planning_jour').insert(
         propositions.map((p) => ({
           date: p.date,
           of_id: p.of_id,
@@ -192,8 +198,16 @@ exports.handler = async (event) => {
           personnel_id: p.personnel_id,
           statut: 'planifié',
         }))
-      );
+      ).select('id, personnel_id');
       if (insertError) throw insertError;
+
+      // Table de liaison : source de vérité de "qui travaille sur quoi"
+      const liens = crees.filter((r) => r.personnel_id)
+        .map((r) => ({ planning_jour_id: r.id, personnel_id: r.personnel_id }));
+      if (liens.length > 0) {
+        const { error: lienError } = await supabase.from('planning_jour_personnel').insert(liens);
+        if (lienError) throw lienError;
+      }
 
       const { error: updateError } = await supabase
         .from('gammes_operatoires')
