@@ -432,6 +432,7 @@
   .gh-bar { position: absolute; top: 5px; height: 18px; border-radius: 5px; font-size: 9.5px; font-family: "IBM Plex Mono", monospace; color: #fff; display: flex; align-items: center; justify-content: center; overflow: hidden; white-space: nowrap; box-shadow: var(--shadow-sm); }
   .gh-bar.machine { background: var(--accent-teal); }
   .gh-bar.main { background: var(--accent-amber); color: #4A2E00; }
+  .note-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
   .formule-cell { font-size: 11.5px; color: var(--ink-700); }
   .modal textarea { width: 100%; font-family: "IBM Plex Mono", monospace; font-size: 12.5px; padding: 9px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--field-bg); color: var(--ink-900); resize: vertical; }
   .modal textarea:focus { border-color: var(--accent-teal); box-shadow: 0 0 0 3px var(--accent-teal-soft); outline: none; }
@@ -887,6 +888,7 @@
         <button data-action="chiffrage">Chiffrage des temps</button>
         <button data-action="planifier">Planifier à l'heure</button>
         <button data-action="affecter">Affecter au planning</button>
+        <button data-action="deplanifier">Déplanifier l'OF</button>
         <button data-action="supprimer" class="danger">Supprimer l'OF</button>
       </div>
     `);
@@ -901,7 +903,28 @@
     });
     menu.querySelector('[data-action="affecter"]').addEventListener('click', () => {
       menu.remove();
-      ouvrirModaleAffectation({});
+      ouvrirModaleAffectation({ ofUuid });
+    });
+    menu.querySelector('[data-action="deplanifier"]').addEventListener('click', () => {
+      menu.remove();
+      afficherModale(`
+        <h3>Déplanifier ${esc(ofNumero)} ?</h3>
+        <p style="font-size:13px; color:var(--ink-700); margin:0 0 6px;">Toutes les étapes <strong>planifiées</strong> de cet OF sont retirées du planning (machines, jours et personnel) et repassent « à planifier ». Vous pourrez ensuite les replanifier à la main ou avec « Planifier à l'heure ».</p>
+        <p style="font-size:12.5px; color:var(--ink-500); margin:0;">Les étapes déjà démarrées ou terminées sont conservées.</p>
+        <div id="m-msg"></div>
+        <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-confirm-deplan">Déplanifier</button></div>`);
+      document.getElementById('m-cancel').addEventListener('click', fermerModale);
+      document.getElementById('m-confirm-deplan').addEventListener('click', async () => {
+        const msg = document.getElementById('m-msg');
+        msg.innerHTML = '<div class="msg">Déplanification…</div>';
+        try {
+          const res = await fetch(`${API}/deplanifier-etape`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: ofUuid }) });
+          const d = await res.json();
+          if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+          toast(d.deplanifiees.length ? `${d.deplanifiees.length} étape(s) déplanifiée(s).${d.conservees.length ? ' ' + d.conservees.length + ' conservée(s) (déjà démarrées).' : ''}` : 'Aucune étape planifiée à retirer.');
+          fermerModale(); chargerDonneesReelles();
+        } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+      });
     });
     menu.querySelector('[data-action="supprimer"]').addEventListener('click', () => {
       menu.remove();
@@ -2663,7 +2686,7 @@
     });
   }
 
-  async function ouvrirModaleAffectation({ machineUuid, machineName, dayIdx }) {
+  async function ouvrirModaleAffectation({ machineUuid, machineName, dayIdx, ofUuid }) {
     let refs;
     try { refs = await getReferentiels(); }
     catch (e) {
@@ -2673,7 +2696,7 @@
     }
 
     const dateIso = dayIdx != null ? DAYS_ISO[dayIdx] : DAYS_ISO[0];
-    const ofOptions = state.ordres.map(o => `<option value="${o.uuid}">${o.id} — ${o.produit}</option>`).join('');
+    const ofOptions = state.ordres.map(o => `<option value="${o.uuid}" ${o.uuid === ofUuid ? 'selected' : ''}>${o.id} — ${o.produit}</option>`).join('');
     const machineOptions = state.machines.map(m => `<option value="${m.uuid}" ${m.uuid===machineUuid?'selected':''}>${m.name}</option>`).join('');
     const persCases = refs.personnel.map(p => `<label><input type="checkbox" value="${p.id}"> ${p.nom}${p.poste ? ' <span style="color:var(--ink-500);">— ' + p.poste + '</span>' : ''}</label>`).join('');
 
@@ -2681,6 +2704,7 @@
       <h3>Affecter un OF au planning</h3>
       <div class="field"><label>Ordre de fabrication</label><select id="m-of">${ofOptions}</select></div>
       <div class="field"><label>Étape de gamme</label><select id="m-etape"><option>Choisir un OF d'abord…</option></select></div>
+      <div id="m-etape-note"></div>
       <div class="field"><label>Machine</label><select id="m-machine">${machineOptions}</select></div>
       <div class="field"><label>Jour</label><input id="m-date" type="date" value="${dateIso}"></div>
       <div class="field"><label>Personnel (optionnel — cocher une ou plusieurs personnes)</label><div class="op-list" id="m-personnel-list">${persCases}</div></div>
@@ -2690,23 +2714,60 @@
 
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
 
-    async function chargerEtapes() {
-      const ofUuid = document.getElementById('m-of').value;
-      const etapeSelect = document.getElementById('m-etape');
-      etapeSelect.innerHTML = `<option>Chargement…</option>`;
+    const etapeSelect = document.getElementById('m-etape');
+    const noteEtape = document.getElementById('m-etape-note');
+    const statutChoisi = () => { const o = etapeSelect.selectedOptions[0]; return o ? o.dataset.statut : null; };
+
+    function majNoteEtape(gammes) {
+      const st = statutChoisi();
+      if (st === 'planifié') {
+        noteEtape.innerHTML = `
+          <div class="msg" style="margin:-4px 0 12px;">Cette étape est <strong>déjà planifiée</strong>. Pour l'affecter autrement, déplanifiez-la d'abord.
+            <div class="note-actions"><button class="btn" id="dp-etape">Déplanifier cette étape</button><button class="btn" id="dp-of">Déplanifier tout l'OF</button></div></div>`;
+        document.getElementById('dp-etape').addEventListener('click', () => deplanifier({ gamme_ids: [etapeSelect.value] }));
+        document.getElementById('dp-of').addEventListener('click', () => deplanifier({ of_id: document.getElementById('m-of').value }));
+      } else if (gammes && !gammes.some(g => g.statut === 'à planifier' || g.statut === 'planifié')) {
+        noteEtape.innerHTML = `<div class="msg" style="margin:-4px 0 12px;">Toutes les étapes de cet OF sont démarrées ou terminées : il n'y a plus rien à planifier.</div>`;
+      } else {
+        noteEtape.innerHTML = '';
+      }
+    }
+
+    async function deplanifier(corps) {
+      const msg = document.getElementById('m-msg');
+      msg.innerHTML = `<div class="msg">Déplanification…</div>`;
       try {
-        const res = await fetch(`${API}/gammes-ordre?of_id=${ofUuid}`);
+        const res = await fetch(`${API}/deplanifier-etape`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        toast(`${d.deplanifiees.length} étape(s) déplanifiée(s).${d.conservees.length ? ' ' + d.conservees.length + ' conservée(s) (déjà démarrées).' : ''}`);
+        msg.innerHTML = '';
+        chargerDonneesReelles();
+        await chargerEtapes();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    }
+
+    async function chargerEtapes() {
+      const ofSel = document.getElementById('m-of').value;
+      etapeSelect.innerHTML = `<option>Chargement…</option>`;
+      noteEtape.innerHTML = '';
+      try {
+        const res = await fetch(`${API}/gammes-ordre?of_id=${ofSel}`);
         const gammes = await res.json();
-        const aPlanifier = gammes.filter(g => g.statut === 'à planifier');
-        if (aPlanifier.length === 0) {
-          etapeSelect.innerHTML = `<option value="">Toutes les étapes sont déjà planifiées</option>`;
+        if (!Array.isArray(gammes) || gammes.length === 0) {
+          etapeSelect.innerHTML = `<option value="">Cet OF n'a aucune étape de gamme</option>`;
           return;
         }
-        etapeSelect.innerHTML = aPlanifier.map(g => `<option value="${g.id}">${g.sequence}. ${g.operation.nom}</option>`).join('');
+        const SUFFIXE = { 'planifié': ' — déjà planifiée', 'en cours': ' — en cours', 'terminé': ' — terminée' };
+        etapeSelect.innerHTML = gammes.map(g => `<option value="${g.id}" data-statut="${g.statut}" ${g.statut === 'en cours' || g.statut === 'terminé' ? 'disabled' : ''}>${g.sequence}. ${esc(g.operation.nom)}${SUFFIXE[g.statut] || ''}</option>`).join('');
+        const defaut = gammes.find(g => g.statut === 'à planifier') || gammes.find(g => g.statut === 'planifié');
+        if (defaut) etapeSelect.value = defaut.id;
+        majNoteEtape(gammes);
       } catch (e) {
         etapeSelect.innerHTML = `<option value="">Erreur de chargement</option>`;
       }
     }
+    etapeSelect.addEventListener('change', () => majNoteEtape(null));
     document.getElementById('m-of').addEventListener('change', chargerEtapes);
     if (ofOptions) chargerEtapes();
 
@@ -2717,6 +2778,10 @@
       const personnel_ids = Array.from(document.querySelectorAll('#m-personnel-list input:checked')).map(i => i.value);
       const msg = document.getElementById('m-msg');
 
+      if (statutChoisi() === 'planifié') {
+        msg.innerHTML = `<div class="msg error">Cette étape est déjà planifiée : déplanifiez-la d'abord (boutons ci-dessus).</div>`;
+        return;
+      }
       if (!gamme_operatoire_id || !machine_id || !date) {
         msg.innerHTML = `<div class="msg error">Étape, machine et jour sont requis.</div>`;
         return;
