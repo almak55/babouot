@@ -1,7 +1,7 @@
 // functions/valider-of.js
 //
 // POST /.netlify/functions/valider-of
-// body : { of_id: "uuid" }
+// body : { of_id: "uuid", forcer?: true }
 //
 // Vérifie les 3 conditions de validation d'un OF et met à jour son
 // statut en conséquence :
@@ -20,12 +20,15 @@
 // Si les 3 critères passent : statut -> 'validé'.
 // Sinon : statut -> 'en attente de validation', avec le détail des
 // blocages renvoyé pour affichage.
+// forcer = true : l'OF est validé MALGRÉ les points bloquants (décision de
+// l'utilisateur, qui les a vus). Les blocages sont quand même renvoyés.
 //
 // Réponse :
 // {
 //   statut: 'validé' | 'en attente de validation',
 //   criteres: { machines: bool, matieres: bool, personnel: bool },
-//   blocages: [ { etape, type, detail } ]
+//   blocages: [ { etape, type, detail } ],
+//   forcee: bool   // validé malgré des blocages
 // }
 
 const { getSupabase } = require('./lib/supabaseclient');
@@ -37,6 +40,7 @@ exports.handler = async (event) => {
     }
     const body = JSON.parse(event.body || '{}');
     const { of_id } = body;
+    const forcer = body.forcer === true;
     if (!of_id) {
       return { statusCode: 400, body: JSON.stringify({ error: 'of_id requis.' }) };
     }
@@ -142,12 +146,12 @@ exports.handler = async (event) => {
     for (const g of gammes) {
       if (!personnelDisponiblePourOp(g.operation_id)) {
         personnelOk = false;
-        blocages.push({ etape: g.sequence, type: 'personnel', detail: `${g.operations.nom} : personne de compétent·e disponible aujourd'hui (tout le monde absent ou aucune compétence déclarée).` });
+        blocages.push({ etape: g.sequence, type: 'personnel', detail: `${g.operations.nom} : aucune personne compétente disponible aujourd'hui (aucune compétence déclarée, ou toutes les personnes compétentes sont absentes).` });
       }
     }
 
     const tousOk = machinesOk && matieresOk && personnelOk;
-    const nouveauStatut = tousOk ? 'validé' : 'en attente de validation';
+    const nouveauStatut = tousOk || forcer ? 'validé' : 'en attente de validation';
 
     const { error: updateError } = await supabase
       .from('ordres_fabrication').update({ statut: nouveauStatut }).eq('id', of_id);
@@ -156,13 +160,3 @@ exports.handler = async (event) => {
     return {
       statusCode: 200,
       body: JSON.stringify({
-        statut: nouveauStatut,
-        criteres: { machines: machinesOk, matieres: matieresOk, personnel: personnelOk },
-        blocages,
-      }),
-    };
-  } catch (err) {
-    console.error('valider-of error:', err);
-    return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
-  }
-};
