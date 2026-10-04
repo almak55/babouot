@@ -32,8 +32,24 @@ exports.handler = async (event) => {
       .neq('statut', 'annulé');
     if (error) throw error;
 
+    // Une tâche peut avoir plusieurs personnes : on "déplie" chaque
+    // créneau en une entrée par personne (table de liaison) pour
+    // détecter qu'une même personne est prise deux fois le même jour.
+    const ids = creneaux.map((c) => c.id);
+    let liens = [];
+    if (ids.length > 0) {
+      const { data, error: liensError } = await supabase
+        .from('planning_jour_personnel').select('planning_jour_id, personnel_id').in('planning_jour_id', ids);
+      if (liensError) throw liensError;
+      liens = data;
+    }
+    const parPersonne = liens.map((l) => {
+      const c = creneaux.find((x) => x.id === l.planning_jour_id);
+      return { id: c.id, date: c.date, personnel_id: l.personnel_id, of_id: c.of_id };
+    });
+
     const conflitsMachine = groupAndFindConflicts(creneaux, 'machine_id');
-    const conflitsPersonnel = groupAndFindConflicts(creneaux, 'personnel_id');
+    const conflitsPersonnel = groupAndFindConflicts(parPersonne, 'personnel_id');
 
     return {
       statusCode: 200,
