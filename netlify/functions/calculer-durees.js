@@ -3,7 +3,11 @@
 // GET  /.netlify/functions/calculer-durees?of_id=uuid
 //   -> calcule la durée de chaque étape de gamme de l'OF et le total.
 // POST /.netlify/functions/calculer-durees
-//   body : { of_id, etapes: [ { gamme_id, machine_id?, parametres?, duree_manuelle_h? } ] }
+//   body : { of_id, etapes: [ { gamme_id, machine_id?, parametres?, duree_manuelle_h?, predecesseurs? } ] }
+//   predecesseurs : numéros des étapes à terminer avant celle-ci (null = l'étape
+//   précédente ; [] = aucune dépendance). Seules des étapes de numéro inférieur sont acceptées.
+//   dependances : { "<n° d'étape>": { mode: "progressif", seuil_pct } } — l'étape démarre dès que
+//   seuil_pct % de l'étape n° est avancé (sans pouvoir finir avant elle). Sans entrée : attendre la fin.
 //   -> enregistre d'abord les réglages des étapes (machine prévue,
 //      paramètres, durée manuelle), puis recalcule et mémorise la
 //      durée estimée de chaque étape (gammes_operatoires.duree_estimee_min).
@@ -30,6 +34,7 @@ exports.handler = async (event) => {
 
       const { data: existantes, error: exError } = await supabase
         .from('gammes_operatoires').select('id, statut, sequence').eq('of_id', ofId);
+      const sequences = new Set(existantes.map((g) => g.sequence));
       if (exError) throw exError;
 
       for (const e of body.etapes || []) {
@@ -54,6 +59,31 @@ exports.handler = async (event) => {
           } else {
             avertissements.push(`Étape ${etape.sequence} : machine inchangée (déjà planifiée — modifiez-la via le planning).`);
           }
+        }
+        if ('predecesseurs' in e) {
+          if (e.predecesseurs === null) {
+            maj.predecesseurs = null;
+          } else if (Array.isArray(e.predecesseurs)) {
+            const valides = Array.from(new Set(e.predecesseurs.map(Number)))
+              .filter((s) => Number.isInteger(s) && s < etape.sequence && sequences.has(s))
+              .sort((a, b) => a - b);
+            if (valides.length !== new Set(e.predecesseurs.map(Number)).size) {
+              avertissements.push(`Étape ${etape.sequence} : seules des étapes antérieures existantes peuvent être prédécesseurs (valeurs invalides ignorées).`);
+            }
+            maj.predecesseurs = valides;
+          }
+        }
+        if ('dependances' in e) {
+          const options = {};
+          Object.entries(e.dependances || {}).forEach(([seq, v]) => {
+            const n = Number(seq);
+            if (!Number.isInteger(n) || n >= etape.sequence || !sequences.has(n)) return;
+            if (!v || v.mode !== 'progressif') return;                       // seul le mode progressif se mémorise
+            if (Array.isArray(maj.predecesseurs) && !maj.predecesseurs.includes(n)) return;   // lien retiré
+            const pct = Number(String(v.seuil_pct).replace(',', '.'));
+            options[n] = { mode: 'progressif', seuil_pct: Number.isFinite(pct) ? Math.max(0, Math.min(100, Math.round(pct))) : 10 };
+          });
+          maj.dependances = options;
         }
         if (Object.keys(maj).length > 0) {
           const { error } = await supabase.from('gammes_operatoires').update(maj).eq('id', etape.id);

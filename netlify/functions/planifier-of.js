@@ -28,7 +28,7 @@ const { getSupabase } = require('./lib/supabaseclient');
 const { calculerEtapes } = require('./lib/durees');
 const PL = require('./lib/planification');
 
-const { enMinutes, dateDe, heureDe, debutDeJour, hhmm, MIN_JOUR, HORIZON_JOURS } = PL;
+const { enMinutes, dateDe, heureDe, debutDeJour, hhmm, MIN_JOUR, HORIZON_JOURS, libelleFerie } = PL;
 
 const CALENDRIERS_DEFAUT = {
   normal:     { code: 'normal',     debut: '08:00', fin: '16:30', pause_debut: '12:00', pause_minutes: 30 },
@@ -147,11 +147,29 @@ exports.handler = async (event) => {
     const parMachine = (mId) => persMachRes.data.filter((c) => c.machine_id === mId && personnelActif.has(c.personnel_id)).map((c) => c.personnel_id);
 
     // ---------- 4. Construction de l'entrée du moteur ----------
+    // Dépendances : numéros d'étapes (colonne predecesseurs) -> positions dans la liste.
+    // null = comportement par défaut (étape précédente), conservé tel quel.
+    const positionDe = new Map(etapesCalc.map((e, i) => [e.sequence, i]));
+    // Options de lien (démarrage progressif), indexées par position du prédécesseur.
+    const liensDe = (e) => {
+      const out = {};
+      Object.entries(e.dependances || {}).forEach(([seq, v]) => {
+        const i = positionDe.get(Number(seq));
+        if (i !== undefined && v && v.mode === 'progressif') {
+          const pct = Number(v.seuil_pct);
+          out[i] = { mode: 'progressif', seuil_pct: Number.isFinite(pct) ? pct : 10 };
+        }
+      });
+      return out;
+    };
+    const indicesDe = (e) => (Array.isArray(e.predecesseurs)
+      ? e.predecesseurs.map((s) => positionDe.get(s)).filter((i) => i !== undefined)
+      : null);
     const etapesMoteur = etapesCalc.map((e, index) => {
       if (!aPlanifier.has(e.gamme_id)) {
         const fins = lignesOf.filter((l) => l.gamme_operatoire_id === e.gamme_id)
           .map((l) => enMinutes(l.date, '00:00') + (l.heure_fin ? hhmm(String(l.heure_fin).slice(0, 5)) : hhmm(cal.fin)));
-        return { index, fixe: true, fin_min: fins.length ? Math.max(...fins) : null };
+        return { index, fixe: true, fin_min: fins.length ? Math.max(...fins) : null, predecesseurs: indicesDe(e) };
       }
       const imp = etapesImposees.find((x) => x.gamme_id === e.gamme_id) || {};
       const besoinMachinePhases = e.phases.some((p) => p.occupe_machine);
@@ -164,6 +182,8 @@ exports.handler = async (event) => {
       }
       return {
         index,
+        predecesseurs: indicesDe(e),
+        liens: liensDe(e),
         non_chiffre: !e.chiffre,
         parametres_manquants: e.parametres_manquants,
         phases,
@@ -186,12 +206,37 @@ exports.handler = async (event) => {
     const { data: toutesMachines } = await supabase.from('machines').select('id, nom');
     (toutesMachines || []).forEach((m) => { nomMachine[m.id] = m.nom; });
 
+    // Réseau PERT : durées et dépendances seulement (sans ressources ni calendrier).
+    const reseau = PL.analyserReseau(etapesMoteur.map((em, i) => ({
+      index: i,
+      duree_min: em.fixe ? 0 : em.phases.reduce((total, p) => total + p.duree_min, 0),
+      predecesseurs: em.predecesseurs ?? null,
+      liens: em.liens || {},
+    })));
+    const pert = {
+      duree_totale_min: reseau.duree_totale_min,
+      etapes: reseau.noeuds.map((n) => {
+        const e = etapesCalc[n.index];
+        return {
+          gamme_id: e.gamme_id, sequence: e.sequence, operation: e.operation, fixe: !!etapesMoteur[n.index].fixe,
+          duree_min: n.duree_min, predecesseurs: n.predecesseurs.map((i) => etapesCalc[i].sequence),
+          dependances: n.predecesseurs.map((i) => {
+            const lien = (etapesMoteur[n.index].liens || {})[i];
+            return { sequence: etapesCalc[i].sequence, mode: lien ? 'progressif' : 'fin', seuil_pct: lien ? lien.seuil_pct : null };
+          }),
+          es: n.es, ef: n.ef, ls: n.ls, lf: n.lf, marge_min: n.marge_min, critique: n.critique,
+        };
+      }),
+    };
+
     const bloquants = [];
     const etapesSortie = plan.etapes.map((r) => {
       const e = etapesCalc[r.index];
       r.problemes.forEach((p) => { if (p.bloquant) bloquants.push({ sequence: e.sequence, operation: e.operation, type: p.type, detail: p.detail }); });
       return {
         gamme_id: e.gamme_id, sequence: e.sequence, operation: e.operation, statut: e.statut,
+        predecesseurs: pert.etapes[r.index].predecesseurs,
+        dependances: pert.etapes[r.index].dependances,
         fixe: !!r.fixe,
         machine: r.machine_id ? { id: r.machine_id, nom: nomMachine[r.machine_id] || '?' } : null,
         machines_possibles: e.machines_compatibles.map((m) => ({ id: m.id, nom: m.nom })),
@@ -205,6 +250,16 @@ exports.handler = async (event) => {
         problemes: r.problemes,
       };
     });
+
+    // Jours fériés (en semaine) tombant dans la période du plan : signalés car non travaillés.
+    const joursFeriesPeriode = [];
+    if (plan.debut_min !== null && plan.fin_min !== null) {
+      for (let j = debutDeJour(plan.debut_min); j <= debutDeJour(plan.fin_min); j += MIN_JOUR) {
+        const jourSemaine = new Date(j * 60000).getUTCDay();
+        const libelle = libelleFerie(dateDe(j));
+        if (libelle && jourSemaine !== 0 && jourSemaine !== 6) joursFeriesPeriode.push({ date: dateDe(j), libelle });
+      }
+    }
 
     const reponse = {
       of: { id: of.id, numero: of.numero, quantite: of.quantite, delai: of.delai },
@@ -224,6 +279,8 @@ exports.handler = async (event) => {
       },
       alternative_heures_sup: null,
       bloquants,
+      pert,
+      jours_feries: joursFeriesPeriode,
       applique: false,
     };
 

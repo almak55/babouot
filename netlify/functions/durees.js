@@ -35,7 +35,7 @@ async function calculerEtapes(supabase, ofId) {
 
   const { data: gammes, error: gammesError } = await supabase
     .from('gammes_operatoires')
-    .select('id, sequence, statut, operation_id, machine_id, parametres, duree_manuelle_h, operations(code, nom)')
+    .select('id, sequence, statut, operation_id, machine_id, parametres, duree_manuelle_h, predecesseurs, dependances, operations(code, nom)')
     .eq('of_id', ofId).order('sequence');
   if (gammesError) throw gammesError;
 
@@ -110,6 +110,8 @@ async function calculerEtapes(supabase, ofId) {
     return {
       gamme_id: g.id, sequence: g.sequence, statut: g.statut,
       operation_id: g.operation_id,
+      predecesseurs: g.predecesseurs ?? null,   // numéros d'étapes ; null = après l'étape précédente
+      dependances: g.dependances || {},         // options par lien : { "1": { mode: "progressif", seuil_pct: 10 } }
       operation: g.operations.nom, operation_code: g.operations.code,
       machine_id: g.machine_id, machines_compatibles: compatibles,
       source, phases,
