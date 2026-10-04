@@ -42,6 +42,7 @@ planning papier existante).
 | `affecter-planning` | Affecte une étape de gamme à une machine/personne/jour, avec contrôle de disponibilité et de séquencement (refuse si l'OF n'est pas validé) |
 | `valider-of` | Vérifie machines opérationnelles + matières suffisantes + personnel disponible, et bascule l'OF en `validé` ou `en attente de validation` |
 | `analyser-fiche` | Extrait titre/client/quantité/délai/opérations depuis une fiche scannée (image, PDF, Word, Excel) via Claude |
+| `supprimer-ordre` | Supprime définitivement un OF avec ses étapes de gamme et ses affectations planning (historique de stock conservé) |
 | `gerer-disponibilite` | Déclare/consulte la disponibilité journalière d'une personne : disponible (éventuellement sur une plage horaire), en arrêt, absent(e) |
 | `gerer-machines` | Liste, crée et modifie les machines du parc (code, nom, opération principale, actif/inactif) |
 
