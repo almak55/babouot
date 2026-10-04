@@ -272,6 +272,9 @@
     font-size: 12.5px; color: var(--ink-900); transition: background .12s var(--ease);
   }
   .row-menu button:hover { background: var(--paper-raised-2); }
+  .row-menu button.danger { color: var(--danger-text); border-top: 1px solid var(--line); }
+  .btn.danger-btn { background: var(--danger); color: #fff; border-color: transparent; font-weight: 600; }
+  .btn.danger-btn:hover { box-shadow: 0 0 0 1px rgba(240,86,75,0.45), 0 0 22px rgba(240,86,75,0.25), var(--shadow-md); }
 
   .btn {
     display: inline-flex; align-items: center; gap: 6px;
@@ -733,7 +736,7 @@
             <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${o.avancement}%"></div></div>
           </td>
           <td class="row-menu-cell">
-            <button class="row-menu-btn" data-ofid="${o.uuid}" data-ofnum="${o.id}" aria-label="Actions">${svgIcon('<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>')}</button>
+            <button class="row-menu-btn" data-ofid="${o.uuid}" data-ofnum="${o.id}" data-ofstatut="${o.statut}" aria-label="Actions">${svgIcon('<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>')}</button>
           </td>
         </tr>
       `));
@@ -742,20 +745,21 @@
     tbody.querySelectorAll('.row-menu-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        ouvrirMenuOf(btn, btn.dataset.ofid, btn.dataset.ofnum);
+        ouvrirMenuOf(btn, btn.dataset.ofid, btn.dataset.ofnum, btn.dataset.ofstatut);
       });
     });
 
     return wrap;
   }
 
-  function ouvrirMenuOf(btn, ofUuid, ofNumero) {
+  function ouvrirMenuOf(btn, ofUuid, ofNumero, ofStatut) {
     document.querySelectorAll('.row-menu').forEach(m => m.remove());
     const menu = el(`
       <div class="row-menu">
         <button data-action="valider">Valider l'OF</button>
         <button data-action="gamme">Voir la gamme opératoire</button>
         <button data-action="affecter">Affecter au planning</button>
+        <button data-action="supprimer" class="danger">Supprimer l'OF</button>
       </div>
     `);
     document.body.appendChild(menu);
@@ -766,6 +770,44 @@
     menu.querySelector('[data-action="affecter"]').addEventListener('click', () => {
       menu.remove();
       ouvrirModaleAffectation({});
+    });
+    menu.querySelector('[data-action="supprimer"]').addEventListener('click', () => {
+      menu.remove();
+      const avertissementStatut = (ofStatut === 'en cours' || ofStatut === 'terminé')
+        ? `<div class="msg error" style="margin-bottom:10px;">⚠️ Cet OF est <strong>${ofStatut}</strong> : sa production a déjà commencé ou est terminée.</div>`
+        : '';
+      afficherModale(`
+        <h3>Supprimer ${ofNumero} ?</h3>
+        ${avertissementStatut}
+        <p style="font-size:13px; color:var(--ink-700); margin:0 0 6px;">Cette action est <strong>définitive</strong> et supprime aussi :</p>
+        <ul style="font-size:13px; color:var(--ink-700); margin:0 0 4px; padding-left:18px;">
+          <li>toutes les étapes de sa gamme opératoire</li>
+          <li>toutes ses affectations au planning</li>
+        </ul>
+        <p style="font-size:12px; color:var(--ink-500); margin:8px 0 0;">L'historique des mouvements de stock est conservé.</p>
+        <div id="m-msg"></div>
+        <div class="actions">
+          <button class="btn" id="m-cancel">Annuler</button>
+          <button class="btn danger-btn" id="m-confirm-delete">Supprimer définitivement</button>
+        </div>
+      `);
+      document.getElementById('m-cancel').addEventListener('click', fermerModale);
+      document.getElementById('m-confirm-delete').addEventListener('click', async () => {
+        const msg = document.getElementById('m-msg');
+        msg.innerHTML = `<div class="msg">Suppression en cours…</div>`;
+        try {
+          const res = await fetch(`${API}/supprimer-ordre?of_id=${ofUuid}`, { method: 'DELETE' });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+          const suffixe = data.affectations_supprimees > 0
+            ? ` (${data.affectations_supprimees} affectation${data.affectations_supprimees>1?'s':''} planning retirée${data.affectations_supprimees>1?'s':''})`
+            : '';
+          toast(`${data.numero} supprimé${suffixe}.`);
+          fermerModale(); chargerDonneesReelles();
+        } catch (e) {
+          msg.innerHTML = `<div class="msg error">${e.message}</div>`;
+        }
+      });
     });
     menu.querySelector('[data-action="valider"]').addEventListener('click', async () => {
       menu.remove();
@@ -1351,6 +1393,48 @@
     root.querySelector('#modal-x').addEventListener('click', fermerModale);
   }
 
+  function fichierEnBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Redimensionne/recompresse une image côté navigateur avant envoi :
+  // une photo de téléphone brute (10-15 Mo, souvent >4000px de large)
+  // peut dépasser la limite de taille des Netlify Functions une fois
+  // encodée en base64, et sature inutilement la mémoire de l'appareil
+  // pendant la capture/l'upload. On redescend à 1800px de long côté
+  // et en JPEG qualité 0.82 — largement suffisant pour que l'IA lise
+  // le texte d'une fiche.
+  async function compresserImage(file, maxCote = 1800, qualite = 0.82) {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const img = await new Promise((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = reject;
+      i.src = dataUrl;
+    });
+    let { width, height } = img;
+    if (width > maxCote || height > maxCote) {
+      const ratio = Math.min(maxCote / width, maxCote / height);
+      width = Math.round(width * ratio);
+      height = Math.round(height * ratio);
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+    const compressedDataUrl = canvas.toDataURL('image/jpeg', qualite);
+    return { base64: compressedDataUrl.split(',')[1], mimeType: 'image/jpeg' };
+  }
+
   async function ouvrirModaleNouvelOf() {
     let refs;
     try { refs = await getReferentiels(); }
@@ -1392,16 +1476,14 @@
       const statusEl = document.getElementById('import-status');
       statusEl.innerHTML = `<div class="msg">Analyse du document en cours…</div>`;
       try {
-        const base64 = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result.split(',')[1]);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
+        const estImage = file.type.startsWith('image/');
+        const { base64, mimeType } = estImage
+          ? await compresserImage(file)
+          : { base64: await fichierEnBase64(file), mimeType: file.type };
         const res = await fetch(`${API}/analyser-fiche`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ file_base64: base64, file_name: file.name, mime_type: file.type }),
+          body: JSON.stringify({ file_base64: base64, file_name: file.name, mime_type: mimeType }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
