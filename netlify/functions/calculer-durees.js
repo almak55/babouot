@@ -60,10 +60,11 @@ exports.handler = async (event) => {
       }
 
       const { data: existantes, error: exError } = await supabase
-        .from('gammes_operatoires').select('id, statut, sequence').eq('of_id', ofId);
+        .from('gammes_operatoires').select('id, statut, sequence, predecesseurs, operations(nom)').eq('of_id', ofId);
       const sequences = new Set(existantes.map((g) => g.sequence));
       if (exError) throw exError;
 
+      const aEcrire = [];
       for (const e of body.etapes || []) {
         const etape = existantes.find((g) => g.id === e.gamme_id);
         if (!etape) continue;
@@ -92,10 +93,10 @@ exports.handler = async (event) => {
             maj.predecesseurs = null;
           } else if (Array.isArray(e.predecesseurs)) {
             const valides = Array.from(new Set(e.predecesseurs.map(Number)))
-              .filter((s) => Number.isInteger(s) && s < etape.sequence && sequences.has(s))
+              .filter((s) => Number.isInteger(s) && s !== etape.sequence && sequences.has(s))
               .sort((a, b) => a - b);
             if (valides.length !== new Set(e.predecesseurs.map(Number)).size) {
-              avertissements.push(`Étape ${etape.sequence} : seules des étapes antérieures existantes peuvent être prédécesseurs (valeurs invalides ignorées).`);
+              avertissements.push(`Étape ${etape.sequence} : seules d'autres étapes existantes de cet OF peuvent être prédécesseurs (valeurs invalides ignorées).`);
             }
             maj.predecesseurs = valides;
           }
@@ -104,7 +105,7 @@ exports.handler = async (event) => {
           const options = {};
           Object.entries(e.dependances || {}).forEach(([seq, v]) => {
             const n = Number(seq);
-            if (!Number.isInteger(n) || n >= etape.sequence || !sequences.has(n)) return;
+            if (!Number.isInteger(n) || n === etape.sequence || !sequences.has(n)) return;
             if (!v || v.mode !== 'progressif') return;                       // seul le mode progressif se mémorise
             if (Array.isArray(maj.predecesseurs) && !maj.predecesseurs.includes(n)) return;   // lien retiré
             const pct = Number(String(v.seuil_pct).replace(',', '.'));
@@ -112,10 +113,34 @@ exports.handler = async (event) => {
           });
           maj.dependances = options;
         }
-        if (Object.keys(maj).length > 0) {
-          const { error } = await supabase.from('gammes_operatoires').update(maj).eq('id', etape.id);
-          if (error) throw error;
-        }
+        if (Object.keys(maj).length > 0) aEcrire.push({ etape, maj });
+      }
+
+      // Aucune boucle : « A après B » et « B après A » (directement ou par un détour) est impossible.
+      const triees = existantes.slice().sort((a, b) => a.sequence - b.sequence);
+      const predsFinaux = new Map(triees.map((g, i) => {
+        const modif = aEcrire.find((x) => x.etape.id === g.id);
+        const liste = modif && 'predecesseurs' in modif.maj ? modif.maj.predecesseurs : g.predecesseurs;
+        return [g.sequence, liste ?? (i > 0 ? [triees[i - 1].sequence] : [])];
+      }));
+      const etat = new Map();   // 1 = en cours de visite, 2 = terminé
+      let boucle = null;
+      const visiter = (seq, chemin) => {
+        if (boucle) return;
+        if (etat.get(seq) === 2) return;
+        if (etat.get(seq) === 1) { boucle = chemin.slice(chemin.indexOf(seq)).concat(seq); return; }
+        etat.set(seq, 1);
+        (predsFinaux.get(seq) || []).forEach((p) => visiter(p, chemin.concat(seq)));
+        etat.set(seq, 2);
+      };
+      Array.from(predsFinaux.keys()).forEach((seq) => visiter(seq, []));
+      if (boucle) {
+        const nomDe = (seq) => { const g = existantes.find((x) => x.sequence === seq); return g && g.operations ? g.operations.nom : `opération ${seq}`; };
+        return { statusCode: 400, body: JSON.stringify({ error: `Enchaînement impossible : les opérations forment une boucle (${boucle.map(nomDe).join(' → ')}). Une opération ne peut pas dépendre, même indirectement, d'elle-même. Rien n'a été enregistré (ni dépendances, ni durées).`, boucle }) };
+      }
+      for (const { etape, maj } of aEcrire) {
+        const { error } = await supabase.from('gammes_operatoires').update(maj).eq('id', etape.id);
+        if (error) throw error;
       }
     } else {
       return { statusCode: 405, body: JSON.stringify({ error: 'Méthode non autorisée.' }) };
