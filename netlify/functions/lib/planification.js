@@ -164,6 +164,55 @@ function cloner(occupation) {
   return { machines: copie(occupation.machines), personnes: copie(occupation.personnes) };
 }
 
+// Présence limitée en heures : une personne n'est là que pour les `minutes` premières
+// minutes de travail d'une phase ; une autre prend ensuite le relais.
+function prefixe(tranches, minutes) {
+  const res = []; let reste = minutes;
+  for (const t of tranches) {
+    if (reste <= 0) break;
+    const l = t.f - t.d; const prise = Math.min(l, reste);
+    res.push({ d: t.d, f: t.d + prise }); reste -= prise;
+  }
+  return res;
+}
+function suffixe(tranches, minutes) {
+  const res = []; let reste = minutes;
+  for (const t of tranches) {
+    const l = t.f - t.d;
+    if (reste >= l) { reste -= l; continue; }
+    res.push({ d: t.d + reste, f: t.f }); reste = 0;
+  }
+  return res;
+}
+const libreSur = (intervalles, occupes) => intervalles.every((iv) => soustraire(iv, occupes).reduce((t, l) => t + (l.f - l.d), 0) === iv.f - iv.d);
+
+// Découpe une phase en segments « même équipe » : [{ d, f, personnes: [ids] }].
+function segmenter(tranches, presences, cal) {
+  const ids = Object.keys(presences);
+  const bornes = new Set();
+  tranches.forEach((t) => { bornes.add(t.d); bornes.add(t.f); });
+  ids.forEach((id) => presences[id].forEach((iv) => { bornes.add(iv.d); bornes.add(iv.f); }));
+  const pts = Array.from(bornes).sort((a, b) => a - b);
+  const elem = [];
+  tranches.forEach((t) => {
+    const dans = pts.filter((x) => x >= t.d && x <= t.f);
+    for (let i = 0; i + 1 < dans.length; i++) {
+      const a = dans[i]; const b = dans[i + 1];
+      const qui = ids.filter((id) => presences[id].some((iv) => iv.d <= a && iv.f >= b));
+      elem.push({ d: a, f: b, cle: qui.slice().sort().join('|'), personnes: qui });
+    }
+  });
+  const segments = []; let run = [];
+  const vider = () => {
+    if (!run.length) return;
+    fusionner(run.map((x) => ({ d: x.d, f: x.f })), cal).forEach((t) => segments.push({ d: t.d, f: t.f, personnes: run[0].personnes }));
+    run = [];
+  };
+  elem.forEach((e) => { if (run.length && run[0].cle !== e.cle) vider(); run.push(e); });
+  vider();
+  return segments;
+}
+
 function simulerEtape(etape, machineId, curseur, ctx, charge) {
   const cal = ctx.calendrier;
   const occMachine = machineId ? (ctx.occupation.machines[machineId] || []) : [];
@@ -197,10 +246,44 @@ function simulerEtape(etape, machineId, curseur, ctx, charge) {
         }
       }
     }
-    const occupes = [].concat(occMach, ...choisis.map(occPers));
-    const t = consommer(ph.duree_min, c, occupes, cal);
+    // Personnes à présence limitée en heures (relayées ensuite par d'autres).
+    const quotas = etape.heures_max || {};
+    const limitees = choisis.filter((id) => Number(quotas[id]) > 0 && Number(quotas[id]) < ph.duree_min);
+    const pleins = choisis.filter((id) => !limitees.includes(id));
+    let t = consommer(ph.duree_min, c, [].concat(occMach, ...pleins.map(occPers)), cal);
     if (!t) return null;
-    phasesRes.push({ nom: ph.nom, duree_min: ph.duree_min, besoin_machine: !!ph.besoin_machine, personnes: choisis, tranches: fusionner(t, cal), brutes: t });
+    let presences = null;
+    if (limitees.length) {
+      presences = {};
+      pleins.forEach((id) => { presences[id] = t; });
+      limitees.forEach((id) => { presences[id] = prefixe(t, Number(quotas[id])); });
+      // Une personne limitée doit être libre pendant SA présence ; sinon on revient à la contrainte stricte.
+      if (limitees.some((id) => !libreSur(presences[id], occPers(id)))) {
+        t = consommer(ph.duree_min, c, [].concat(occMach, ...choisis.map(occPers)), cal);
+        if (!t) return null;
+        pleins.forEach((id) => { presences[id] = t; });
+        limitees.forEach((id) => { presences[id] = prefixe(t, Number(quotas[id])); });
+      }
+      // Relais : un remplaçant compétent, libre sur tout le reste de la phase, prend la suite.
+      const dejaLa = new Set(choisis);
+      limitees.slice().sort((a, b) => Number(quotas[a]) - Number(quotas[b])).forEach((id) => {
+        const reste = suffixe(t, Number(quotas[id]));
+        const candidats = pool.concat(etape.personnes_pour(machineId))
+          .filter((x, i, arr) => arr.indexOf(x) === i && !dejaLa.has(x) && libreSur(reste, occPers(x)));
+        candidats.sort((a, b) => (charge.get(a) || 0) - (charge.get(b) || 0) || (a < b ? -1 : 1));
+        if (candidats.length) {
+          presences[candidats[0]] = reste; dejaLa.add(candidats[0]);
+        } else {
+          problemes.push({ type: 'relais_manquant', bloquant: false, detail: `« ${ph.nom} » : après le départ d'une personne limitée en heures, aucun remplaçant disponible — personnel à affecter pour la suite.` });
+        }
+      });
+    }
+    phasesRes.push({
+      nom: ph.nom, duree_min: ph.duree_min, besoin_machine: !!ph.besoin_machine,
+      personnes: presences ? Object.keys(presences) : choisis,
+      presences, segments: presences ? segmenter(t, presences, cal) : null,
+      tranches: fusionner(t, cal), brutes: t,
+    });
     c = t[t.length - 1].f;
   }
 
@@ -264,9 +347,16 @@ function inscrire(res, ctx, charge) {
     ph.tranches.forEach((t) => {
       const iv = { d: t.d, f: t.f };
       if (ph.besoin_machine && res.machine_id) (ctx.occupation.machines[res.machine_id] ??= []).push(iv);
-      ph.personnes.forEach((p) => (ctx.occupation.personnes[p] ??= []).push(iv));
+      if (!ph.presences) ph.personnes.forEach((p) => (ctx.occupation.personnes[p] ??= []).push(iv));
     });
-    ph.personnes.forEach((p) => charge.set(p, (charge.get(p) || 0) + ph.duree_min));
+    if (ph.presences) {
+      Object.entries(ph.presences).forEach(([p, ivs]) => {
+        ivs.forEach((iv) => (ctx.occupation.personnes[p] ??= []).push({ d: iv.d, f: iv.f }));
+        charge.set(p, (charge.get(p) || 0) + ivs.reduce((tt, x) => tt + (x.f - x.d), 0));
+      });
+    } else {
+      ph.personnes.forEach((p) => charge.set(p, (charge.get(p) || 0) + ph.duree_min));
+    }
   });
 }
 
