@@ -37,7 +37,7 @@ exports.handler = async (event) => {
       supabase.from('personnel_competences').select('personnel_id, operations(nom)'),
       supabase.from('personnel_machines').select('personnel_id, machines(code, nom)'),
       supabase.from('ordres_fabrication')
-        .select('id, numero, quantite, delai, priorite, statut, titres(nom, client)')
+        .select('*, titres(nom, client)')
         .in('statut', ['en attente de validation', 'validé', 'en cours', 'en pause']),
       supabase.from('stocks').select('id, nom, unite, quantite, seuil_alerte'),
       supabase.from('planning_jour')
@@ -78,7 +78,8 @@ exports.handler = async (event) => {
 
     const ordresAvecAvancement = ordresRes.data.map((o) => ({
       ...o,
-      avancement: avancementParOf[o.id] ?? 0,
+      // Avancement réel (saisies de production, pondéré par les durées) ; à défaut, part d'étapes terminées.
+      avancement: Number(o.avancement_pct) > 0 ? Math.round(Number(o.avancement_pct)) : (avancementParOf[o.id] ?? 0),
     }));
 
     // Regroupe compétences (par opération) et machines précises par personne.
