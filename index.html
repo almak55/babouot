@@ -1505,7 +1505,7 @@
     const dessiner = () => {
       const lignes = donnees.profils.map((p, i) => `
         <div class="profil-ligne"><div><strong>${esc(p.operation)}</strong> · ${esc(nomType(p.type_production))}<br>
-          <span class="plan-note">mise en route ${nbm(p.mise_en_route_min)} · réglage ${nbm(p.reglage_min)} · roulage ${p.cadence_par_h ? p.cadence_par_h + ' ex./h' : '—'} · nettoyage ${nbm(p.nettoyage_min)}</span></div>
+          <span class="plan-note">mise en route ${nbm(p.mise_en_route_min)} · réglage ${nbm(p.reglage_min)} · roulage ${p.cadence_par_h ? p.cadence_par_h + ' ' + (p.unite_cadence || 'ex.') + '/h' : '—'}${p.quantite_formule ? ' (sur ' + esc(p.quantite_formule) + ')' : ''} · nettoyage ${nbm(p.nettoyage_min)}</span></div>
           <span><button class="btn" data-modif="${i}">Modifier</button> <button class="btn" data-suppr="${i}">Supprimer</button></span></div>`).join('');
       $('pf-liste').innerHTML = lignes || '<div class="empty">Aucun profil enregistré pour cette machine.</div>';
       $('pf-liste').querySelectorAll('[data-modif]').forEach(b => b.addEventListener('click', () => {
@@ -1513,6 +1513,7 @@
         $('pf-op').value = p.operation_id; $('pf-type').value = p.type_production || '';
         $('pf-mer').value = p.mise_en_route_min ?? ''; $('pf-reg').value = p.reglage_min ?? '';
         $('pf-cad').value = p.cadence_par_h ?? ''; $('pf-net').value = p.nettoyage_min ?? ''; $('pf-pers').value = p.nb_personnes || 1;
+        $('pf-unite').value = p.unite_cadence || ''; $('pf-formule').value = p.quantite_formule || ''; majUnite();
         calcul();
       }));
       $('pf-liste').querySelectorAll('[data-suppr]').forEach(b => b.addEventListener('click', async () => {
@@ -1537,20 +1538,47 @@
             <button class="btn" type="button" id="pf-newtype" style="margin-top:6px;">+ Nouveau type…</button></div>
           <div class="field"><label>Mise en route (min)</label><input id="pf-mer" type="number" min="0" step="any"></div>
           <div class="field"><label>Réglage (min)</label><input id="pf-reg" type="number" min="0" step="any"></div>
-          <div class="field"><label>Roulage : cadence moyenne (exemplaires / h)</label><input id="pf-cad" type="number" min="0" step="any"></div>
+          <div class="field"><label>Cadence portant sur…</label>
+            <select id="pf-preset">
+              <option value="exemplaires">Des exemplaires (par défaut)</option>
+              <option value="cahiers">Des cahiers (couture, pliage)</option>
+              <option value="coupes">Des coupes (massicot)</option>
+              <option value="autre">Autre unité…</option>
+            </select></div>
+          <div class="field"><label>Unité de la cadence</label><input id="pf-unite" placeholder="exemplaires"></div>
+          <div class="field" style="grid-column: 1 / -1;"><label>Quantité à traiter <span class="plan-note">— formule d'après la fiche ; vide = quantité de l'OF</span></label><input id="pf-formule" class="mono" placeholder="quantite"></div>
+          <div class="field"><label id="pf-cad-label">Roulage : cadence moyenne (exemplaires / h)</label><input id="pf-cad" type="number" min="0" step="any"></div>
           <div class="field"><label>Nettoyage (min)</label><input id="pf-net" type="number" min="0" step="any"></div>
           <div class="field"><label>Personnes au roulage</label><input id="pf-pers" type="number" min="1" step="1" value="1"></div>
-          <div class="field"><label>Aperçu pour <input id="pf-qte" type="number" min="1" value="1000" style="width:90px; display:inline-block;"> ex.</label><div id="pf-total" class="mono" style="padding:8px 0;">—</div></div>
+          <div class="field"><label>Aperçu pour <input id="pf-qte" type="number" min="1" value="1000" style="width:90px; display:inline-block;"> unités à traiter</label><div id="pf-total" class="mono" style="padding:8px 0;">—</div></div>
         </div>
       </div>
       <div id="pf-msg"></div>
       <div class="actions"><button class="btn" id="m-close">Fermer</button><button class="btn primary" id="pf-save">Enregistrer le profil</button></div>
     `, 'large');
     const nv = (id) => { const v = $(id).value; return v === '' ? null : Number(String(v).replace(',', '.')); };
+    const PRESETS = {
+      exemplaires: { unite: 'exemplaires', formule: '' },
+      cahiers: { unite: 'cahiers', formule: 'quantite * nb_cahiers' },
+      // Piles de 7 cm maximum : feuilles par pile = 70 mm ÷ épaisseur d'une feuille (≈ 0,00125 mm par g/m²).
+      coupes: { unite: 'coupes', formule: 'plafond(nb_feuilles / plancher(70 / (grammage_g * 0.00125); 1); 1) * nb_coupes_pile' },
+    };
+    function majUnite() {
+      const u = $('pf-unite').value.trim() || 'exemplaires';
+      $('pf-cad-label').textContent = `Roulage : cadence moyenne (${u} / h)`;
+      calcul();
+    }
+    $('pf-preset').addEventListener('change', () => {
+      const pr = PRESETS[$('pf-preset').value];
+      if (pr) { $('pf-unite').value = pr.unite === 'exemplaires' ? '' : pr.unite; $('pf-formule').value = pr.formule; }
+      majUnite();
+    });
+    $('pf-unite').addEventListener('input', majUnite);
     function calcul() {
       const q = nv('pf-qte') || 0; const cad = nv('pf-cad');
       const min = (nv('pf-mer') || 0) + (nv('pf-reg') || 0) + (nv('pf-net') || 0) + (cad ? q / cad * 60 : 0);
-      $('pf-total').textContent = min ? `${fmtH(min / 60)} au total` : '—';
+      const u = $('pf-unite').value.trim() || 'exemplaires';
+      $('pf-total').textContent = min ? `${fmtH(min / 60)} au total (${q} ${u} à traiter)` : '—';
     }
     ['pf-mer', 'pf-reg', 'pf-cad', 'pf-net', 'pf-qte'].forEach(id => $(id).addEventListener('input', calcul));
     $('pf-newtype').addEventListener('click', async () => {
@@ -1575,6 +1603,7 @@
           body: JSON.stringify({
             machine_id: machine.id, operation_id: $('pf-op').value, type_production: $('pf-type').value || null,
             mise_en_route_min: nv('pf-mer'), reglage_min: nv('pf-reg'), cadence_par_h: nv('pf-cad'), nettoyage_min: nv('pf-net'), nb_personnes: nv('pf-pers') || 1,
+            unite_cadence: $('pf-unite').value.trim() || null, quantite_formule: $('pf-formule').value.trim() || null,
           }),
         });
         const d = await res.json();
@@ -2946,7 +2975,7 @@
           ${svgIcon('<path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M20 16v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3"/>')}
           <span><strong>Importer une fiche</strong> — photo, PDF, Word ou Excel<br>remplit le formulaire automatiquement</span>
         </label>
-        <div id="import-status"></div>
+        <div id="import-status"></div><div id="import-car"></div>
       </div>
       <div class="field"><label>Titre / produit</label><input id="m-titre-nom" placeholder="ex: Trône de Fer 5"></div>
       <div class="field"><label>Client</label><input id="m-titre-client" placeholder="ex: Éditions Pléiade"></div>
@@ -2962,6 +2991,7 @@
       <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">Créer l'OF</button></div>
     `);
 
+    let caracteristiquesFiche = {};
     document.getElementById('m-import').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -2985,6 +3015,9 @@
         if (data.quantite) document.getElementById('m-qte').value = data.quantite;
         if (data.delai) document.getElementById('m-delai').value = data.delai;
         if (data.type_production) document.getElementById('m-type').value = data.type_production;
+        caracteristiquesFiche = data.caracteristiques || {};
+        const lues = Object.entries(caracteristiquesFiche);
+        document.getElementById('import-car').innerHTML = lues.length ? `<div class="plan-note">Caractéristiques lues sur la fiche : ${lues.map(([k, v]) => esc(k) + ' = ' + esc(String(v))).join(' · ')} (modifiables ensuite dans le chiffrage).</div>` : '';
         document.querySelectorAll('.op-list input[type="checkbox"]').forEach(cb => {
           cb.checked = (data.operation_codes || []).includes(cb.value);
         });
@@ -3016,7 +3049,7 @@
         const res = await fetch(`${API}/creer-ordre`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ titre: { nom, client }, quantite, delai, priorite, operations, type_production: document.getElementById('m-type').value || null }),
+          body: JSON.stringify({ titre: { nom, client }, quantite, delai, priorite, operations, type_production: document.getElementById('m-type').value || null, caracteristiques: caracteristiquesFiche }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
