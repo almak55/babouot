@@ -12,6 +12,10 @@
 //   replanifier?: boolean,              // reprendre aussi les étapes déjà planifiées (pas "en cours")
 //   etapes_imposees?: [ { gamme_id, machine_id?, personnel_ids? } ],
 //   appliquer?: boolean                 // false = simple PROPOSITION ; true = écrit le planning
+//   --- recalage après retard de production (utilisé par saisir-production) ---
+//   etapes_a_replanifier?: [gamme_id]   // étapes à reprendre, quel que soit leur statut (sauf terminé)
+//   restant?: { gamme_id: 0..1 }        // part de travail restant à faire sur une étape déjà entamée
+//   depuis?: 'AAAA-MM-JJTHH:MM'         // les créneaux de ces étapes antérieurs à cet instant sont conservés (historique)
 // }
 //
 // Calcule, phase par phase, QUAND se déroule chaque étape de l'OF, en tenant
@@ -91,10 +95,15 @@ exports.handler = async (event) => {
       : { data: [], error: null };
     if (lignesOfError) throw lignesOfError;
 
+    const idsReplan = new Set(Array.isArray(body.etapes_a_replanifier) ? body.etapes_a_replanifier : []);
+    const restant = body.restant && typeof body.restant === 'object' ? body.restant : {};
+    const depuisMin = lireDateHeure(body.depuis, '00:00');
     const aPlanifier = new Set(etapesCalc
-      .filter((e) => e.statut === 'à planifier' || (replanifier && e.statut === 'planifié'))
+      .filter((e) => e.statut === 'à planifier' || (replanifier && e.statut === 'planifié') || (idsReplan.has(e.gamme_id) && e.statut !== 'terminé'))
       .map((e) => e.gamme_id));
-    const lignesARemplacer = lignesOf.filter((l) => aPlanifier.has(l.gamme_operatoire_id));
+    // Avec « depuis », on garde les créneaux déjà passés (historique de ce qui s'est réellement déroulé).
+    const lignesARemplacer = lignesOf.filter((l) => aPlanifier.has(l.gamme_operatoire_id)
+      && (depuisMin === null || enMinutes(l.date, '00:00') + (l.heure_fin ? hhmm(String(l.heure_fin).slice(0, 5)) : MIN_JOUR) > depuisMin));
     const idsARemplacer = new Set(lignesARemplacer.map((l) => l.id));
 
     // ---------- 3. Occupation des machines et du personnel ----------
@@ -178,7 +187,17 @@ exports.handler = async (event) => {
       if (e.duree_manuelle_h !== null) {
         phases = [{ nom: 'Étape (durée manuelle)', duree_min: Math.round(e.duree_manuelle_h * 60), besoin_machine: e.phases.length === 0 ? e.machines_compatibles.length > 0 : besoinMachinePhases, nb_personnes: nbMax }];
       } else {
-        phases = e.phases.map((p) => ({ nom: p.nom, duree_min: Math.round(p.duree_h * 60), besoin_machine: !!p.occupe_machine, nb_personnes: p.nb_personnes }));
+        phases = e.phases.map((p) => ({ nom: p.nom, duree_min: Math.round(p.duree_h * 60), besoin_machine: !!p.occupe_machine, nb_personnes: p.nb_personnes, type_calcul: p.type_calcul }));
+      }
+      // Étape déjà entamée : seule la part restante est replanifiée. La mise en route et le réglage sont
+      // déjà faits ; le nettoyage reste dû ; le reste (cadence, par élément, formule) est proratisé.
+      const rest = restant[e.gamme_id];
+      if (rest !== undefined && Number(rest) < 1) {
+        const r = Math.max(0, Number(rest));
+        const reste = phases
+          .filter((p) => !(p.type_calcul === 'fixe' && /mise en route|r[ée]glage|\bMER\b/i.test(p.nom)))
+          .map((p) => (p.type_calcul === 'fixe' && /nettoy/i.test(p.nom)) ? p : { ...p, duree_min: Math.max(1, Math.round(p.duree_min * r)) });
+        phases = reste.length ? reste : [{ ...phases[phases.length - 1], duree_min: 1 }];
       }
       return {
         index,
@@ -367,7 +386,7 @@ exports.handler = async (event) => {
 
     for (const e of etapesSortie.filter((x) => !x.fixe)) {
       const { error } = await supabase.from('gammes_operatoires')
-        .update({ statut: 'planifié', machine_id: e.machine ? e.machine.id : null }).eq('id', e.gamme_id);
+        .update({ statut: e.statut === 'en cours' ? 'en cours' : 'planifié', machine_id: e.machine ? e.machine.id : null }).eq('id', e.gamme_id);
       if (error) throw error;
     }
 
