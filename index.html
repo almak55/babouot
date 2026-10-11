@@ -462,6 +462,13 @@
   .produit-box { border: 1px solid var(--accent-teal); background: var(--accent-teal-soft); border-radius: var(--radius-md); padding: 11px 14px; margin-bottom: 12px; }
   .produit-titre { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
   .import-lignes { max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-md); margin-top: 10px; }
+  .dispo-strip { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .dispo-chip { font-size: 11.5px; padding: 3px 7px; border-radius: 7px; border: 1px solid var(--line); background: var(--field-bg); color: var(--ink-700); cursor: default; line-height: 1.3; font-family: inherit; }
+  .dispo-chip.libre { border-color: var(--accent-teal); color: var(--ink-900); cursor: pointer; }
+  .dispo-chip.occupe { background: rgba(214, 69, 65, .12); border-color: rgba(214, 69, 65, .45); text-decoration: line-through; }
+  .dispo-chip.maintenance { background: rgba(230, 160, 20, .16); border-color: rgba(230, 160, 20, .5); }
+  .dispo-chip.choisi { outline: 2px solid var(--accent-teal); font-weight: 600; }
+  .dispo-legende { font-size: 11.5px; color: var(--ink-500); margin-top: 4px; width: 100%; }
   .profil-ligne { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
   .pl-pers-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .pl-heures-wrap { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-500); white-space: nowrap; }
@@ -2494,7 +2501,12 @@
             ${paramsHtml}
             <div class="field"><label>Durée manuelle (h) — remplace le calcul</label><input class="s-manuel" type="number" min="0" step="any" value="${e.duree_manuelle_h ?? ''}"></div>
           </div>
-          ${e.type_manquant ? `<div class="msg error" style="margin:6px 0 0;">Des temps existent pour : ${e.types_possibles.map(c => esc(((data.types_production || []).find(t => t.code === c) || { libelle: c }).libelle)).join(', ')}. Choisissez le <strong>type de production</strong> de l'OF ci-dessus puis enregistrez.</div>` : ''}
+          ${e.type_manquant ? (() => {
+            const lib = (c) => esc(((data.types_production || []).find(t => t.code === c) || { libelle: c }).libelle);
+            const actuel = data.of.type_production ? lib(data.of.type_production) : 'non précisé';
+            const machine = (e.machines_compatibles.find(m => m.id === e.machine_id) || {}).nom;
+            return `<div class="msg ${e.duree_manuelle_h !== null ? '' : 'error'}" style="margin:6px 0 0;">Type de production de l'OF : <strong>${actuel}</strong>. ${machine ? 'Pour ' + esc(machine) + ', d' : 'D'}es temps ne sont enregistrés que pour : <strong>${e.types_possibles.map(lib).join(', ')}</strong>. ${e.duree_manuelle_h !== null ? 'La durée manuelle ci-dessous est utilisée à la place.' : 'Deux solutions : changer le type de production de l\'OF (en haut), ou ajouter un profil « ' + actuel + ' » pour cette machine (Machines → modifier → Configurer les temps de production).'}</div>`;
+          })() : ''}
           ${predHtml}${manquants}${erreursF}${phasesHtml}
         </div>`;
     }).join('');
@@ -3081,7 +3093,7 @@
       <div class="field"><label>Ordre de fabrication</label><select id="m-of">${ofOptions}</select></div>
       <div class="field"><label>Étape de gamme</label><select id="m-etape"><option>Choisir un OF d'abord…</option></select></div>
       <div id="m-etape-note"></div>
-      <div class="field"><label>Machine <span class="plan-note">— laissez « Aucune machine » pour un travail manuel</span></label><select id="m-machine">${machineOptions}</select></div>
+      <div class="field"><label>Machine <span class="plan-note">— laissez « Aucune machine » pour un travail manuel</span></label><select id="m-machine">${machineOptions}</select><div id="m-dispo" class="dispo-strip"></div></div>
       <div class="field"><label>Jour de début <span class="plan-note">— proposé automatiquement selon les dépendances</span></label><input id="m-date" type="date" value="${dateIso}"><div id="m-date-note" class="plan-note" style="margin-top:4px;"></div></div>
       <div class="field"><label>Personnel (optionnel — cocher une ou plusieurs personnes)</label><div class="op-list" id="m-personnel-list">${persCases}</div></div>
       <div id="m-msg"></div>
@@ -3145,6 +3157,41 @@
         etapeSelect.innerHTML = `<option value="">Erreur de chargement</option>`;
       }
     }
+    // Disponibilité de la machine choisie : jours libres / occupés / en maintenance.
+    let dateManuelle = false;
+    const aujourdhuiLocal = () => new Date().toLocaleDateString('sv-SE');
+    async function majDispo(auto) {
+      const zone = document.getElementById('m-dispo');
+      const machine = document.getElementById('m-machine').value;
+      if (!machine) { zone.innerHTML = ''; return; }
+      const champ = document.getElementById('m-date');
+      const auj = aujourdhuiLocal();
+      let du = auj;
+      if (champ.value && champ.value > auj) { const d = new Date(champ.value + 'T00:00:00'); d.setDate(d.getDate() - 3); const t = d.toLocaleDateString('sv-SE'); if (t > auj) du = t; }
+      zone.innerHTML = '<span class="plan-note">Disponibilités de la machine…</span>';
+      try {
+        const res = await fetch(`${API}/dispo-machine?machine_id=${machine}&du=${du}&jours=21`);
+        const r = await res.json();
+        if (!res.ok) throw new Error(r.error || 'Erreur inconnue');
+        let note = '';
+        const premierLibre = r.jours.find(j => j.etat === 'libre' && j.date >= (champ.value || auj));
+        const courant = r.jours.find(j => j.date === champ.value);
+        if (auto && !dateManuelle && courant && courant.etat !== 'libre' && premierLibre) {
+          note = `La machine est occupée le ${courant.libelle} : premier jour libre proposé (${premierLibre.libelle}).`;
+          champ.value = premierLibre.date;
+        }
+        const choisi = champ.value;
+        zone.innerHTML = r.jours.map(j => `<button type="button" class="dispo-chip ${j.etat} ${j.date === choisi ? 'choisi' : ''}" data-date="${j.date}" title="${esc(j.etat === 'libre' ? 'Libre — cliquer pour choisir ce jour' : j.details.join('\n'))}">${esc(j.libelle)}</button>`).join('')
+          + `<div class="dispo-legende">${note ? esc(note) + ' · ' : ''}Vert : libre (cliquez pour choisir) · barré : occupé (survolez pour voir par quoi) · orangé : maintenance.</div>`;
+        zone.querySelectorAll('.dispo-chip.libre').forEach(b => b.addEventListener('click', () => {
+          champ.value = b.dataset.date; dateManuelle = true;
+          zone.querySelectorAll('.dispo-chip').forEach(x => x.classList.toggle('choisi', x === b));
+        }));
+      } catch (e) { zone.innerHTML = `<span class="plan-note">Disponibilités indisponibles (${esc(e.message)}).</span>`; }
+    }
+    document.getElementById('m-machine').addEventListener('change', () => majDispo(true));
+    document.getElementById('m-date').addEventListener('change', () => { dateManuelle = true; majDispo(false); });
+
     // Jour de début automatique : déduit des dépendances de l'opération choisie.
     let suggestionNum = 0;
     async function majJourDebut() {
@@ -3159,6 +3206,7 @@
         if (num !== suggestionNum) return;   // une autre étape a été choisie entre-temps
         if (!res.ok) throw new Error(r.error || 'Erreur inconnue');
         document.getElementById('m-date').value = r.date;
+        majDispo(true);
         if (r.bloques && r.bloques.length) {
           note.innerHTML = `<span style="color:var(--danger);">À planifier d'abord : ${r.bloques.map(esc).join(', ')}.</span>`;
         } else {
@@ -3171,7 +3219,7 @@
       const opt = etapeSelect.selectedOptions && etapeSelect.selectedOptions[0];
       if (opt && opt.dataset.manuel === '1') document.getElementById('m-machine').value = '';
     }
-    etapeSelect.addEventListener('change', () => { majNoteEtape(null); ajusterMachine(); majJourDebut(); });
+    etapeSelect.addEventListener('change', () => { dateManuelle = false; majNoteEtape(null); ajusterMachine(); majJourDebut(); });
     document.getElementById('m-of').addEventListener('change', chargerEtapes);
     if (ofOptions) chargerEtapes();
 
