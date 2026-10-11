@@ -284,6 +284,39 @@ function instantAtteint(pr, pct) {
   return pr.fin;
 }
 
+// Ordre de traitement des étapes : un prédécesseur est toujours traité avant
+// son successeur, QUELLE QUE SOIT sa position dans la liste (ou son numéro).
+//   preds[i] : positions des prédécesseurs de la position i.
+// Renvoie { ordre: [positions], cycle: [positions] } — `cycle` est vide si le
+// réseau est valide ; sinon il contient les étapes prises dans une boucle.
+// À égalité, l'ordre de la liste est conservé (résultat stable).
+function ordreTopologique(preds) {
+  const n = preds.length;
+  const restants = preds.map((ps) => new Set(ps));
+  const fait = new Array(n).fill(false);
+  const ordre = [];
+  while (ordre.length < n) {
+    let prochain = -1;
+    for (let i = 0; i < n; i++) {
+      if (!fait[i] && restants[i].size === 0) { prochain = i; break; }
+    }
+    if (prochain === -1) {
+      return { ordre, cycle: Array.from({ length: n }, (_, i) => i).filter((i) => !fait[i]) };
+    }
+    fait[prochain] = true;
+    ordre.push(prochain);
+    restants.forEach((r) => r.delete(prochain));
+  }
+  return { ordre, cycle: [] };
+}
+
+// Prédécesseurs (en positions) d'une liste d'étapes : null = étape précédente de la liste.
+function predecesseursEnPositions(etapes) {
+  const pos = new Map(etapes.map((e, i) => [e.index, i]));
+  return etapes.map((e, i) => (e.predecesseurs ?? (i > 0 ? [etapes[i - 1].index] : []))
+    .filter((p) => pos.has(p) && pos.get(p) !== i).map((p) => pos.get(p)));
+}
+
 // Planification vers l'avant : démarre au plus tôt à `debutMin`.
 //   etape.predecesseurs : indices des étapes à terminer d'abord
 //                         (absent/null : l'étape précédente ; [] : aucune dépendance).
@@ -295,7 +328,12 @@ function planifierAvant(entree, debutMin) {
   const resultats = new Map();   // index -> { debut, fin, duree, brutes } : point de départ des suivantes
   const etapes = [];
 
-  entree.etapes.forEach((etape, pos) => {
+  const topo = ordreTopologique(predecesseursEnPositions(entree.etapes));
+  // En cas de boucle (refusée à la saisie), les étapes concernées sont traitées à la suite, dans l'ordre de la liste.
+  const ordreTraitement = topo.ordre.concat(topo.cycle);
+
+  ordreTraitement.forEach((pos) => {
+    const etape = entree.etapes[pos];
     const preds = etape.predecesseurs ?? (pos > 0 ? [entree.etapes[pos - 1].index] : []);
     const liens = etape.liens || {};
     let depart = debutMin;
@@ -343,6 +381,8 @@ function planifierAvant(entree, debutMin) {
     }
   });
 
+  // Résultats remis dans l'ordre de la liste (et non dans l'ordre de traitement).
+  etapes.sort((a, b) => a.index - b.index);
   const planifiees = etapes.filter((e) => !e.fixe);
   const placees = planifiees.filter((e) => e.debut_min !== null);
   return {
@@ -392,7 +432,7 @@ function planifierArriere(entree, finMaxMin, plancherMin) {
 function analyserReseau(noeuds) {
   const pos = new Map(noeuds.map((n, i) => [n.index, i]));
   const preds = noeuds.map((n, i) => (n.predecesseurs ?? (i > 0 ? [noeuds[i - 1].index] : []))
-    .filter((p) => pos.has(p) && pos.get(p) < i));
+    .filter((p) => pos.has(p) && pos.get(p) !== i));
   const d = noeuds.map((n) => n.duree_min);
   const lienDe = (i, pIdx) => {
     const l = (noeuds[i].liens || {})[noeuds[pIdx].index];
@@ -401,9 +441,13 @@ function analyserReseau(noeuds) {
     return { decalage: Math.round(d[pIdx] * pct / 100) };
   };
 
+  const topo = ordreTopologique(preds.map((ps) => ps.map((p) => pos.get(p))));
+  const ordre = topo.ordre.concat(topo.cycle);
   const es = []; const ef = [];
-  noeuds.forEach((n, i) => {
+  ordre.forEach((i) => {
+    const n = noeuds[i];
     let debut = 0; let finMin = 0;
+    preds[i] = preds[i].filter((p) => es[pos.get(p)] !== undefined);
     preds[i].forEach((p) => {
       const j = pos.get(p); const lien = lienDe(i, j);
       if (lien) { debut = Math.max(debut, es[j] + lien.decalage); finMin = Math.max(finMin, ef[j]); }
@@ -417,7 +461,8 @@ function analyserReseau(noeuds) {
   const succ = noeuds.map(() => []);
   preds.forEach((ps, i) => ps.forEach((p) => succ[pos.get(p)].push(i)));
   const lf = []; const ls = [];
-  for (let i = noeuds.length - 1; i >= 0; i--) {
+  for (let k = ordre.length - 1; k >= 0; k--) {
+    const i = ordre[k];
     let fin = total; let borneDebut = Infinity;
     succ[i].forEach((j) => {
       const lien = lienDe(j, i);
@@ -440,5 +485,5 @@ function analyserReseau(noeuds) {
 module.exports = {
   enMinutes, dateDe, heureDe, debutDeJour, hhmm, MIN_JOUR, HORIZON_JOURS,
   joursFeries, libelleFerie, estOuvre,
-  fenetresDuJour, soustraire, consommer, fusionner, planifierAvant, planifierArriere, analyserReseau,
+  fenetresDuJour, soustraire, consommer, fusionner, ordreTopologique, planifierAvant, planifierArriere, analyserReseau,
 };
