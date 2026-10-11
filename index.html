@@ -2879,7 +2879,7 @@
       <div class="field"><label>Étape de gamme</label><select id="m-etape"><option>Choisir un OF d'abord…</option></select></div>
       <div id="m-etape-note"></div>
       <div class="field"><label>Machine <span class="plan-note">— laissez « Aucune machine » pour un travail manuel</span></label><select id="m-machine">${machineOptions}</select></div>
-      <div class="field"><label>Jour</label><input id="m-date" type="date" value="${dateIso}"></div>
+      <div class="field"><label>Jour de début <span class="plan-note">— proposé automatiquement selon les dépendances</span></label><input id="m-date" type="date" value="${dateIso}"><div id="m-date-note" class="plan-note" style="margin-top:4px;"></div></div>
       <div class="field"><label>Personnel (optionnel — cocher une ou plusieurs personnes)</label><div class="op-list" id="m-personnel-list">${persCases}</div></div>
       <div id="m-msg"></div>
       <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">Affecter</button></div>
@@ -2937,16 +2937,38 @@
         if (defaut) etapeSelect.value = defaut.id;
         majNoteEtape(gammes);
         ajusterMachine();
+        majJourDebut();
       } catch (e) {
         etapeSelect.innerHTML = `<option value="">Erreur de chargement</option>`;
       }
+    }
+    // Jour de début automatique : déduit des dépendances de l'opération choisie.
+    let suggestionNum = 0;
+    async function majJourDebut() {
+      const note = document.getElementById('m-date-note');
+      const id = etapeSelect.value;
+      if (!id || statutChoisi() === 'planifié') { note.textContent = ''; return; }
+      const num = ++suggestionNum;
+      note.textContent = 'Calcul du jour de début…';
+      try {
+        const res = await fetch(`${API}/jour-debut-etape?gamme_id=${id}`);
+        const r = await res.json();
+        if (num !== suggestionNum) return;   // une autre étape a été choisie entre-temps
+        if (!res.ok) throw new Error(r.error || 'Erreur inconnue');
+        document.getElementById('m-date').value = r.date;
+        if (r.bloques && r.bloques.length) {
+          note.innerHTML = `<span style="color:var(--danger);">À planifier d'abord : ${r.bloques.map(esc).join(', ')}.</span>`;
+        } else {
+          note.textContent = `Début le ${r.libelle} — ${r.raison}.`;
+        }
+      } catch (e) { if (num === suggestionNum) note.textContent = ''; }
     }
     // Opération manuelle : pas de machine à choisir.
     function ajusterMachine() {
       const opt = etapeSelect.selectedOptions && etapeSelect.selectedOptions[0];
       if (opt && opt.dataset.manuel === '1') document.getElementById('m-machine').value = '';
     }
-    etapeSelect.addEventListener('change', () => { majNoteEtape(null); ajusterMachine(); });
+    etapeSelect.addEventListener('change', () => { majNoteEtape(null); ajusterMachine(); majJourDebut(); });
     document.getElementById('m-of').addEventListener('change', chargerEtapes);
     if (ofOptions) chargerEtapes();
 
@@ -2974,8 +2996,20 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ gamme_operatoire_id, machine_id: machine_id || null, date, personnel_ids }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+        let data = await res.json();
+        if (res.status === 409 && data.conflit === 'dependance') {
+          if (!confirm(`${data.error}\n\nAffecter quand même à la date choisie ?`)) {
+            document.getElementById('m-date').value = data.date_suggeree;
+            msg.innerHTML = `<div class="msg">Date remplacée par le premier jour possible. Cliquez sur Affecter pour valider.</div>`;
+            return;
+          }
+          const res2 = await fetch(`${API}/affecter-planning`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ gamme_operatoire_id, machine_id: machine_id || null, date, personnel_ids, forcer: true }),
+          });
+          data = await res2.json();
+          if (!res2.ok) throw new Error(data.error || 'Erreur inconnue');
+        } else if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
         msg.innerHTML = `<div class="msg ok">Affecté.</div>`;
         toast('Affectation enregistrée.');
         fermerModale(); chargerDonneesReelles();
