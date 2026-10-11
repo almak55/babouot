@@ -17,6 +17,7 @@
 // + quantité de l'OF ÷ cadence.
 
 const { getSupabase } = require('./lib/supabaseclient');
+const { analyser } = require('./lib/formules');
 
 const NOMS = { mise_en_route: 'Mise en route', reglage: 'Réglage', roulage: 'Roulage', nettoyage: 'Nettoyage' };
 const NOMS_LISTE = Object.values(NOMS);
@@ -44,12 +45,12 @@ exports.handler = async (event) => {
       const profils = new Map();
       phases.filter((p) => NOMS_LISTE.includes(p.nom)).forEach((p) => {
         const cle = `${p.operation_id}|${p.type_production || ''}`;
-        if (!profils.has(cle)) profils.set(cle, { operation_id: p.operation_id, operation: p.operations.nom, type_production: p.type_production, mise_en_route_min: null, reglage_min: null, cadence_par_h: null, nettoyage_min: null, nb_personnes: 1 });
+        if (!profils.has(cle)) profils.set(cle, { operation_id: p.operation_id, operation: p.operations.nom, type_production: p.type_production, mise_en_route_min: null, reglage_min: null, cadence_par_h: null, nettoyage_min: null, nb_personnes: 1, quantite_formule: null, unite_cadence: null });
         const pr = profils.get(cle);
         if (p.nom === NOMS.mise_en_route) pr.mise_en_route_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
         if (p.nom === NOMS.reglage) pr.reglage_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
         if (p.nom === NOMS.nettoyage) pr.nettoyage_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
-        if (p.nom === NOMS.roulage) { pr.cadence_par_h = p.cadence_par_h === null ? null : Number(p.cadence_par_h); pr.nb_personnes = p.nb_personnes; }
+        if (p.nom === NOMS.roulage) { pr.cadence_par_h = p.cadence_par_h === null ? null : Number(p.cadence_par_h); pr.nb_personnes = p.nb_personnes; pr.quantite_formule = p.quantite_formule || null; pr.unite_cadence = p.unite_cadence || null; }
       });
       return { statusCode: 200, body: JSON.stringify({ types, profils: Array.from(profils.values()) }) };
     }
@@ -80,15 +81,29 @@ exports.handler = async (event) => {
       if (Object.values(valeurs).every((v) => v === null)) return { statusCode: 400, body: JSON.stringify({ error: 'Renseignez au moins une valeur.' }) };
       const nbPers = Math.max(1, parseInt(b.nb_personnes, 10) || 1);
 
+      // Unité de la cadence (exemplaires, cahiers, coupes…) et quantité à traiter (formule sur la fiche).
+      const unite = String(b.unite_cadence || '').trim() || null;
+      let formule = String(b.quantite_formule || '').trim() || null;
+      if (formule && formule.replace(/\s+/g, '') === 'quantite') formule = null;   // = quantité de l'OF : rien à calculer
+      if (formule) {
+        const a = analyser(formule);
+        if (!a.ok) return { statusCode: 400, body: JSON.stringify({ error: `Quantité à traiter : formule invalide (${a.erreur}).` }) };
+        const { data: cat, error: catErr } = await supabase.from('caracteristiques_produit').select('cle');
+        if (catErr) throw catErr;
+        const connues = new Set(cat.map((c) => c.cle));
+        const inconnues = a.variables.filter((x) => x !== 'quantite' && !connues.has(x));
+        if (inconnues.length) return { statusCode: 400, body: JSON.stringify({ error: `Caractéristique inconnue : ${inconnues.map((x) => `« ${x} »`).join(', ')}. Créez-la d'abord dans « Caractéristiques produit ».` }) };
+      }
+
       await effacer(supabase, b.machine_id, b.operation_id, type);
       const lignes = [];
       const ajout = (nom, ordre, champs) => lignes.push({ operation_id: b.operation_id, machine_id: b.machine_id, type_production: type, nom, ordre, occupe_machine: true, nb_personnes: 1, ...champs });
       if (valeurs.mise_en_route !== null) ajout(NOMS.mise_en_route, 1, { type_calcul: 'fixe', duree_h: valeurs.mise_en_route / 60 });
       if (valeurs.reglage !== null) ajout(NOMS.reglage, 2, { type_calcul: 'fixe', duree_h: valeurs.reglage / 60 });
-      if (valeurs.cadence !== null) ajout(NOMS.roulage, 3, { type_calcul: 'cadence', cadence_par_h: valeurs.cadence, nb_personnes: nbPers });
+      if (valeurs.cadence !== null) ajout(NOMS.roulage, 3, { type_calcul: 'cadence', cadence_par_h: valeurs.cadence, nb_personnes: nbPers, ...(formule || unite ? { quantite_formule: formule, unite_cadence: unite } : {}) });
       if (valeurs.nettoyage !== null) ajout(NOMS.nettoyage, 4, { type_calcul: 'fixe', duree_h: valeurs.nettoyage / 60 });
       const { error } = await supabase.from('phases_standard').insert(lignes);
-      if (error) throw error;
+      if (error) throw new Error(/quantite_formule|unite_cadence/.test(error.message || '') ? `${error.message} — exécutez d'abord la migration 24 dans Supabase.` : error.message);
       return { statusCode: 200, body: JSON.stringify({ ok: true, phases: lignes.length }) };
     }
 

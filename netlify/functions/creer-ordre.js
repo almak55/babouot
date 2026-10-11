@@ -23,6 +23,7 @@ exports.handler = async (event) => {
     const body = JSON.parse(event.body || '{}');
     const { titre, titre_id, quantite, delai, priorite, operations } = body;
     const typeProduction = body.type_production ? String(body.type_production) : null;
+    const caracteristiques = body.caracteristiques && typeof body.caracteristiques === 'object' ? body.caracteristiques : null;
 
     if (!quantite || !Array.isArray(operations) || operations.length === 0) {
       return {
@@ -94,6 +95,14 @@ exports.handler = async (event) => {
       ({ data: of, error: ofError } = await supabase.from('ordres_fabrication').insert(ligneOf).select('id, numero').single());
     }
     if (ofError) throw ofError;
+
+    // Caractéristiques techniques lues sur la fiche (grammage, nombre de cahiers…) : conservées sur l'OF.
+    if (caracteristiques && Object.keys(caracteristiques).length && of) {
+      const { data: cat } = await supabase.from('caracteristiques_produit').select('cle');
+      const valides = new Set((cat || []).map((c) => c.cle));
+      const propres = Object.fromEntries(Object.entries(caracteristiques).filter(([k, v]) => valides.has(k) && v !== null && v !== ''));
+      if (Object.keys(propres).length) await supabase.from('ordres_fabrication').update({ caracteristiques: propres }).eq('id', of.id);
+    }
 
     // 5. Créer la gamme opératoire, dans l'ordre fourni.
     const gammeRows = operations.map((code, i) => ({

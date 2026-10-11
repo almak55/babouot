@@ -43,6 +43,8 @@ exports.handler = async (event) => {
     if (opsError) throw opsError;
     const typesRes = await supabase.from('types_production').select('code, libelle').order('ordre');
     const typesProd = typesRes.error ? [] : (typesRes.data || []);
+    const carRes = await supabase.from('caracteristiques_produit').select('cle, libelle, type, unite').order('ordre');
+    const catalogueCar = carRes.error ? [] : (carRes.data || []);
 
     // ------------------------------------------------------------
     // 1. Construire le contenu à envoyer à Claude selon le format.
@@ -103,6 +105,7 @@ exports.handler = async (event) => {
   "quantite": number | null,
   "delai": string | null,
   "type_production": string | null,
+  "caracteristiques": { [cle: string]: number | string },
   "operation_codes": string[],
   "confiance": "haute" | "moyenne" | "basse",
   "notes": string
@@ -114,6 +117,9 @@ Règles :
 - "quantite" : le tirage ou la quantité à relier (cherche "Tirage", "Quantité à relier"). Un seul nombre entier, sans texte autour.
 - "delai" : une date de livraison si présente (cherche "Livraison le", "LIVRAISON"), au format AAAA-MM-JJ. Si seuls jour/mois sont donnés, utilise l'année ${anneeCourante}. null si aucune date trouvée.
 - "type_production" : ${typesProd.length ? `uniquement si la fiche indique explicitement le type de travail, un code parmi : ${typesProd.map(t => `${t.code} (${t.libelle})`).join(', ')}` : 'toujours null'} ; sinon null. N'en déduis pas à partir du seul nom de l'éditeur.
+- "caracteristiques" : les valeurs techniques lues sur la fiche, uniquement pour les clés de cette liste (clé = libellé [unité]) :
+${catalogueCar.length ? catalogueCar.map(c => `  ${c.cle} = ${c.libelle}${c.unite ? ' [' + c.unite + ']' : ''}${c.type === 'texte' ? ' (texte)' : ' (nombre)'}`).join('\n') : '  (aucune)'}
+  N'inclus que les valeurs clairement présentes (ex. grammage du papier, nombre de cahiers, nombre de coupes) ; objet vide {} sinon. Nombres sans unité ni texte autour.
 - "operation_codes" : uniquement des codes choisis dans la liste ci-dessous, correspondant aux opérations clairement indiquées comme applicables (mention "oui", case cochée, quantité renseignée). N'invente aucun code hors de cette liste. Dans l'ordre le plus plausible d'une gamme de fabrication.
 - "confiance" : "haute" si l'essentiel est net et lisible, "moyenne" si certains champs sont incertains, "basse" si le document est difficile à exploiter.
 - "notes" : une phrase en français signalant les champs douteux, illisibles, ou les opérations non rattachées à la liste.
@@ -157,6 +163,16 @@ ${listeOperations}`;
     const codesValides = new Set(operations.map(o => o.code));
     resultat.operation_codes = (resultat.operation_codes || []).filter(c => codesValides.has(c));
     if (!typesProd.some((t) => t.code === resultat.type_production)) resultat.type_production = null;
+    // Caractéristiques : on ne garde que les clés du catalogue, valeurs converties selon leur type.
+    const propres = {};
+    Object.entries(resultat.caracteristiques || {}).forEach(([cle, val]) => {
+      const def = catalogueCar.find((c) => c.cle === cle);
+      if (!def || val === null || val === undefined || String(val).trim() === '') return;
+      if (def.type === 'texte') { propres[cle] = String(val).trim(); return; }
+      const n = Number(String(val).replace(',', '.').replace(/[^0-9.\-]/g, ''));
+      if (Number.isFinite(n)) propres[cle] = n;
+    });
+    resultat.caracteristiques = propres;
 
     return { statusCode: 200, body: JSON.stringify(resultat) };
   } catch (err) {
