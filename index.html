@@ -2618,6 +2618,8 @@
       const data = await res.json();
 
       state.machines = data.machines.map(m => ({ id: m.code, uuid: m.id, name: m.nom, code: m.code }));
+      // Ligne virtuelle pour les opérations manuelles (aucune machine) : sinon leurs créneaux seraient invisibles.
+      if (data.planning.some(c => !c.machine_id)) state.machines.push({ id: 'MANUEL', uuid: null, name: 'Travail manuel (sans machine)', code: 'MANUEL', manuel: true });
 
       state.personnel = data.personnel.map(p => {
         // Charge = heures affectées / 40 h (5 j × 8 h). Une ligne sans heures = journée entière (8 h).
@@ -2662,7 +2664,7 @@
 
       const planningParMachine = {};
       data.planning.forEach(creneau => {
-        const machine = data.machines.find(m => m.id === creneau.machine_id);
+        const machine = creneau.machine_id ? data.machines.find(m => m.id === creneau.machine_id) : { code: 'MANUEL' };
         if (!machine) return;
         const dayIdx = DAYS_ISO.indexOf(creneau.date);
         if (dayIdx === -1) return;
@@ -2868,7 +2870,7 @@
 
     const dateIso = dayIdx != null ? DAYS_ISO[dayIdx] : DAYS_ISO[0];
     const ofOptions = state.ordres.map(o => `<option value="${o.uuid}" ${o.uuid === ofUuid ? 'selected' : ''}>${o.id} — ${o.produit}</option>`).join('');
-    const machineOptions = state.machines.map(m => `<option value="${m.uuid}" ${m.uuid===machineUuid?'selected':''}>${m.name}</option>`).join('');
+    const machineOptions = `<option value="">— Aucune machine (opération manuelle) —</option>` + state.machines.filter(m => m.uuid).map(m => `<option value="${m.uuid}" ${m.uuid===machineUuid?'selected':''}>${m.name}</option>`).join('');
     const persCases = refs.personnel.map(p => `<label><input type="checkbox" value="${p.id}"> ${p.nom}${p.poste ? ' <span style="color:var(--ink-500);">— ' + p.poste + '</span>' : ''}</label>`).join('');
 
     afficherModale(`
@@ -2876,7 +2878,7 @@
       <div class="field"><label>Ordre de fabrication</label><select id="m-of">${ofOptions}</select></div>
       <div class="field"><label>Étape de gamme</label><select id="m-etape"><option>Choisir un OF d'abord…</option></select></div>
       <div id="m-etape-note"></div>
-      <div class="field"><label>Machine</label><select id="m-machine">${machineOptions}</select></div>
+      <div class="field"><label>Machine <span class="plan-note">— laissez « Aucune machine » pour un travail manuel</span></label><select id="m-machine">${machineOptions}</select></div>
       <div class="field"><label>Jour</label><input id="m-date" type="date" value="${dateIso}"></div>
       <div class="field"><label>Personnel (optionnel — cocher une ou plusieurs personnes)</label><div class="op-list" id="m-personnel-list">${persCases}</div></div>
       <div id="m-msg"></div>
@@ -2930,15 +2932,21 @@
           return;
         }
         const SUFFIXE = { 'planifié': ' — déjà planifiée', 'en cours': ' — en cours', 'terminé': ' — terminée' };
-        etapeSelect.innerHTML = gammes.map(g => `<option value="${g.id}" data-statut="${g.statut}" ${g.statut === 'en cours' || g.statut === 'terminé' ? 'disabled' : ''}>${esc(g.operation.nom)}${SUFFIXE[g.statut] || ''}</option>`).join('');
+        etapeSelect.innerHTML = gammes.map(g => `<option value="${g.id}" data-statut="${g.statut}" data-manuel="${g.sans_machine ? 1 : 0}" ${g.statut === 'en cours' || g.statut === 'terminé' ? 'disabled' : ''}>${esc(g.operation.nom)}${SUFFIXE[g.statut] || ''}</option>`).join('');
         const defaut = gammes.find(g => g.statut === 'à planifier') || gammes.find(g => g.statut === 'planifié');
         if (defaut) etapeSelect.value = defaut.id;
         majNoteEtape(gammes);
+        ajusterMachine();
       } catch (e) {
         etapeSelect.innerHTML = `<option value="">Erreur de chargement</option>`;
       }
     }
-    etapeSelect.addEventListener('change', () => majNoteEtape(null));
+    // Opération manuelle : pas de machine à choisir.
+    function ajusterMachine() {
+      const opt = etapeSelect.selectedOptions && etapeSelect.selectedOptions[0];
+      if (opt && opt.dataset.manuel === '1') document.getElementById('m-machine').value = '';
+    }
+    etapeSelect.addEventListener('change', () => { majNoteEtape(null); ajusterMachine(); });
     document.getElementById('m-of').addEventListener('change', chargerEtapes);
     if (ofOptions) chargerEtapes();
 
@@ -2953,16 +2961,18 @@
         msg.innerHTML = `<div class="msg error">Cette étape est déjà planifiée : déplanifiez-la d'abord (boutons ci-dessus).</div>`;
         return;
       }
-      if (!gamme_operatoire_id || !machine_id || !date) {
-        msg.innerHTML = `<div class="msg error">Étape, machine et jour sont requis.</div>`;
+      if (!gamme_operatoire_id || !date) {
+        msg.innerHTML = `<div class="msg error">Étape et jour sont requis.</div>`;
         return;
       }
+      const optChoisie = etapeSelect.selectedOptions[0];
+      if (!machine_id && optChoisie && optChoisie.dataset.manuel === '0' && !confirm('Cette opération utilise normalement une machine. L\'affecter sans machine ?')) return;
       msg.innerHTML = `<div class="msg">Affectation en cours…</div>`;
       try {
         const res = await fetch(`${API}/affecter-planning`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gamme_operatoire_id, machine_id, date, personnel_ids }),
+          body: JSON.stringify({ gamme_operatoire_id, machine_id: machine_id || null, date, personnel_ids }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
