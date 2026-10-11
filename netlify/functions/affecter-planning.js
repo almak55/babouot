@@ -19,6 +19,8 @@
 //           { error, conflit: 'machine'|'personnel'|'absence' }
 
 const { getSupabase } = require('./lib/supabaseclient');
+const { jourDebutSuggere, aujourdhuiParis } = require('./lib/debut-etape');
+const PL = require('./lib/planification');
 
 exports.handler = async (event) => {
   try {
@@ -26,16 +28,17 @@ exports.handler = async (event) => {
       return { statusCode: 405, body: JSON.stringify({ error: 'Méthode non autorisée, utiliser POST.' }) };
     }
     const body = JSON.parse(event.body || '{}');
-    const { gamme_operatoire_id, date, machine_id } = body;
+    const { gamme_operatoire_id, machine_id } = body;
+    let { date } = body;
     const personnelIds = Array.from(new Set([
       ...(Array.isArray(body.personnel_ids) ? body.personnel_ids : []),
       ...(body.personnel_id ? [body.personnel_id] : []),
     ].filter(Boolean)));
 
-    if (!gamme_operatoire_id || !date) {
+    if (!gamme_operatoire_id) {
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: 'gamme_operatoire_id et date sont requis (la machine est facultative : opération manuelle).' }),
+        body: JSON.stringify({ error: 'gamme_operatoire_id requis (date facultative : déduite des dépendances ; machine facultative : opération manuelle).' }),
       };
     }
     const machineId = machine_id || null;
@@ -84,6 +87,34 @@ exports.handler = async (event) => {
           conflit: 'sequencement',
         }),
       };
+    }
+
+    // Jour de début : automatique (déduit des dépendances) si non précisé ;
+    // si précisé trop tôt par rapport aux dépendances, refus sauf `forcer`.
+    const suggestion = await jourDebutSuggere(supabase, gamme.id, aujourdhuiParis());
+    const dateAuto = !date;
+    if (dateAuto) date = suggestion.date;
+    else if (date < suggestion.date && !body.forcer && suggestion.raison) {
+      return {
+        statusCode: 409,
+        body: JSON.stringify({
+          error: `Trop tôt : cette opération démarre au plus tôt le ${suggestion.libelle} (${suggestion.raison}).`,
+          conflit: 'dependance', date_suggeree: suggestion.date,
+        }),
+      };
+    }
+
+    // Date automatique : si la machine est déjà prise ce jour-là, on prend le prochain jour ouvré libre.
+    if (dateAuto && machineId) {
+      for (let essai = 0; essai < 60; essai++) {
+        const { data: prise, error: priseErr } = await supabase
+          .from('planning_jour').select('id').eq('machine_id', machineId).eq('date', date).neq('statut', 'annulé');
+        if (priseErr) throw priseErr;
+        if (!prise.length) break;
+        let j = PL.enMinutes(date, '00:00') + PL.MIN_JOUR;
+        while (!PL.estOuvre(j)) j += PL.MIN_JOUR;
+        date = PL.dateDe(j);
+      }
     }
 
     // Vérifier que la machine est libre ce jour-là.
@@ -164,7 +195,7 @@ exports.handler = async (event) => {
       .eq('id', gamme.id);
     if (updateError) throw updateError;
 
-    return { statusCode: 200, body: JSON.stringify({ planning_jour_id: creneau.id, personnel_ids: personnelIds }) };
+    return { statusCode: 200, body: JSON.stringify({ planning_jour_id: creneau.id, personnel_ids: personnelIds, date }) };
   } catch (err) {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
