@@ -610,7 +610,7 @@
         <div>
           <div class="greeting">Bonjour, Alain <span class="wave">👋</span></div>
           <h1 id="page-title">Planification</h1>
-          <div class="sub" id="page-sub">Semaine du 21 au 27 septembre 2026 — parc machine réel</div>
+          <div class="sub" id="page-sub">Chargement de la semaine…</div>
         </div>
       </div>
       <div style="display:flex; align-items:center; gap:8px;">
@@ -740,19 +740,45 @@
     date.setUTCDate(date.getUTCDate() - jour + 1);
     return date;
   }
-  const LUNDI = lundiDeLaSemaine(new Date());
-  const DAYS_ISO = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(LUNDI);
-    d.setUTCDate(d.getUTCDate() + i);
-    return d.toISOString().slice(0, 10);
-  });
   const JOURS_ABREGES = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-  const DAYS = DAYS_ISO.map((iso, i) => `${JOURS_ABREGES[i]} ${iso.slice(8, 10)}`);
+  const MOIS_FR = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
   const AUJOURDHUI_ISO = new Date().toISOString().slice(0, 10);
-  const TODAY_IDX = Math.max(0, DAYS_ISO.indexOf(AUJOURDHUI_ISO));
+  let LUNDI, DAYS_ISO, DAYS, TODAY_IDX;
+  function libelleSemaine() {
+    const a = new Date(DAYS_ISO[0] + 'T00:00:00Z'), b = new Date(DAYS_ISO[6] + 'T00:00:00Z');
+    const ja = a.getUTCDate(), jb = b.getUTCDate();
+    const fin = `${jb}${jb === 1 ? 'er' : ''} ${MOIS_FR[b.getUTCMonth()]} ${b.getUTCFullYear()}`;
+    const debut = a.getUTCMonth() === b.getUTCMonth() ? `${ja}${ja === 1 ? 'er' : ''}` : `${ja}${ja === 1 ? 'er' : ''} ${MOIS_FR[a.getUTCMonth()]}`;
+    return `Semaine du ${debut} au ${fin}`;
+  }
+  // Positionne la semaine affichée sur le lundi donné (Date UTC).
+  function definirSemaine(lundi) {
+    LUNDI = lundi;
+    DAYS_ISO = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(lundi);
+      d.setUTCDate(d.getUTCDate() + i);
+      return d.toISOString().slice(0, 10);
+    });
+    DAYS = DAYS_ISO.map((iso, i) => `${JOURS_ABREGES[i]} ${iso.slice(8, 10)}`);
+    TODAY_IDX = DAYS_ISO.indexOf(AUJOURDHUI_ISO); // -1 si aujourd'hui n'est pas dans la semaine affichée
+    titles.planning[1] = libelleSemaine() + ' — parc machine réel';
+  }
+  // Semaine initiale : la semaine courante ; le dimanche, on prépare déjà la suivante.
+  function lundiInitial() {
+    const aujourdhui = new Date(AUJOURDHUI_ISO + 'T00:00:00Z');
+    const l = lundiDeLaSemaine(aujourdhui);
+    if (aujourdhui.getUTCDay() === 0) l.setUTCDate(l.getUTCDate() + 7);
+    return l;
+  }
+  function changerSemaine(deltaSemaines) {
+    const l = deltaSemaines === 0 ? lundiDeLaSemaine(new Date(AUJOURDHUI_ISO + 'T00:00:00Z')) : new Date(LUNDI);
+    if (deltaSemaines) l.setUTCDate(l.getUTCDate() + 7 * deltaSemaines);
+    definirSemaine(l);
+    chargerDonneesReelles();
+  }
 
   const titles = {
-    planning: ['Planification', 'Semaine du 22 au 28 septembre 2026'],
+    planning: ['Planification', ''],
     ordres: ['Ordres de fabrication', "5 ordres actifs — 2 en cours, 2 planifiés, 1 en pause"],
     personnel: ['Personnel', 'Affectation, compétences et charge par opérateur'],
     machines: ['Machines', 'Parc machine — créer, modifier, rattacher à une opération'],
@@ -760,6 +786,8 @@
     stocks: ['Stocks & matières', 'Papier, colle, fil, couverture — suivi des seuils'],
     reporting: ['Reporting', 'Indicateurs de production — semaine en cours'],
   };
+
+  definirSemaine(lundiInitial());
 
   function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; }
   function svgIcon(inner){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`; }
@@ -809,6 +837,11 @@
     const legend = el(`
       <div class="panel">
         <div class="panel-head"><h2>Planning atelier — vue machines</h2>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <button class="btn" id="sem-prec" title="Semaine précédente">◀</button>
+            <button class="btn" id="sem-auj">Aujourd'hui</button>
+            <button class="btn" id="sem-suiv" title="Semaine suivante">▶</button>
+          </div>
           <button class="btn primary" id="add-of-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Affecter un OF</button>
         </div>
         <div class="gantt-wrap"><table class="gantt" id="gantt-table"></table></div>
@@ -821,6 +854,9 @@
     `);
     wrap.appendChild(legend);
 
+    legend.querySelector('#sem-prec').addEventListener('click', () => changerSemaine(-1));
+    legend.querySelector('#sem-suiv').addEventListener('click', () => changerSemaine(1));
+    legend.querySelector('#sem-auj').addEventListener('click', () => changerSemaine(0));
     const table = legend.querySelector('#gantt-table');
     let thead = '<tr><th class="day" style="text-align:left; position:sticky; left:0; background:var(--paper-raised);">Machine</th>';
     DAYS.forEach((d,i)=> thead += `<th class="day ${i===TODAY_IDX?'today':''}">${d}</th>`);
