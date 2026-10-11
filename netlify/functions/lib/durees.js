@@ -146,6 +146,34 @@ async function calculerEtapes(supabase, ofId) {
             detail = `${p.formule}  [${a.variables.map((v) => `${v} = ${valeurs[v]}`).join(', ')}]`;
           }
         }
+      } else if (p.quantite_formule && String(p.quantite_formule).trim()) {
+        // Cadence sur une autre unité que l'exemplaire (cahiers cousus/pliés, coupes au massicot…) :
+        // la quantité de travail se calcule d'après la fiche (ex. quantite * nb_cahiers).
+        const unite = p.unite_cadence || 'unités';
+        const a = analyser(p.quantite_formule);
+        if (!a.ok) {
+          erreursFormule.push({ phase: p.nom, message: `quantité à traiter : ${a.erreur}` });
+          detail = `formule invalide : ${a.erreur}`;
+        } else {
+          const valeurs = {};
+          a.variables.forEach((v) => {
+            const info = v === 'quantite' ? { libelle: 'Quantité (exemplaires)', type: 'nombre', unite: null } : (parCle[v] || { libelle: v, type: 'nombre', unite: null });
+            if (v === 'quantite') valeurs[v] = quantite;
+            else { const val = valeurDe(v); if (val !== null) valeurs[v] = val; }
+            ajouterRequis(v, info.libelle, info.type, info.unite);
+          });
+          const r = evaluer(p.quantite_formule, valeurs, { ...typesCar, quantite: 'nombre' });
+          if (!r.ok) {
+            erreursFormule.push({ phase: p.nom, message: `quantité à traiter : ${r.erreur}` });
+            detail = `erreur : ${r.erreur}`;
+          } else if (r.manquantes.length) {
+            r.manquantes.forEach((v) => { if (!manquants.includes(v)) manquants.push(v); });
+            detail = `à renseigner : ${r.manquantes.join(', ')}`;
+          } else {
+            d = r.valeur / Number(p.cadence_par_h);
+            detail = `${Math.round(r.valeur * 100) / 100} ${unite} ÷ ${p.cadence_par_h} ${unite}/h  [${p.quantite_formule}]`;
+          }
+        }
       } else {
         d = quantite / Number(p.cadence_par_h);
         detail = `${quantite} ÷ ${p.cadence_par_h}/h`;
