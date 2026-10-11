@@ -462,13 +462,16 @@
   .produit-box { border: 1px solid var(--accent-teal); background: var(--accent-teal-soft); border-radius: var(--radius-md); padding: 11px 14px; margin-bottom: 12px; }
   .produit-titre { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
   .import-lignes { max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-md); margin-top: 10px; }
+  .profil-ligne { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
   .pl-pers-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .pl-heures-wrap { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-500); white-space: nowrap; }
   .pl-heures { width: 110px; padding: 3px 6px; font-size: 12px; }
   .pred-list { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--field-bg); }
   .pred-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
-  .pred-name { font-size: 12.5px; min-width: 200px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-  .pred-name input { width: auto; margin: 0; }
+  .pred-name { font-size: 12.5px; min-width: 200px; display: inline-flex; align-items: center; justify-content: flex-start; text-align: left; gap: 8px; cursor: pointer; margin: 0; font-weight: 400; color: var(--ink-900); }
+  .pred-name input { width: auto; margin: 0; flex: 0 0 auto; }
+  .pred-list { align-items: flex-start; }
+  .pred-row { justify-content: flex-start; }
   .pred-row select { min-width: 250px; padding: 5px 8px; font-size: 12.5px; }
   .pred-pct { font-size: 12.5px; color: var(--ink-700); display: inline-flex; align-items: center; gap: 5px; }
   .pred-pct input { width: 64px; padding: 4px 6px; font-size: 12.5px; }
@@ -1431,12 +1434,14 @@
       <div class="field"><label>Code</label><input id="m-code" value="${machine ? machine.code : ''}" placeholder="ex: SIGLOCH"></div>
       <div class="field"><label>Nom</label><input id="m-nom" value="${machine ? machine.nom : ''}" placeholder="ex: Sigloch"></div>
       <div class="field"><label>Opérations (cocher toutes celles que cette machine peut faire)</label><div class="op-list">${opsHtml}</div></div>
-      ${estEdition ? `<div class="field"><label><input type="checkbox" id="m-actif" ${machine.actif ? 'checked' : ''}> Machine active</label></div>` : ''}
+      ${estEdition ? `<div class="field"><label><input type="checkbox" id="m-actif" ${machine.actif ? 'checked' : ''}> Machine active</label></div>
+      <div class="field"><label>Temps de production de cette machine <span class="plan-note">— mise en route, réglage, cadence, nettoyage (par type de production)</span></label><button class="btn" type="button" id="m-profils">Configurer les temps de production…</button></div>` : ''}
       <div class="field"><label>Notes</label><input id="m-notes" value="${machine && machine.notes ? machine.notes : ''}" placeholder="optionnel"></div>
       <div id="m-msg"></div>
       <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">${estEdition ? 'Enregistrer' : 'Créer'}</button></div>
     `);
 
+    if (estEdition) document.getElementById('m-profils').addEventListener('click', () => ouvrirProfilsMachine(machine, refs));
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
     document.getElementById('m-submit').addEventListener('click', async () => {
       const code = document.getElementById('m-code').value.trim();
@@ -1468,6 +1473,117 @@
         msg.innerHTML = `<div class="msg error">${e.message}</div>`;
       }
     });
+  }
+
+
+  // ---------- Profils de temps d'une machine (par type de production) ----------
+  // Un profil = mise en route + réglage + roulage (cadence en ex./h) + nettoyage.
+  // Le chiffrage l'applique automatiquement : MER + réglage + quantité ÷ cadence + nettoyage.
+  async function ouvrirProfilsMachine(machine, refs) {
+    const codes = (machine.operations || []).map(o => o.code);
+    const ops = refs.operations.filter(o => codes.includes(o.code));
+    let donnees;
+    const charger = async () => {
+      const res = await fetch(`${API}/profils-machine?machine_id=${machine.id}`);
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+      return d;
+    };
+    try { donnees = await charger(); }
+    catch (e) {
+      afficherModale(`<h3>Temps de production — ${esc(machine.nom)}</h3><div class="msg error">${esc(e.message)}${/type_production|types_production|relation/i.test(e.message) ? ' — exécutez d\'abord la migration 23 dans Supabase.' : ''}</div><div class="actions"><button class="btn" id="m-close">Fermer</button></div>`);
+      document.getElementById('m-close').addEventListener('click', fermerModale);
+      return;
+    }
+    if (!ops.length) {
+      afficherModale(`<h3>Temps de production — ${esc(machine.nom)}</h3><div class="msg">Cochez d'abord au moins une opération pour cette machine (et enregistrez), puis revenez ici.</div><div class="actions"><button class="btn" id="m-close">Fermer</button></div>`);
+      document.getElementById('m-close').addEventListener('click', fermerModale);
+      return;
+    }
+    const nomType = (c) => c ? ((donnees.types.find(t => t.code === c) || { libelle: c }).libelle) : 'Tous types';
+    const nbm = (v) => (v === null || v === undefined ? '—' : `${v} min`);
+    const dessiner = () => {
+      const lignes = donnees.profils.map((p, i) => `
+        <div class="profil-ligne"><div><strong>${esc(p.operation)}</strong> · ${esc(nomType(p.type_production))}<br>
+          <span class="plan-note">mise en route ${nbm(p.mise_en_route_min)} · réglage ${nbm(p.reglage_min)} · roulage ${p.cadence_par_h ? p.cadence_par_h + ' ex./h' : '—'} · nettoyage ${nbm(p.nettoyage_min)}</span></div>
+          <span><button class="btn" data-modif="${i}">Modifier</button> <button class="btn" data-suppr="${i}">Supprimer</button></span></div>`).join('');
+      $('pf-liste').innerHTML = lignes || '<div class="empty">Aucun profil enregistré pour cette machine.</div>';
+      $('pf-liste').querySelectorAll('[data-modif]').forEach(b => b.addEventListener('click', () => {
+        const p = donnees.profils[Number(b.dataset.modif)];
+        $('pf-op').value = p.operation_id; $('pf-type').value = p.type_production || '';
+        $('pf-mer').value = p.mise_en_route_min ?? ''; $('pf-reg').value = p.reglage_min ?? '';
+        $('pf-cad').value = p.cadence_par_h ?? ''; $('pf-net').value = p.nettoyage_min ?? ''; $('pf-pers').value = p.nb_personnes || 1;
+        calcul();
+      }));
+      $('pf-liste').querySelectorAll('[data-suppr]').forEach(b => b.addEventListener('click', async () => {
+        const p = donnees.profils[Number(b.dataset.suppr)];
+        if (!confirm(`Supprimer ce profil (${p.operation} · ${nomType(p.type_production)}) ?`)) return;
+        try {
+          const res = await fetch(`${API}/profils-machine?machine_id=${machine.id}&operation_id=${p.operation_id}&type_production=${p.type_production || 'tous'}`, { method: 'DELETE' });
+          if (!res.ok) throw new Error((await res.json()).error || 'Erreur inconnue');
+          donnees = await charger(); dessiner();
+        } catch (e) { $('pf-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+      }));
+    };
+    const $ = (id) => document.getElementById(id);
+    afficherModale(`
+      <h3>Temps de production — ${esc(machine.nom)}</h3>
+      <div id="pf-liste"></div>
+      <div class="produit-box">
+        <div class="produit-titre">Ajouter ou modifier un profil <span class="plan-note">— un profil par opération et par type de production ; le même enregistrement le remplace</span></div>
+        <div class="step-grid">
+          <div class="field"><label>Opération</label><select id="pf-op">${ops.map(o => `<option value="${o.id}">${esc(o.nom)}</option>`).join('')}</select></div>
+          <div class="field"><label>Type de production</label><select id="pf-type"><option value="">Tous types</option>${donnees.types.map(t => `<option value="${esc(t.code)}">${esc(t.libelle)}</option>`).join('')}</select>
+            <button class="btn" type="button" id="pf-newtype" style="margin-top:6px;">+ Nouveau type…</button></div>
+          <div class="field"><label>Mise en route (min)</label><input id="pf-mer" type="number" min="0" step="any"></div>
+          <div class="field"><label>Réglage (min)</label><input id="pf-reg" type="number" min="0" step="any"></div>
+          <div class="field"><label>Roulage : cadence moyenne (exemplaires / h)</label><input id="pf-cad" type="number" min="0" step="any"></div>
+          <div class="field"><label>Nettoyage (min)</label><input id="pf-net" type="number" min="0" step="any"></div>
+          <div class="field"><label>Personnes au roulage</label><input id="pf-pers" type="number" min="1" step="1" value="1"></div>
+          <div class="field"><label>Aperçu pour <input id="pf-qte" type="number" min="1" value="1000" style="width:90px; display:inline-block;"> ex.</label><div id="pf-total" class="mono" style="padding:8px 0;">—</div></div>
+        </div>
+      </div>
+      <div id="pf-msg"></div>
+      <div class="actions"><button class="btn" id="m-close">Fermer</button><button class="btn primary" id="pf-save">Enregistrer le profil</button></div>
+    `, 'large');
+    const nv = (id) => { const v = $(id).value; return v === '' ? null : Number(String(v).replace(',', '.')); };
+    function calcul() {
+      const q = nv('pf-qte') || 0; const cad = nv('pf-cad');
+      const min = (nv('pf-mer') || 0) + (nv('pf-reg') || 0) + (nv('pf-net') || 0) + (cad ? q / cad * 60 : 0);
+      $('pf-total').textContent = min ? `${fmtH(min / 60)} au total` : '—';
+    }
+    ['pf-mer', 'pf-reg', 'pf-cad', 'pf-net', 'pf-qte'].forEach(id => $(id).addEventListener('input', calcul));
+    $('pf-newtype').addEventListener('click', async () => {
+      const libelle = prompt('Nom du nouveau type de production (ex. Brochure) :');
+      if (!libelle || !libelle.trim()) return;
+      try {
+        const res = await fetch(`${API}/profils-machine`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'ajouter_type', libelle }) });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        donnees.types.push({ code: d.code, libelle: d.libelle });
+        $('pf-type').insertAdjacentHTML('beforeend', `<option value="${esc(d.code)}">${esc(d.libelle)}</option>`);
+        $('pf-type').value = d.code;
+        referentielsCache = null;
+      } catch (e) { $('pf-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
+    $('m-close').addEventListener('click', fermerModale);
+    $('pf-save').addEventListener('click', async () => {
+      $('pf-msg').innerHTML = '<div class="msg">Enregistrement…</div>';
+      try {
+        const res = await fetch(`${API}/profils-machine`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            machine_id: machine.id, operation_id: $('pf-op').value, type_production: $('pf-type').value || null,
+            mise_en_route_min: nv('pf-mer'), reglage_min: nv('pf-reg'), cadence_par_h: nv('pf-cad'), nettoyage_min: nv('pf-net'), nb_personnes: nv('pf-pers') || 1,
+          }),
+        });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        toast('Profil enregistré.');
+        donnees = await charger(); dessiner(); $('pf-msg').innerHTML = '';
+      } catch (e) { $('pf-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
+    dessiner(); calcul();
   }
 
   // ---------- Temps standards & chiffrage ----------
@@ -2074,7 +2190,10 @@
   }
 
   async function ouvrirModalePlanification(ofUuid, ofNumero, etat) {
-    etat = etat || { mode: 'avant', debut: maintenantLocal(), fin: '', horaires: 'normal', replanifier: false, imposes: {} };
+    // Date de livraison de la fiche de fabrication : reprise automatiquement comme « fin au plus tard ».
+    const ofCourant = (state.ordres || []).find(o => o.uuid === ofUuid);
+    const livraison = ofCourant && ofCourant.delai && /^\d{4}-\d{2}-\d{2}/.test(String(ofCourant.delai)) ? String(ofCourant.delai).slice(0, 10) : null;
+    etat = etat || { mode: 'avant', debut: maintenantLocal(), fin: livraison ? `${livraison}T16:30` : '', horaires: 'normal', replanifier: false, imposes: {} };
     let refs;
     try { refs = await getReferentiels(); }
     catch (e) { toast(`Backend indisponible : ${e.message}`, 'error'); return; }
@@ -2088,7 +2207,7 @@
             <option value="arriere" ${etat.mode === 'arriere' ? 'selected' : ''}>Terminer au plus tard le…</option>
           </select></div>
         <div class="field" id="pl-debut-wrap"><label>Début souhaité</label><input id="pl-debut" type="datetime-local" value="${etat.debut}"></div>
-        <div class="field" id="pl-fin-wrap"><label>Fin au plus tard <span style="font-weight:400">(vide = délai de l'OF)</span></label><input id="pl-fin" type="datetime-local" value="${etat.fin}"></div>
+        <div class="field" id="pl-fin-wrap"><label>Fin au plus tard <span style="font-weight:400">${livraison ? `(livraison de la fiche : ${livraison.slice(8)}/${livraison.slice(5, 7)}/${livraison.slice(0, 4)})` : "(vide = délai de l'OF)"}</span></label><input id="pl-fin" type="datetime-local" value="${etat.fin}"></div>
         <div class="field"><label>Horaires</label>
           <select id="pl-horaires">
             <option value="normal" ${etat.horaires === 'normal' ? 'selected' : ''}>Normaux</option>
@@ -2342,10 +2461,11 @@
           <div class="step-source">${SOURCES[e.source]}${e.duree_manuelle_h !== null ? ' — <strong>durée manuelle appliquée</strong>' : ''}</div>
           <div class="step-grid">
             <div class="field"><label>Machine prévue ${verrou ? '(planifiée — non modifiable ici)' : ''}</label><select class="s-machine" ${verrou ? 'disabled' : ''}>${machOptions}</select></div>
-            <div class="field"><label>Quantité (vide = ${data.of.quantite})</label><input class="s-qte" type="number" min="1" value="${e.parametres.quantite ?? ''}"></div>
+            <div class="field"><label>Quantité de cette opération <span class="plan-note">— reprise de l'OF, corrigeable</span></label><input class="s-qte" type="number" min="1" data-auto="${e.parametres.quantite ? 0 : 1}" value="${e.parametres.quantite ?? data.of.quantite}"></div>
             ${paramsHtml}
             <div class="field"><label>Durée manuelle (h) — remplace le calcul</label><input class="s-manuel" type="number" min="0" step="any" value="${e.duree_manuelle_h ?? ''}"></div>
           </div>
+          ${e.type_manquant ? `<div class="msg error" style="margin:6px 0 0;">Des temps existent pour : ${e.types_possibles.map(c => esc(((data.types_production || []).find(t => t.code === c) || { libelle: c }).libelle)).join(', ')}. Choisissez le <strong>type de production</strong> de l'OF ci-dessus puis enregistrez.</div>` : ''}
           ${predHtml}${manquants}${erreursF}${phasesHtml}
         </div>`;
     }).join('');
@@ -2367,6 +2487,14 @@
     afficherModale(`
       <h3>Chiffrage — ${ofNumero} <span style="font-weight:400; color:var(--ink-500); font-size:13px;">(${data.of.quantite.toLocaleString('fr-FR')} ex.)</span></h3>
       ${data.avertissements.map(a => `<div class="msg error">${a}</div>`).join('')}
+      <div class="produit-box">
+        <div class="produit-titre">Production <span class="plan-note">— quantité reprise de la fiche de fabrication, corrigeable ; le type de production choisit les temps de machine</span></div>
+        <div class="step-grid">
+          <div class="field"><label>Quantité de l'OF (exemplaires)</label><input id="m-of-qte" type="number" min="1" value="${data.of.quantite}"></div>
+          <div class="field"><label>Type de production</label>
+            <select id="m-type-prod"><option value="">— non précisé —</option>${(data.types_production || []).map(t => `<option value="${esc(t.code)}" ${data.of.type_production === t.code ? 'selected' : ''}>${esc(t.libelle)}</option>`).join('')}</select></div>
+        </div>
+      </div>
       ${produitHtml}
       <div class="produit-box">
         <div class="produit-titre">Opérations de cet OF <span class="plan-note">— enregistrez vos saisies avant d'ajouter ou de retirer une opération</span></div>
@@ -2388,6 +2516,11 @@
       <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="m-submit">Recalculer et enregistrer</button></div>
     `, 'large');
 
+    // Quantité : la quantité de l'OF se répercute sur les opérations qui n'ont pas de valeur propre.
+    document.querySelectorAll('.s-qte').forEach(i => i.addEventListener('input', () => { i.dataset.auto = '0'; }));
+    document.getElementById('m-of-qte').addEventListener('input', (ev) => {
+      document.querySelectorAll('.s-qte[data-auto="1"]').forEach(i => { i.value = ev.target.value; });
+    });
     const majLignePred = (row) => {
       const coche = row.querySelector('.s-pred-check').checked;
       const sel = row.querySelector('.s-pred-mode');
@@ -2423,8 +2556,8 @@
       document.querySelectorAll('.s-car').forEach(i => { caracteristiques[i.dataset.cle] = i.value.trim(); });   // vide = effacer
       const etapes = Array.from(document.querySelectorAll('.step-card')).map(card => {
         const parametres = {};
-        const q = card.querySelector('.s-qte').value;
-        if (q !== '') parametres.quantite = q;
+        const qIn = card.querySelector('.s-qte');
+        if (qIn.dataset.auto === '0' && qIn.value !== '' && qIn.value !== document.getElementById('m-of-qte').value) parametres.quantite = qIn.value;
         card.querySelectorAll('.s-param').forEach(i => { if (i.value !== '') parametres[i.dataset.cle] = i.value; });
         const etape = {
           gamme_id: card.dataset.gamme,
@@ -2453,7 +2586,7 @@
       try {
         const res = await fetch(`${API}/calculer-durees`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ of_id: ofUuid, caracteristiques, etapes }),
+          body: JSON.stringify({ of_id: ofUuid, caracteristiques, etapes, quantite_of: document.getElementById('m-of-qte').value, type_production: document.getElementById('m-type-prod').value || null }),
         });
         const nouveau = await res.json();
         if (!res.ok) throw new Error(nouveau.error || 'Erreur inconnue');
@@ -2819,6 +2952,8 @@
       <div class="field"><label>Client</label><input id="m-titre-client" placeholder="ex: Éditions Pléiade"></div>
       <div class="field"><label>Quantité</label><input id="m-qte" type="number" min="1" placeholder="2000"></div>
       <div class="field"><label>Délai</label><input id="m-delai" type="date"></div>
+      <div class="field"><label>Type de production <span class="plan-note">— choisit les temps de machine (Pléiade, Cartonné…)</span></label>
+        <select id="m-type"><option value="">— non précisé —</option>${(refs.types_production || []).map(t => `<option value="${esc(t.code)}">${esc(t.libelle)}</option>`).join('')}</select></div>
       <div class="field"><label>Priorité</label>
         <select id="m-priorite"><option value="normale">Normale</option><option value="haute">Haute</option><option value="urgente">Urgente</option></select>
       </div>
@@ -2849,6 +2984,7 @@
         if (data.client) document.getElementById('m-titre-client').value = data.client;
         if (data.quantite) document.getElementById('m-qte').value = data.quantite;
         if (data.delai) document.getElementById('m-delai').value = data.delai;
+        if (data.type_production) document.getElementById('m-type').value = data.type_production;
         document.querySelectorAll('.op-list input[type="checkbox"]').forEach(cb => {
           cb.checked = (data.operation_codes || []).includes(cb.value);
         });
@@ -2880,7 +3016,7 @@
         const res = await fetch(`${API}/creer-ordre`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ titre: { nom, client }, quantite, delai, priorite, operations }),
+          body: JSON.stringify({ titre: { nom, client }, quantite, delai, priorite, operations, type_production: document.getElementById('m-type').value || null }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
