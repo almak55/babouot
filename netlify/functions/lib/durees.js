@@ -178,7 +178,7 @@ async function calculerEtapes(supabase, ofId) {
         d = quantite / Number(p.cadence_par_h);
         detail = `${quantite} ÷ ${p.cadence_par_h}/h`;
       }
-      return { nom: p.nom, duree_h: arrondi(d), detail, occupe_machine: p.occupe_machine, nb_personnes: p.nb_personnes };
+      return { nom: p.nom, duree_h: arrondi(d), detail, occupe_machine: p.occupe_machine, nb_personnes: p.nb_personnes, type_calcul: p.type_calcul };
     });
 
     const totalPhases = phases.reduce((s, p) => s + p.duree_h, 0);
