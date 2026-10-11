@@ -33,8 +33,13 @@ function nombreOuNull(v) {
 
 // Retourne { of, etapes, calendrier } ou null si l'OF n'existe pas.
 async function calculerEtapes(supabase, ofId) {
-  const { data: of, error: ofError } = await supabase
-    .from('ordres_fabrication').select('id, numero, quantite, delai, caracteristiques').eq('id', ofId).maybeSingle();
+  let { data: of, error: ofError } = await supabase
+    .from('ordres_fabrication').select('id, numero, quantite, delai, caracteristiques, type_production').eq('id', ofId).maybeSingle();
+  if (ofError && /type_production/.test(ofError.message || '')) {
+    // Migration 23 pas encore exécutée : on continue sans type de production.
+    ({ data: of, error: ofError } = await supabase
+      .from('ordres_fabrication').select('id, numero, quantite, delai, caracteristiques').eq('id', ofId).maybeSingle());
+  }
   if (ofError) throw ofError;
   if (!of) return null;
 
@@ -45,6 +50,9 @@ async function calculerEtapes(supabase, ofId) {
   if (gammesError) throw gammesError;
 
   const opIds = Array.from(new Set(gammes.map((g) => g.operation_id)));
+  const typesRes = await supabase.from('types_production').select('code, libelle').order('ordre');
+  const typesProduction = typesRes.error ? [] : (typesRes.data || []);
+  const typeOf = (of && of.type_production) || null;
   const [phasesRes, machinesRes, machinesOpsRes, calRes, catalogueRes] = await Promise.all([
     opIds.length
       ? supabase.from('phases_standard').select('*').in('operation_id', opIds)
@@ -64,10 +72,23 @@ async function calculerEtapes(supabase, ofId) {
   const etapes = gammes.map((g) => {
     const parametres = g.parametres || {};
     const phasesOp = phasesRes.data.filter((p) => p.operation_id === g.operation_id);
-    const propres = g.machine_id ? phasesOp.filter((p) => p.machine_id === g.machine_id) : [];
-    const generiques = phasesOp.filter((p) => !p.machine_id);
-    const utilisees = (propres.length ? propres : generiques).slice().sort((a, b) => a.ordre - b.ordre);
-    const source = propres.length ? 'machine' : generiques.length ? 'operation' : 'aucune';
+    // Priorité : temps de la machine pour le type de l'OF > temps de la machine pour tous types >
+    // temps standard de l'opération pour le type de l'OF > pour tous types.
+    const duType = (liste) => liste.filter((p) => (p.type_production || null) === typeOf);
+    const tousTypes = (liste) => liste.filter((p) => !p.type_production);
+    const deLaMachine = g.machine_id ? phasesOp.filter((p) => p.machine_id === g.machine_id) : [];
+    const deLOperation = phasesOp.filter((p) => !p.machine_id);
+    const candidats = [
+      ['machine', typeOf ? duType(deLaMachine) : []], ['machine', tousTypes(deLaMachine)],
+      ['operation', typeOf ? duType(deLOperation) : []], ['operation', tousTypes(deLOperation)],
+    ];
+    const retenu = candidats.find(([, l]) => l.length) || ['aucune', []];
+    const utilisees = retenu[1].slice().sort((a, b) => a.ordre - b.ordre);
+    const source = retenu[0];
+    // Des temps existent mais pour un autre type de production : il faut choisir le type de l'OF.
+    const typesAutres = Array.from(new Set(phasesOp.filter((p) => p.type_production && p.type_production !== typeOf
+      && (!p.machine_id || p.machine_id === g.machine_id)).map((p) => p.type_production)));
+    const typeManquant = !utilisees.length && typesAutres.length > 0;
 
     const quantiteEtape = nombreOuNull(parametres.quantite);
     const quantite = quantiteEtape !== null && quantiteEtape > 0 ? quantiteEtape : of.quantite;
@@ -161,7 +182,8 @@ async function calculerEtapes(supabase, ofId) {
       dependances: g.dependances || {},         // options par lien : { "1": { mode: "progressif", seuil_pct: 10 } }
       operation: g.operations.nom, operation_code: g.operations.code,
       machine_id: g.machine_id, machines_compatibles: compatibles,
-      source, phases,
+      source, phases, type_manquant: typeManquant,
+      types_possibles: typeManquant ? typesAutres : [],
       parametres, parametres_requis: requis, parametres_manquants: manquants,
       duree_manuelle_h: manuelle,
       erreurs_formule: erreursFormule,
@@ -182,7 +204,7 @@ async function calculerEtapes(supabase, ofId) {
     };
   });
 
-  return { of: { ...of, caracteristiques: caracteristiquesOf }, etapes, calendrier, catalogue };
+  return { of: { ...of, caracteristiques: caracteristiquesOf, type_production: typeOf }, types_production: typesProduction, etapes, calendrier, catalogue };
 }
 
 module.exports = { calculerEtapes, arrondi, nombreOuNull };
