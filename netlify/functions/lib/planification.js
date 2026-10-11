@@ -284,6 +284,23 @@ function instantAtteint(pr, pct) {
   return pr.fin;
 }
 
+// Contraintes d'un lien « étape ← prédécesseur ». Trois types, cumulables :
+//   fin        : démarre quand le prédécesseur est TERMINÉ ;
+//   debut      : démarre dès que le prédécesseur a DÉMARRÉ ;
+//   progressif : démarre dès seuil_pct % du prédécesseur fait, sans pouvoir finir avant lui.
+// Ancien format (sans indicateurs) : absent = « fin » ; { mode: 'progressif', seuil_pct } = progressif.
+function contraintesLien(lien) {
+  if (!lien) return { fin: true, debut: false, progressif: false, seuil_pct: 10 };
+  const explicite = 'fin' in lien || 'debut' in lien || 'progressif' in lien;
+  const pct = Number.isFinite(Number(lien.seuil_pct)) ? Math.max(0, Math.min(100, Number(lien.seuil_pct))) : 10;
+  if (!explicite) {
+    return lien.mode === 'progressif' ? { fin: false, debut: false, progressif: true, seuil_pct: pct } : { fin: true, debut: false, progressif: false, seuil_pct: pct };
+  }
+  const c = { fin: !!lien.fin, debut: !!lien.debut, progressif: !!lien.progressif, seuil_pct: pct };
+  if (!c.fin && !c.debut && !c.progressif) c.fin = true;
+  return c;
+}
+
 // Ordre de traitement des étapes : un prédécesseur est toujours traité avant
 // son successeur, QUELLE QUE SOIT sa position dans la liste (ou son numéro).
 //   preds[i] : positions des prédécesseurs de la position i.
@@ -341,12 +358,14 @@ function planifierAvant(entree, debutMin) {
     preds.forEach((p) => {
       const pr = resultats.get(p);
       if (!pr) return;
-      const lien = liens[p];
-      if (lien && lien.mode === 'progressif' && pr.brutes && pr.brutes.length) {
-        depart = Math.max(depart, instantAtteint(pr, lien.seuil_pct));
+      const c = contraintesLien(liens[p]);
+      const mesurable = !!(pr.brutes && pr.brutes.length);
+      // Sans tranches mesurables (étape déjà faite, impossible à placer) : « progressif » se ramène à « fin ».
+      if (c.fin || (c.progressif && !mesurable)) depart = Math.max(depart, pr.fin);
+      if (c.debut) depart = Math.max(depart, pr.debut);
+      if (c.progressif && mesurable) {
+        depart = Math.max(depart, instantAtteint(pr, c.seuil_pct));
         finMinRequise = Math.max(finMinRequise, pr.fin);
-      } else {
-        depart = Math.max(depart, pr.fin);
       }
     });
 
@@ -434,11 +453,11 @@ function analyserReseau(noeuds) {
   const preds = noeuds.map((n, i) => (n.predecesseurs ?? (i > 0 ? [noeuds[i - 1].index] : []))
     .filter((p) => pos.has(p) && pos.get(p) !== i));
   const d = noeuds.map((n) => n.duree_min);
+  // Contraintes du lien i ← pIdx : « fin », décalage de démarrage (début / progressif), fin minimale (progressif).
   const lienDe = (i, pIdx) => {
-    const l = (noeuds[i].liens || {})[noeuds[pIdx].index];
-    if (!l || l.mode !== 'progressif') return null;
-    const pct = Number.isFinite(Number(l.seuil_pct)) ? Math.max(0, Math.min(100, Number(l.seuil_pct))) : 10;
-    return { decalage: Math.round(d[pIdx] * pct / 100) };
+    const c = contraintesLien((noeuds[i].liens || {})[noeuds[pIdx].index]);
+    const decalage = c.progressif ? Math.round(d[pIdx] * c.seuil_pct / 100) : 0;
+    return { fin: c.fin, depart: c.debut || c.progressif, decalage, finMin: c.progressif };
   };
 
   const topo = ordreTopologique(preds.map((ps) => ps.map((p) => pos.get(p))));
@@ -450,8 +469,9 @@ function analyserReseau(noeuds) {
     preds[i] = preds[i].filter((p) => es[pos.get(p)] !== undefined);
     preds[i].forEach((p) => {
       const j = pos.get(p); const lien = lienDe(i, j);
-      if (lien) { debut = Math.max(debut, es[j] + lien.decalage); finMin = Math.max(finMin, ef[j]); }
-      else debut = Math.max(debut, ef[j]);
+      if (lien.fin) debut = Math.max(debut, ef[j]);
+      if (lien.depart) debut = Math.max(debut, es[j] + lien.decalage);
+      if (lien.finMin) finMin = Math.max(finMin, ef[j]);
     });
     es[i] = debut;
     ef[i] = Math.max(debut + d[i], finMin);
@@ -466,8 +486,9 @@ function analyserReseau(noeuds) {
     let fin = total; let borneDebut = Infinity;
     succ[i].forEach((j) => {
       const lien = lienDe(j, i);
-      if (lien) { borneDebut = Math.min(borneDebut, ls[j] - lien.decalage); fin = Math.min(fin, lf[j]); }
-      else fin = Math.min(fin, ls[j]);
+      if (lien.fin) fin = Math.min(fin, ls[j]);
+      if (lien.depart) borneDebut = Math.min(borneDebut, ls[j] - lien.decalage);
+      if (lien.finMin) fin = Math.min(fin, lf[j]);
     });
     lf[i] = fin;
     ls[i] = Math.min(fin - d[i], borneDebut);
@@ -485,5 +506,5 @@ function analyserReseau(noeuds) {
 module.exports = {
   enMinutes, dateDe, heureDe, debutDeJour, hhmm, MIN_JOUR, HORIZON_JOURS,
   joursFeries, libelleFerie, estOuvre,
-  fenetresDuJour, soustraire, consommer, fusionner, ordreTopologique, planifierAvant, planifierArriere, analyserReseau,
+  fenetresDuJour, soustraire, consommer, fusionner, ordreTopologique, contraintesLien, planifierAvant, planifierArriere, analyserReseau,
 };
