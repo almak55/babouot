@@ -1326,11 +1326,148 @@
     doc.save(`placement-personnel-${date}.pdf`);
   }
 
+  // ---------- Affichage collectif : tout le personnel sur une page, en grille horaire ----------
+  async function genererAffichageCollectif(date) {
+    const res = await fetch(`${API}/feuille-journaliere?date=${date}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+    await chargerLibsPdf();
+
+    const mn = (t) => { const [h, m] = String(t).split(':'); return Number(h) * 60 + Number(m); };
+    const gens = [
+      ...data.personnes.map(p => ({ nom: p.nom, poste: p.poste, statut: p.statut, plage: p.plage, commentaire: p.commentaire, creneaux: p.creneaux })),
+      ...data.presents_sans_tache.map(p => ({ nom: p.nom, poste: p.poste, statut: 'présent', plage: '', commentaire: '', creneaux: [] })),
+    ].sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+
+    // Axe horaire : 7h-17h au minimum, élargi si besoin
+    let h0 = 7 * 60, h1 = 17 * 60;
+    gens.forEach(g => g.creneaux.forEach(c => { if (c.debut) h0 = Math.min(h0, mn(c.debut)); if (c.fin) h1 = Math.max(h1, mn(c.fin)); }));
+    h0 = Math.floor(h0 / 60) * 60; h1 = Math.ceil(h1 / 60) * 60;
+
+    // Couleur par OF
+    const PALETTE = [[200,230,225],[250,220,190],[210,220,245],[245,210,225],[225,240,190],[235,215,250],[255,240,170],[200,235,245],[250,205,200],[215,235,215],[240,225,205],[220,220,235]];
+    const ofs = [...new Set(data.personnes.flatMap(p => p.creneaux).concat(data.sans_personnel).map(c => c.of))];
+    const couleurOf = Object.fromEntries(ofs.map((o, i) => [o, PALETTE[i % PALETTE.length]]));
+
+    const grand = gens.length > 13;
+    const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: grand ? 'a3' : 'a4' });
+    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+    const maj = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+    const M = 8, nomW = 42, x0 = M + nomW, gw = W - M - x0;
+    const px = (min) => x0 + ((min - h0) / (h1 - h0)) * gw;
+
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(grand ? 24 : 18);
+    doc.text('Affectation du personnel', M, 13);
+    doc.text(pdfTxt(maj(dateFr(date))), W - M, 13, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(100);
+    doc.text(pdfTxt(`Atelier Babouot - edite le ${new Date().toLocaleString('fr-FR')}`), M, 18);
+    doc.setTextColor(0);
+
+    // Lecture des lignes : lanes si chevauchement
+    gens.forEach(g => {
+      const tri = g.creneaux.slice().sort((a, b) => (a.debut ? mn(a.debut) : h0) - (b.debut ? mn(b.debut) : h0));
+      const fins = [];
+      tri.forEach(c => {
+        const d = c.debut ? mn(c.debut) : h0, f = c.fin ? mn(c.fin) : h1;
+        let l = fins.findIndex(x => x <= d); if (l < 0) { l = fins.length; fins.push(0); }
+        fins[l] = f; c._l = l; c._d = d; c._f = f;
+      });
+      g.lanes = Math.max(1, fins.length);
+    });
+
+    const yHead = 22, hHead = 7;
+    const legendeH = Math.min(40, 8 + Math.ceil(ofs.length / 2) * 5);
+    const dispo = H - yHead - hHead - legendeH - 14;
+    const totLanes = gens.reduce((s, g) => s + g.lanes, 0) || 1;
+    const hLane = Math.max(11, Math.min(26, dispo / totLanes));
+
+    // En-tête horaire
+    doc.setFillColor(30, 90, 100); doc.rect(M, yHead, W - 2 * M, hHead, 'F');
+    doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+    doc.text('Personnel', M + 2, yHead + 4.8);
+    for (let t = h0; t <= h1; t += 60) {
+      const x = px(t);
+      if (t < h1) doc.text(`${String(t / 60).padStart(2, '0')}h`, x + 1.5, yHead + 4.8);
+    }
+    doc.setTextColor(0);
+
+    let y = yHead + hHead;
+    gens.forEach((g, i) => {
+      const hRow = g.lanes * hLane;
+      if (i % 2 === 0) { doc.setFillColor(247, 248, 249); doc.rect(M, y, W - 2 * M, hRow, 'F'); }
+      // pause
+      doc.setFillColor(232, 232, 232); doc.rect(px(12 * 60), y, px(12 * 60 + 30) - px(12 * 60), hRow, 'F');
+      // grille verticale
+      doc.setDrawColor(215); doc.setLineWidth(0.15);
+      for (let t = h0; t <= h1; t += 60) doc.line(px(t), y, px(t), y + hRow);
+      doc.line(M, y + hRow, W - M, y + hRow);
+
+      // nom
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(grand ? 11 : 10);
+      doc.text(pdfTxt(g.nom), M + 2, y + hRow / 2 - (g.poste ? 0.5 : -1.2), { maxWidth: nomW - 3 });
+      if (g.poste) { doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(100); doc.text(pdfTxt(g.poste), M + 2, y + hRow / 2 + 3.2, { maxWidth: nomW - 3 }); doc.setTextColor(0); }
+
+      if (!g.creneaux.length) {
+        const indispo = !['présent', 'disponible'].includes(g.statut);
+        doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(indispo ? 180 : 130, indispo ? 60 : 130, indispo ? 40 : 130);
+        doc.text(pdfTxt(indispo ? `${g.statut.toUpperCase()}${g.plage ? ' ' + g.plage : ''}${g.commentaire ? ' - ' + g.commentaire : ''}` : 'Disponible - sans affectation'), x0 + 3, y + hRow / 2 + 1);
+        doc.setTextColor(0);
+      }
+      g.creneaux.forEach(c => {
+        const bx = px(c._d), bw = px(c._f) - bx - 0.4, by = y + c._l * hLane + 0.8, bh = hLane - 1.6;
+        const col = couleurOf[c.of] || [230, 230, 230];
+        doc.setFillColor(...col); doc.setDrawColor(90); doc.setLineWidth(0.25);
+        doc.roundedRect(bx + 0.2, by, bw, bh, 1, 1, 'FD');
+        const fs = grand ? 8.5 : 7.5; doc.setFontSize(fs);
+        const maxL = Math.max(1, Math.floor((bh - 1) / (fs * 0.42)));
+        const lignes = [];
+        doc.setFont('helvetica', 'bold');
+        doc.splitTextToSize(pdfTxt(c.operation), bw - 2).slice(0, 2).forEach(l => lignes.push(['b', l]));
+        doc.setFont('helvetica', 'normal');
+        const nomMachine = c.machine.replace(/\s*\(.*\)$/, '');
+        doc.splitTextToSize(pdfTxt(nomMachine), bw - 2).slice(0, 1).forEach(l => lignes.push(['n', l]));
+        doc.splitTextToSize(pdfTxt(`${c.of}${c.debut ? '  ' + c.debut + '-' + c.fin : ''}`), bw - 2).slice(0, 1).forEach(l => lignes.push(['n', l]));
+        lignes.slice(0, maxL).forEach(([st, l], k) => {
+          doc.setFont('helvetica', st === 'b' ? 'bold' : 'normal');
+          doc.text(l, bx + 1.2, by + 3.2 + k * fs * 0.42);
+        });
+      });
+      y += hRow;
+    });
+    doc.setDrawColor(150); doc.setLineWidth(0.3); doc.rect(M, yHead, W - 2 * M, y - yHead);
+
+    // Légende des OF
+    y += 5;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.text('Ordres de fabrication du jour', M, y);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+    const detail = {};
+    data.personnes.flatMap(p => p.creneaux).concat(data.sans_personnel).forEach(c => { detail[c.of] = c; });
+    const colW = (W - 2 * M) / 2;
+    ofs.forEach((o, i) => {
+      const c = detail[o]; const cx = M + (i % 2) * colW, cy = y + 5 + Math.floor(i / 2) * 5;
+      doc.setFillColor(...couleurOf[o]); doc.setDrawColor(90); doc.rect(cx, cy - 3, 6, 3.6, 'FD');
+      doc.text(pdfTxt(`${o} - ${c.titre || ''}${c.client ? ' (' + c.client + ')' : ''}${c.quantite != null ? ' - ' + Number(c.quantite).toLocaleString('fr-FR') + ' ex.' : ''}${c.delai ? ' - livraison ' + dateCourte(c.delai) : ''}`), cx + 8, cy, { maxWidth: colW - 10 });
+    });
+    if (data.sans_personnel.length) {
+      doc.setTextColor(180, 60, 30); doc.setFont('helvetica', 'bold');
+      doc.text(pdfTxt(`Attention : ${data.sans_personnel.length} creneau(x) sans personnel affecte (voir feuille detaillee).`), W - M, H - 7, { align: 'right' });
+      doc.setTextColor(0);
+    }
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(110);
+    doc.text('Zone grisee : pause', M, H - 7); doc.setTextColor(0);
+    doc.save(`affichage-personnel-${date}.pdf`);
+  }
+
   function ouvrirModaleFeuilleJournaliere() {
     const defaut = DAYS_ISO.includes(AUJOURDHUI_ISO) ? AUJOURDHUI_ISO : DAYS_ISO[0];
     afficherModale(`
       <h3>Feuille de placement du personnel</h3>
-      <p style="font-size:13px;color:var(--ink-500);margin:0 0 10px;">PDF par personne : horaires, machine, OF, titre, client, quantité, caractéristiques, équipe, avec colonnes d'observations et de visa.</p>
+      <div class="field"><label>Modèle</label>
+        <select id="fj-modele">
+          <option value="collectif">Affichage collectif — tout le personnel sur une page (grille horaire)</option>
+          <option value="detail">Feuille détaillée — une section par personne (observations, visa)</option>
+        </select>
+      </div>
       <div class="field"><label>Jour</label><input id="fj-date" type="date" value="${defaut}"></div>
       <div id="m-msg"></div>
       <div class="actions">
@@ -1345,7 +1482,8 @@
       if (!date) { msg.innerHTML = `<div class="msg error">Choisissez un jour.</div>`; return; }
       msg.innerHTML = `<div class="msg">Génération du PDF…</div>`;
       try {
-        await genererFeuilleJournaliere(date);
+        if (document.getElementById('fj-modele').value === 'collectif') await genererAffichageCollectif(date);
+        else await genererFeuilleJournaliere(date);
         toast('Feuille de placement téléchargée.');
         fermerModale();
       } catch (e) {
