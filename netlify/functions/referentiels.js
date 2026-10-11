@@ -25,6 +25,8 @@ exports.handler = async () => {
     for (const r of [operationsRes, machinesRes, personnelRes, titresRes]) {
       if (r.error) throw r.error;
     }
+    // Types de production (Pléiade, Cartonné…) : absents tant que la migration 23 n'est pas exécutée.
+    const typesRes = await supabase.from('types_production').select('code, libelle').order('ordre');
 
     return {
       statusCode: 200,
@@ -33,6 +35,7 @@ exports.handler = async () => {
         machines: machinesRes.data,
         personnel: personnelRes.data,
         titres: titresRes.data,
+        types_production: typesRes.error ? [] : typesRes.data,
       }),
     };
   } catch (err) {

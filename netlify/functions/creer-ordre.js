@@ -22,6 +22,7 @@ exports.handler = async (event) => {
     }
     const body = JSON.parse(event.body || '{}');
     const { titre, titre_id, quantite, delai, priorite, operations } = body;
+    const typeProduction = body.type_production ? String(body.type_production) : null;
 
     if (!quantite || !Array.isArray(operations) || operations.length === 0) {
       return {
@@ -77,18 +78,21 @@ exports.handler = async (event) => {
     const numero = `OF-${annee}-${String((count || 0) + 1).padStart(4, '0')}`;
 
     // 4. Créer l'OF.
-    const { data: of, error: ofError } = await supabase
-      .from('ordres_fabrication')
-      .insert({
-        numero,
-        titre_id: titreId,
-        quantite,
-        delai: delai || null,
-        priorite: priorite || 'normale',
-        statut: 'en attente de validation',
-      })
-      .select('id, numero')
-      .single();
+    const ligneOf = {
+      numero,
+      titre_id: titreId,
+      quantite,
+      delai: delai || null,
+      priorite: priorite || 'normale',
+      statut: 'en attente de validation',
+    };
+    let { data: of, error: ofError } = await supabase
+      .from('ordres_fabrication').insert(typeProduction ? { ...ligneOf, type_production: typeProduction } : ligneOf)
+      .select('id, numero').single();
+    if (ofError && typeProduction && /type_production/.test(ofError.message || '')) {
+      // Migration 23 pas encore exécutée : on crée l'OF sans type de production.
+      ({ data: of, error: ofError } = await supabase.from('ordres_fabrication').insert(ligneOf).select('id, numero').single());
+    }
     if (ofError) throw ofError;
 
     // 5. Créer la gamme opératoire, dans l'ordre fourni.

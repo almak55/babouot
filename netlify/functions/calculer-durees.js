@@ -36,6 +36,21 @@ exports.handler = async (event) => {
       ofId = body.of_id;
       if (!ofId) return { statusCode: 400, body: JSON.stringify({ error: 'of_id requis.' }) };
 
+      // Type de production de l'OF (Pléiade, Cartonné…) : il choisit les temps de machine applicables.
+      if ('type_production' in body) {
+        const tp = body.type_production ? String(body.type_production) : null;
+        const { error: tpErr } = await supabase.from('ordres_fabrication').update({ type_production: tp }).eq('id', ofId);
+        if (tpErr) throw tpErr;
+      }
+
+      // Quantité de l'OF (reprise de la fiche, corrigeable ici).
+      if ('quantite_of' in body) {
+        const q = Math.round(Number(String(body.quantite_of).replace(',', '.')));
+        if (!Number.isFinite(q) || q <= 0) return { statusCode: 400, body: JSON.stringify({ error: 'Quantité de l\'OF invalide (nombre entier > 0).' }) };
+        const { error: qErr } = await supabase.from('ordres_fabrication').update({ quantite: q }).eq('id', ofId);
+        if (qErr) throw qErr;
+      }
+
       // Caractéristiques du produit (niveau OF) : fusionnées avec l'existant.
       if (body.caracteristiques && typeof body.caracteristiques === 'object') {
         const [{ data: ofRow, error: ofErr }, { data: cat, error: catErr }] = await Promise.all([
@@ -150,7 +165,7 @@ exports.handler = async (event) => {
 
     const calcul = await calculerEtapes(supabase, ofId);
     if (!calcul) return { statusCode: 404, body: JSON.stringify({ error: 'OF introuvable.' }) };
-    const { of, etapes, calendrier, catalogue } = calcul;
+    const { of, etapes, calendrier, catalogue, types_production: typesProduction } = calcul;
 
     // Caractéristiques à renseigner pour cet OF : celles dont ses étapes ont besoin, dédoublonnées.
     const produitRequis = [];
@@ -173,7 +188,8 @@ exports.handler = async (event) => {
     return {
       statusCode: 200,
       body: JSON.stringify({
-        of: { id: of.id, numero: of.numero, quantite: of.quantite, caracteristiques: of.caracteristiques },
+        of: { id: of.id, numero: of.numero, quantite: of.quantite, caracteristiques: of.caracteristiques, type_production: of.type_production || null },
+        types_production: typesProduction || [],
         catalogue,
         produit_requis: produitRequis,
         etapes,
