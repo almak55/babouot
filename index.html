@@ -1426,18 +1426,22 @@
         if (g.sansPers) { doc.setDrawColor(180, 60, 30); doc.setLineDashPattern([1.2, 0.8], 0); }
         doc.roundedRect(bx + 0.2, by, bw, bh, 1, 1, 'FD');
         doc.setLineDashPattern([], 0);
-        const fs = grand ? 8.5 : 7.5; doc.setFontSize(fs);
-        const maxL = Math.max(1, Math.floor((bh - 1) / (fs * 0.42)));
-        const lignes = [];
-        doc.setFont('helvetica', 'bold');
-        doc.splitTextToSize(pdfTxt(c.operation), bw - 2).slice(0, 2).forEach(l => lignes.push(['b', l]));
-        doc.setFont('helvetica', 'normal');
+        const base = grand ? 8.5 : 7.5;
+        const grandBloc = bh >= 17;
+        const nbL = grandBloc ? 4 : 3;
+        const fs = Math.max(5.8, Math.min(base, (bh - 1.2) / (nbL * 0.43)));
+        const pas = fs * 0.43;
         const nomMachine = c.machine.replace(/\s*\(.*\)$/, '');
-        doc.splitTextToSize(pdfTxt(nomMachine), bw - 2).slice(0, 1).forEach(l => lignes.push(['n', l]));
-        doc.splitTextToSize(pdfTxt(`${c.of}${c.debut ? '  ' + c.debut + '-' + c.fin : ''}`), bw - 2).slice(0, 1).forEach(l => lignes.push(['n', l]));
-        lignes.slice(0, maxL).forEach(([st, l], k) => {
-          doc.setFont('helvetica', st === 'b' ? 'bold' : 'normal');
-          doc.text(l, bx + 1.2, by + 3.2 + k * fs * 0.42);
+        const horaire = c.debut ? `${c.debut}-${c.fin}` : '';
+        const titre = [c.titre, c.client].filter(Boolean).join(' - ') || c.of;
+        const items = grandBloc
+          ? [['b', c.operation], ['bi', titre], ['n', nomMachine], ['n', `${c.of}  ${horaire}`]]
+          : [['b', c.operation], ['bi', titre], ['n', `${nomMachine} | ${c.of} ${horaire}`]];
+        doc.setFontSize(fs);
+        items.forEach(([st, txt], k) => {
+          doc.setFont('helvetica', st === 'b' ? 'bold' : st === 'bi' ? 'bolditalic' : 'normal');
+          const l = doc.splitTextToSize(pdfTxt(txt), bw - 2)[0] || '';
+          doc.text(l, bx + 1.2, by + 0.8 + (k + 1) * pas);
         });
       });
       y += hRow;
