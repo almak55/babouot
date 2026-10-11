@@ -191,6 +191,10 @@ exports.handler = async (event) => {
         machine_imposee: imp.machine_id || e.machine_id || null,
         machines_candidates: e.machines_compatibles.map((m) => m.id),
         personnes_imposees: Array.isArray(imp.personnel_ids) && imp.personnel_ids.length ? imp.personnel_ids : null,
+        // Présence limitée : { id: heures } -> minutes ; les autres restent toute la tâche, un remplaçant prend le relais.
+        heures_max: Object.fromEntries(Object.entries(imp.personnel_heures || {})
+          .map(([id, h]) => [id, Math.round(Number(String(h).replace(',', '.')) * 60)])
+          .filter(([, m]) => Number.isFinite(m) && m > 0)),
         personnes_pour: (machineId) => Array.from(new Set([...parOperation(e.operation_id), ...(machineId ? parMachine(machineId) : [])])),
       };
     });
@@ -247,6 +251,12 @@ exports.handler = async (event) => {
           nom: ph.nom, duree_min: ph.duree_min, besoin_machine: ph.besoin_machine,
           personnes: ph.personnes.map((id) => ({ id, nom: nomPersonne[id] || '?' })),
           tranches: ph.tranches.map((t) => ({ date: dateDe(t.d), debut: heureDe(t.d), fin: heureDe(t.f) })),
+          // Relais : seulement quand une personne n'est pas là toute la tâche.
+          relais: ph.presences ? Object.entries(ph.presences).map(([id, ivs]) => {
+            const minutes = ivs.reduce((t, x) => t + (x.f - x.d), 0);
+            return { id, nom: nomPersonne[id] || '?', minutes, debut: iso(ivs[0].d), fin: iso(ivs[ivs.length - 1].f), toute_la_tache: minutes >= ph.duree_min };
+          }) : null,
+          segments: ph.segments ? ph.segments.map((sg) => ({ date: dateDe(sg.d), debut: heureDe(sg.d), fin: heureDe(sg.f), personnes: sg.personnes })) : null,
         })),
         problemes: r.problemes,
       };
@@ -308,18 +318,24 @@ exports.handler = async (event) => {
     const lignes = [];
     etapesSortie.filter((e) => !e.fixe).forEach((e) => {
       const calc = etapesCalc.find((x) => x.gamme_id === e.gamme_id);
-      e.phases.forEach((ph) => ph.tranches.forEach((t) => {
-        lignes.push({
-          ligne: {
-            date: t.date, heure_debut: t.debut, heure_fin: t.fin,
-            machine_id: ph.besoin_machine && e.machine ? e.machine.id : null,
-            personnel_id: ph.personnes.length ? ph.personnes[0].id : null,
-            operation_id: calc.operation_id, gamme_operatoire_id: e.gamme_id, of_id: of.id,
-            phase: ph.nom, statut: 'planifié',
-          },
-          personnes: ph.personnes.map((p) => p.id),
+      e.phases.forEach((ph) => {
+        // Avec relais : une ligne par segment (même équipe) ; sinon une ligne par tranche.
+        const morceaux = ph.segments
+          ? ph.segments.map((sg) => ({ date: sg.date, debut: sg.debut, fin: sg.fin, ids: sg.personnes }))
+          : ph.tranches.map((t) => ({ date: t.date, debut: t.debut, fin: t.fin, ids: ph.personnes.map((p) => p.id) }));
+        morceaux.forEach((t) => {
+          lignes.push({
+            ligne: {
+              date: t.date, heure_debut: t.debut, heure_fin: t.fin,
+              machine_id: ph.besoin_machine && e.machine ? e.machine.id : null,
+              personnel_id: t.ids.length ? t.ids[0] : null,
+              operation_id: calc.operation_id, gamme_operatoire_id: e.gamme_id, of_id: of.id,
+              phase: ph.nom, statut: 'planifié',
+            },
+            personnes: t.ids,
+          });
         });
-      }));
+      });
     });
 
     const cle = (l) => `${l.gamme_operatoire_id}|${l.phase}|${l.date}|${String(l.heure_debut).slice(0, 5)}`;
