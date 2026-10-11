@@ -1065,6 +1065,9 @@
     afficherModale(`
       <h3>Saisie de production — fin de journée</h3>
       <div class="field" style="max-width:220px;"><label>Journée</label><input id="sp-date" type="date" value="${dateInit || dateLocaleIso()}"></div>
+      <div class="field" style="margin-top:6px;"><label>Importer un relevé de production (Excel, CSV, PDF ou photo)</label>
+        <input type="file" id="sp-file" accept=".xlsx,.xls,.csv,.pdf,image/*">
+        <div id="sp-import-msg" class="plan-note" style="margin-top:4px;">Les quantités lues sont rapprochées des tâches puis pré-remplies ci-dessous : vous vérifiez avant d'enregistrer.</div></div>
       <div id="sp-liste"><div class="msg">Chargement…</div></div>
       <label style="display:flex;gap:8px;align-items:center;margin:12px 0 4px;font-size:13px;"><input type="checkbox" id="sp-recaler" checked> Décaler automatiquement le planning si une tâche n'est pas terminée comme prévu</label>
       <div id="m-msg"></div>
@@ -1072,6 +1075,62 @@
     `, 'xlarge');
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
     let taches = [];
+    let lus = {};   // gamme_id -> proposition issue d'un fichier importé
+    function rendreTable() {
+      const box = document.getElementById('sp-liste');
+      if (!taches.length) { box.innerHTML = `<div class="msg">Aucune tâche planifiée le ${dateCourte(document.getElementById('sp-date').value)}.</div>`; return; }
+      box.innerHTML = `<div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Tâche</th><th style="min-width:150px;">Avancement</th><th>Produit ce jour</th><th>Terminée</th><th></th></tr></thead><tbody>${taches.map((t, i) => {
+        const s = t.saisie || {};
+        const l = lus[t.gamme_id];
+        const qte = l && l.quantite !== null ? l.quantite : (s.quantite ? s.quantite : '');
+        const fini = l ? (l.termine || t.statut === 'terminé') : (s.termine || t.statut === 'terminé');
+        const pct = l && l.pct !== null ? l.pct : (s.pct_cumule ?? '');
+        const h = l && l.heures_reelles !== null ? l.heures_reelles : (s.heures_reelles ?? '');
+        const com = l && l.commentaire ? l.commentaire : (s.commentaire || '');
+        const source = l ? `<div class="plan-note" style="color:var(--accent-teal);margin-top:3px;">Lu dans le fichier (${l.confiance === 'haute' ? 'fiable' : l.confiance === 'moyenne' ? 'à vérifier' : 'douteux'}) : ${esc(l.texte_source)}</div>` : '';
+        return `<tr data-i="${i}" ${l ? 'style="background:var(--field-bg);"' : ''}>
+          <td><strong>${esc(t.operation)}</strong> <span class="plan-note">— ${esc(t.machine)}</span><br>
+            <span class="plan-note">${esc(t.of)} · ${esc(t.titre)}${t.client ? ' (' + esc(t.client) + ')' : ''}<br>${t.debut ? esc(t.debut) + '–' + esc(t.fin) + ' · ' : ''}${esc((t.personnel || []).join(', ') || (t.debut ? 'personnel à affecter' : 'non planifiée ce jour'))}</span>${source}</td>
+          <td>${jaugeAvancement(t.avancement_pct, null, false)}<div class="plan-note">${t.avancement_pct} % ${t.quantite_totale ? '· ' + nbFr(t.quantite_realisee) + ' / ' + nbFr(t.quantite_totale) : ''}</div></td>
+          <td><input class="sp-qte" type="number" min="0" step="any" value="${qte}" placeholder="quantité" style="width:110px;"></td>
+          <td style="text-align:center;"><input class="sp-fini" type="checkbox" ${fini ? 'checked' : ''}></td>
+          <td><details ${l && (pct !== '' || h !== '' || com) ? 'open' : ''}><summary class="plan-note" style="cursor:pointer;">+</summary>
+            <div class="field"><label>Avancement cumulé (%) — si pas de quantité</label><input class="sp-pct" type="number" min="0" max="100" step="any" value="${pct}"></div>
+            <div class="field"><label>Heures réelles</label><input class="sp-h" type="number" min="0" step="0.25" value="${h}"></div>
+            <div class="field"><label>Remarque</label><input class="sp-com" type="text" value="${esc(com)}"></div></details></td>
+        </tr>`; }).join('')}</tbody></table></div>
+        <div class="plan-note" style="margin-top:6px;">Saisissez la quantité réellement produite aujourd'hui (en exemplaires). Les lignes laissées vides sont ignorées. Pour une tâche sans quantité (travail manuel), utilisez « + » pour indiquer l'avancement en %.</div>`;
+    }
+    // Import d'un relevé : lecture, rapprochement avec les tâches, pré-remplissage à relire.
+    document.getElementById('sp-file').addEventListener('change', async (ev) => {
+      const file = ev.target.files[0];
+      const info = document.getElementById('sp-import-msg');
+      if (!file) return;
+      if (file.size > 4 * 1024 * 1024) { info.innerHTML = '<span style="color:var(--danger-text);">Fichier trop volumineux (4 Mo maximum).</span>'; return; }
+      info.textContent = 'Lecture du relevé en cours…';
+      try {
+        const nom = file.name.toLowerCase();
+        const mime = file.type || (nom.endsWith('.pdf') ? 'application/pdf' : nom.endsWith('.csv') ? 'text/csv' : nom.endsWith('.xls') ? 'application/vnd.ms-excel' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        const base64 = await fichierEnBase64(file);
+        const res = await fetch(`${API}/extraire-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file_base64: base64, file_name: file.name, mime_type: mime, date: document.getElementById('sp-date').value }) });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        // Le document porte sa propre date : on bascule sur cette journée.
+        if (d.date && d.date !== document.getElementById('sp-date').value) {
+          document.getElementById('sp-date').value = d.date;
+          await charger();
+        }
+        d.propositions.forEach(p => {
+          lus[p.gamme_id] = p;
+          if (!taches.some(t => t.gamme_id === p.gamme_id)) taches.push(p.tache);   // tâche non planifiée ce jour-là mais citée par le relevé
+        });
+        rendreTable();
+        document.getElementById('sp-go').disabled = !taches.length;
+        const ko = d.non_rapprochees.length ? ` <strong style="color:var(--accent-amber-text);">${d.non_rapprochees.length} ligne(s) non rapprochée(s) :</strong> ${d.non_rapprochees.slice(0, 6).map(x => esc(x.texte_source)).join(' ; ')}${d.non_rapprochees.length > 6 ? '…' : ''}.` : '';
+        info.innerHTML = `${d.propositions.length} tâche(s) pré-remplie(s)${d.date ? ' pour le ' + dateCourte(d.date) : ''}. Vérifiez les quantités avant d'enregistrer.${ko} ${d.notes ? '<br>' + esc(d.notes) : ''}`;
+      } catch (e) { info.innerHTML = `<span style="color:var(--danger-text);">${esc(e.message)}</span>`; }
+      ev.target.value = '';
+    });
     async function charger() {
       const date = document.getElementById('sp-date').value;
       const box = document.getElementById('sp-liste');
@@ -1083,22 +1142,9 @@
         const d = await res.json();
         if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
         taches = d.taches;
-        if (!taches.length) { box.innerHTML = `<div class="msg">Aucune tâche planifiée le ${dateCourte(date)}.</div>`; return; }
-        box.innerHTML = `<div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Tâche</th><th style="min-width:150px;">Avancement</th><th>Produit ce jour</th><th>Terminée</th><th></th></tr></thead><tbody>${taches.map((t, i) => {
-          const s = t.saisie || {};
-          return `<tr data-i="${i}">
-            <td><strong>${esc(t.operation)}</strong> <span class="plan-note">— ${esc(t.machine)}</span><br>
-              <span class="plan-note">${esc(t.of)} · ${esc(t.titre)}${t.client ? ' (' + esc(t.client) + ')' : ''}<br>${t.debut ? esc(t.debut) + '–' + esc(t.fin) + ' · ' : ''}${esc(t.personnel.join(', ') || 'personnel à affecter')}</span></td>
-            <td>${jaugeAvancement(t.avancement_pct, null, false)}<div class="plan-note">${t.avancement_pct} % ${t.quantite_totale ? '· ' + nbFr(t.quantite_realisee) + ' / ' + nbFr(t.quantite_totale) : ''}</div></td>
-            <td><input class="sp-qte" type="number" min="0" step="any" value="${s.quantite ? s.quantite : ''}" placeholder="quantité" style="width:110px;"></td>
-            <td style="text-align:center;"><input class="sp-fini" type="checkbox" ${s.termine || t.statut === 'terminé' ? 'checked' : ''}></td>
-            <td><details><summary class="plan-note" style="cursor:pointer;">+</summary>
-              <div class="field"><label>Avancement cumulé (%) — si pas de quantité</label><input class="sp-pct" type="number" min="0" max="100" step="any" value="${s.pct_cumule ?? ''}"></div>
-              <div class="field"><label>Heures réelles</label><input class="sp-h" type="number" min="0" step="0.25" value="${s.heures_reelles ?? ''}"></div>
-              <div class="field"><label>Remarque</label><input class="sp-com" type="text" value="${esc(s.commentaire || '')}"></div></details></td>
-          </tr>`; }).join('')}</tbody></table></div>
-          <div class="plan-note" style="margin-top:6px;">Saisissez la quantité réellement produite aujourd'hui (en exemplaires). Les lignes laissées vides sont ignorées. Pour une tâche sans quantité (travail manuel), utilisez « + » pour indiquer l'avancement en %.</div>`;
-        document.getElementById('sp-go').disabled = false;
+        lus = {};
+        rendreTable();
+        document.getElementById('sp-go').disabled = !taches.length;
       } catch (e) { box.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
     }
     document.getElementById('sp-date').addEventListener('change', charger);
