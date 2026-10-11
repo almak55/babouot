@@ -464,7 +464,8 @@
   .import-lignes { max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-md); margin-top: 10px; }
   .pred-list { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--field-bg); }
   .pred-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
-  .pred-name { font-size: 12.5px; min-width: 150px; }
+  .pred-name { font-size: 12.5px; min-width: 200px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .pred-name input { width: auto; margin: 0; }
   .pred-row select { min-width: 250px; padding: 5px 8px; font-size: 12.5px; }
   .pred-pct { font-size: 12.5px; color: var(--ink-700); display: inline-flex; align-items: center; gap: 5px; }
   .pred-pct input { width: 64px; padding: 4px 6px; font-size: 12.5px; }
@@ -941,7 +942,7 @@
       afficherModale(`
         <h3>${n} validé, mais pas encore planifié</h3>
         <div class="plan-bloquants"><strong>À corriger pour pouvoir le planifier :</strong>
-          <ul>${(p.bloquants || []).map(b => `<li><span class="mono">Étape ${b.sequence}</span> — ${esc(b.operation)} : ${esc(b.detail)}</li>`).join('')}</ul></div>
+          <ul>${(p.bloquants || []).map(b => `<li><strong>${esc(b.operation)}</strong> : ${esc(b.detail)}</li>`).join('')}</ul></div>
         <div class="plan-note" style="margin-top:8px;">L'OF est bien validé. Corrigez ces points (par exemple chiffrez l'étape), puis lancez « Planifier à l'heure » ou revalidez l'OF.</div>
         <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="m-ouvrir-chiffrage">Ouvrir le chiffrage…</button></div>`);
       document.getElementById('m-cancel').addEventListener('click', fermerModale);
@@ -1112,7 +1113,7 @@
         list.className = '';
         list.innerHTML = gammes.map(g => `
           <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px;">
-            <span><span class="mono" style="color:var(--ink-500); margin-right:8px;">${g.sequence}.</span>${g.operation.nom}</span>
+            <span>${g.operation.nom}</span>
             <span class="tag ${g.statut==='terminé'?'ok':g.statut==='à planifier'?'warn':'ok'}">${ETAT_LABEL2[g.statut] || g.statut}</span>
           </div>
         `).join('') || '<div class="empty">Aucune étape.</div>';
@@ -1969,9 +1970,20 @@
   // Réseau PERT : une boîte par étape, rangées par niveau de dépendance ; chemin critique en rouge.
   function reseauPert(plan) {
     if (!plan.pert || !plan.pert.etapes || plan.pert.etapes.length === 0) return '';
-    const noeuds = plan.pert.etapes;
+    // Les numéros de saisie n'ont aucun sens chronologique : l'ordre d'affichage vient du calcul (début au plus tôt).
+    const noeuds = plan.pert.etapes.slice().sort((a, b) => a.es - b.es || a.ef - b.ef);
+    const parSeq = new Map(noeuds.map(n => [n.sequence, n]));
     const niveau = new Map();
-    noeuds.forEach(n => niveau.set(n.sequence, n.predecesseurs.length ? 1 + Math.max(...n.predecesseurs.map(p => niveau.get(p) ?? 0)) : 0));
+    const niveauDe = (sq, pile = new Set()) => {
+      if (niveau.has(sq)) return niveau.get(sq);
+      if (pile.has(sq)) return 0;
+      pile.add(sq);
+      const n = parSeq.get(sq);
+      const v = n && n.predecesseurs.length ? 1 + Math.max(...n.predecesseurs.map(p => niveauDe(p, pile))) : 0;
+      niveau.set(sq, v);
+      return v;
+    };
+    noeuds.forEach(n => niveauDe(n.sequence));
     const parNiveau = {};
     noeuds.forEach(n => { (parNiveau[niveau.get(n.sequence)] ??= []).push(n); });
     const NW = 170, NH = 58, GX = 46, GY = 14;
@@ -1991,17 +2003,17 @@
       const decalage = prog ? Math.round(pn.duree_min * (dep.seuil_pct ?? 10) / 100) : 0;
       const crit = pn.critique && n.critique && (prog ? (n.es === pn.es + decalage || n.ef === pn.ef) : pn.ef === n.es);
       const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, mx = (x1 + x2) / 2;
-      const trait = `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" class="pert-edge ${crit ? 'crit' : ''} ${prog ? 'prog' : ''}"><title>${prog ? `Démarrage progressif : dès ${dep.seuil_pct} % de l'étape ${p}` : `Après la fin de l'étape ${p}`}</title></path>`;
+      const trait = `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" class="pert-edge ${crit ? 'crit' : ''} ${prog ? 'prog' : ''}"><title>${prog ? `Démarrage progressif : dès ${dep.seuil_pct} % de « ${pn.operation} »` : `Après la fin de « ${pn.operation} »`}</title></path>`;
       const etiquette = prog ? `<text x="${mx}" y="${(y1 + y2) / 2 - 5}" text-anchor="middle" class="pert-lien">dès ${dep.seuil_pct} %</text>` : '';
       return trait + etiquette;
     })).join('');
     const boites = noeuds.map(n => {
       const p = pos.get(n.sequence);
       const detail = n.fixe ? 'déjà planifiée' : n.critique ? `${fmtH(n.duree_min / 60)} · critique` : `${fmtH(n.duree_min / 60)} · marge ${fmtH(n.marge_min / 60)}`;
-      return `<g class="pert-node ${n.critique ? 'crit' : ''} ${n.fixe ? 'fixe' : ''}" transform="translate(${p.x},${p.y})"><title>${esc(n.operation)} — ${detail}</title><rect width="${NW}" height="${NH}" rx="9"/><text x="10" y="23" class="t1">${n.sequence}. ${esc(tronque(n.operation, 21))}</text><text x="10" y="42" class="t2">${detail}</text></g>`;
+      return `<g class="pert-node ${n.critique ? 'crit' : ''} ${n.fixe ? 'fixe' : ''}" transform="translate(${p.x},${p.y})"><title>${esc(n.operation)} — ${detail}</title><rect width="${NW}" height="${NH}" rx="9"/><text x="10" y="23" class="t1">${esc(tronque(n.operation, 24))}</text><text x="10" y="42" class="t2">${detail}</text></g>`;
     }).join('');
 
-    const critiques = noeuds.filter(n => n.critique).map(n => n.sequence);
+    const critiques = noeuds.filter(n => n.critique).map(n => n.operation);
     const enChaine = noeuds.every((n, i) => n.predecesseurs.length === (i === 0 ? 0 : 1) && (i === 0 || n.predecesseurs[0] === noeuds[i - 1].sequence));
     return `
       <details class="pert" ${enChaine ? '' : 'open'}>
@@ -2014,7 +2026,7 @@
   // Gantt horaire : un jour par colonne, les heures en abscisse, une ligne par phase.
   function ganttHoraire(plan) {
     const lignes = [];
-    plan.etapes.filter(e => !e.fixe).forEach(e => e.phases.forEach(ph => lignes.push({ e, ph })));
+    plan.etapes.filter(e => !e.fixe).slice().sort((a, b) => (a.debut || '9').localeCompare(b.debut || '9')).forEach(e => e.phases.forEach(ph => lignes.push({ e, ph })));
     const critiques = new Set((plan.pert ? plan.pert.etapes : []).filter(x => x.critique).map(x => x.gamme_id));
     const dates = Array.from(new Set(lignes.flatMap(l => l.ph.tranches.map(t => t.date)))).sort();
     if (dates.length === 0) return '<div class="empty">Aucune phase à afficher.</div>';
@@ -2042,7 +2054,7 @@
         const qui = ph.personnes.map(p => p.nom).join(', ') || 'personnel à affecter';
         return `<div class="gh-bar ${ph.besoin_machine ? 'machine' : 'main'}" style="left:${g}px; width:${l}px" title="${esc(ph.nom)} — ${t.debut}–${t.fin} — ${esc(qui)}">${l > 52 ? `${t.debut}–${t.fin}` : ''}</div>`;
       }).join('');
-      return `<div class="gh-row"><div class="gh-label" title="${esc(e.operation + ' — ' + ph.nom)}${critiques.has(e.gamme_id) ? ' (chemin critique)' : ''}">${critiques.has(e.gamme_id) ? '<span class="crit-dot">●</span> ' : ''}<span class="mono">${e.sequence}.</span> ${esc(e.operation)} <em>${esc(ph.nom)}</em></div><div class="gh-track" style="width:${dates.length * W}px">${barres}</div></div>`;
+      return `<div class="gh-row"><div class="gh-label" title="${esc(e.operation + ' — ' + ph.nom)}${critiques.has(e.gamme_id) ? ' (chemin critique)' : ''}">${critiques.has(e.gamme_id) ? '<span class="crit-dot">●</span> ' : ''}${esc(e.operation)} <em>${esc(ph.nom)}</em></div><div class="gh-track" style="width:${dates.length * W}px">${barres}</div></div>`;
     }).join('');
 
     return `
@@ -2143,10 +2155,11 @@
       const alt = plan.alternative_heures_sup
         ? `<div class="plan-alt">Avec heures supplémentaires : fin ${fmtDateHeure(plan.alternative_heures_sup.fin)} — ${plan.alternative_heures_sup.respecte_delai ? '<strong>le délai serait tenu</strong>' : 'le délai ne serait pas tenu non plus'}.</div>` : '';
       const bloquants = plan.bloquants.length
-        ? `<div class="plan-bloquants"><strong>À corriger avant d'appliquer :</strong><ul>${plan.bloquants.map(b => `<li>Étape ${b.sequence} (${esc(b.operation)}) : ${esc(b.detail)}</li>`).join('')}</ul></div>` : '';
+        ? `<div class="plan-bloquants"><strong>À corriger avant d'appliquer :</strong><ul>${plan.bloquants.map(b => `<li><strong>${esc(b.operation)}</strong> : ${esc(b.detail)}</li>`).join('')}</ul></div>` : '';
 
-      const etapesHtml = plan.etapes.map(e => {
-        if (e.fixe) return `<div class="plan-step fixe"><strong>${e.sequence}. ${esc(e.operation)}</strong> <span class="plan-note">— déjà planifiée (cochez « Replanifier » pour la reprendre)</span></div>`;
+      const nomDeSeq = (sq) => { const x = plan.etapes.find(y => y.sequence === sq); return x ? esc(x.operation) : '?'; };
+      const etapesHtml = plan.etapes.slice().sort((a, b) => (a.debut || '9').localeCompare(b.debut || '9')).map(e => {
+        if (e.fixe) return `<div class="plan-step fixe"><strong>${esc(e.operation)}</strong> <span class="plan-note">— déjà planifiée (cochez « Replanifier » pour la reprendre)</span></div>`;
         const choisis = Array.from(new Map(e.phases.flatMap(ph => ph.personnes).map(p => [p.id, p])).keys());
         const imp = etat.imposes[e.gamme_id] || {};
         const selectedPersons = imp.personnel_ids || choisis;
@@ -2159,8 +2172,8 @@
         const alertes = e.problemes.map(p => `<div class="msg ${p.bloquant ? 'error' : ''}" style="margin:4px 0 0; ${p.bloquant ? '' : 'color:var(--accent-amber-text);'}">${p.bloquant ? '⛔' : '⚠️'} ${esc(p.detail)}</div>`).join('');
         return `
           <div class="plan-step" data-gamme="${e.gamme_id}">
-            <div class="step-head"><strong><span class="mono" style="color:var(--ink-500)">${e.sequence}.</span> ${esc(e.operation)}</strong>
-              <span class="plan-note">${e.predecesseurs && e.predecesseurs.length ? 'après étape' + (e.predecesseurs.length > 1 ? 's ' : ' ') + (e.dependances && e.dependances.length ? e.dependances.map(d => d.mode === 'progressif' ? `${d.sequence} (dès ${d.seuil_pct} %)` : d.sequence).join(', ') : e.predecesseurs.join(', ')) : 'dès le début'} · ${e.debut ? fmtDateHeure(e.debut) + ' → ' + fmtDateHeure(e.fin) : 'non planifiable'}</span></div>
+            <div class="step-head"><strong>${esc(e.operation)}</strong>
+              <span class="plan-note">${e.predecesseurs && e.predecesseurs.length ? 'après : ' + (e.dependances && e.dependances.length ? e.dependances.map(d => (nomDeSeq(d.sequence)) + (d.mode === 'progressif' ? ` (dès ${d.seuil_pct} %)` : '')).join(', ') : e.predecesseurs.map(nomDeSeq).join(', ')) : 'dès le début'} · ${e.debut ? fmtDateHeure(e.debut) + ' → ' + fmtDateHeure(e.fin) : 'non planifiable'}</span></div>
             <div class="step-grid">
               <div class="field"><label>Machine${e.machine ? ' retenue : ' + esc(e.machine.nom) : ''}</label><select class="pl-machine">${machOpts}</select></div>
               <div class="field"><label>Personnel (imposer)</label>
@@ -2243,6 +2256,12 @@
       aucune: 'Aucun temps standard défini pour cette opération — renseignez-le dans « Temps standards », ou saisissez une durée manuelle.',
     };
 
+    // Libellés : nom de l'opération ; si le même nom existe plusieurs fois dans l'OF, on ajoute « (1ʳᵉ) », « (2ᵉ)… ».
+    const libelles = new Map();
+    data.etapes.forEach(x => {
+      const memes = data.etapes.filter(y => y.operation === x.operation);
+      libelles.set(x.sequence, memes.length > 1 ? `${x.operation} (${memes.indexOf(x) + 1}/${memes.length})` : x.operation);
+    });
     const etapesHtml = data.etapes.map(e => {
       const verrou = e.statut !== 'à planifier';
       const machOptions = `<option value="">— Standard de l'opération —</option>` + e.machines_compatibles
@@ -2253,33 +2272,35 @@
           <input class="s-param" data-cle="${p.cle}" type="${p.type === 'texte' ? 'text' : 'number'}" ${p.type === 'texte' ? '' : 'min="0" step="any"'} placeholder="${esc(valeurProduit(p.cle))}" value="${esc(e.parametres[p.cle] ?? '')}"></div>`).join('');
       const phasesHtml = e.phases.length ? `<ul class="phase-list">${e.phases.map(p => `
         <li><span>${esc(p.nom)}${p.occupe_machine ? '' : ' <em>(sans machine)</em>'}</span><span class="mono">${fmtH(p.duree_h)}</span><small>${esc(p.detail)}</small></li>`).join('')}</ul>` : '';
+      // TOUTES les autres opérations de l'OF peuvent être cochées : le numéro de saisie n'est pas un ordre d'exécution.
+      const autres = data.etapes.filter(x => x.sequence !== e.sequence);
       const avant = data.etapes.filter(x => x.sequence < e.sequence);
       const actuels = e.predecesseurs ?? (avant.length ? [avant[avant.length - 1].sequence] : []);
-      const lignesPred = avant.map(x => {
+      const lignesPred = autres.map(x => {
         const opt = (e.dependances || {})[x.sequence];
-        const mode = !actuels.includes(x.sequence) ? 'aucun' : (opt && opt.mode === 'progressif' ? 'progressif' : 'fin');
+        const coche = actuels.includes(x.sequence);
+        const mode = opt && opt.mode === 'progressif' ? 'progressif' : 'fin';
         const pct = opt && opt.seuil_pct !== undefined && opt.seuil_pct !== null ? opt.seuil_pct : 10;
         return `<div class="pred-row">
-          <span class="pred-name">${x.sequence}. ${esc(x.operation)}</span>
-          <select class="s-pred-mode" data-seq="${x.sequence}">
-            <option value="aucun" ${mode === 'aucun' ? 'selected' : ''}>Aucun lien (matière déjà disponible)</option>
+          <label class="pred-name"><input type="checkbox" class="s-pred-check" data-seq="${x.sequence}" ${coche ? 'checked' : ''}> ${esc(libelles.get(x.sequence))}</label>
+          <select class="s-pred-mode ${coche ? '' : 'hidden'}" data-seq="${x.sequence}">
             <option value="fin" ${mode === 'fin' ? 'selected' : ''}>Attendre la fin</option>
             <option value="progressif" ${mode === 'progressif' ? 'selected' : ''}>Démarrage progressif</option>
           </select>
-          <span class="pred-pct ${mode === 'progressif' ? '' : 'hidden'}">dès <input class="s-pred-pct" type="number" min="0" max="100" step="1" value="${pct}"> % avancé</span>
+          <span class="pred-pct ${coche && mode === 'progressif' ? '' : 'hidden'}">dès <input class="s-pred-pct" type="number" min="0" max="100" step="1" value="${pct}"> % avancé</span>
         </div>`;
       }).join('');
-      const predHtml = avant.length ? `
-        <div class="field pred-field"><label>Démarre après… (lien avec les étapes précédentes)</label>
+      const predHtml = autres.length ? `
+        <div class="field pred-field"><label>Démarre après… <span class="plan-note">(cochez une ou plusieurs opérations ; aucune case cochée = peut démarrer dès le début)</span></label>
           <div class="pred-list">${lignesPred}</div>
-          <small><strong>Aucun lien</strong> : l'étape peut démarrer en parallèle (ex. les feuilles sont déjà à la plieuse). <strong>Attendre la fin</strong> : elle démarre quand l'étape est terminée. <strong>Démarrage progressif</strong> : elle démarre dès qu'une part de l'étape est faite (ex. la pliure dès que des feuilles refendues sont prêtes), mais ne peut pas finir avant elle.</small></div>` : '';
+          <small>Les opérations sont listées dans l'ordre de saisie de l'OF, ce n'est <strong>pas</strong> l'ordre d'exécution : c'est vous qui définissez ce qui vient après quoi. <strong>Attendre la fin</strong> : l'opération démarre quand la coche est terminée. <strong>Démarrage progressif</strong> : elle démarre dès qu'une part de l'opération cochée est faite (ex. la pliure dès que des feuilles refendues sont prêtes), mais ne peut pas finir avant elle.</small></div>` : '';
       const manquants = e.parametres_manquants.length
         ? `<div class="msg error" style="margin:6px 0 0;">À renseigner : ${e.parametres_requis.filter(p => e.parametres_manquants.includes(p.cle)).map(p => esc(p.libelle)).join(', ')}.</div>` : '';
       const erreursF = (e.erreurs_formule || []).map(x => `<div class="msg error" style="margin:6px 0 0;">Formule « ${esc(x.phase)} » : ${esc(x.message)}</div>`).join('');
       return `
         <div class="step-card" data-gamme="${e.gamme_id}" data-verrou="${verrou ? 1 : 0}">
           <div class="step-head">
-            <strong><span class="mono" style="color:var(--ink-500);">${e.sequence}.</span> ${e.operation}</strong>
+            <strong>${e.operation}</strong>
             <span class="tag ${e.chiffre ? 'ok' : 'warn'}">${e.chiffre ? fmtH(e.total_h) : 'Non chiffré'}</span>
           </div>
           <div class="step-source">${SOURCES[e.source]}${e.duree_manuelle_h !== null ? ' — <strong>durée manuelle appliquée</strong>' : ''}</div>
@@ -2324,9 +2345,16 @@
       <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="m-submit">Recalculer et enregistrer</button></div>
     `, 'large');
 
-    document.querySelectorAll('.s-pred-mode').forEach(sel => sel.addEventListener('change', () => {
-      sel.closest('.pred-row').querySelector('.pred-pct').classList.toggle('hidden', sel.value !== 'progressif');
-    }));
+    const majLignePred = (row) => {
+      const coche = row.querySelector('.s-pred-check').checked;
+      const sel = row.querySelector('.s-pred-mode');
+      sel.classList.toggle('hidden', !coche);
+      row.querySelector('.pred-pct').classList.toggle('hidden', !coche || sel.value !== 'progressif');
+    };
+    document.querySelectorAll('.pred-row').forEach(row => {
+      row.querySelector('.s-pred-check').addEventListener('change', () => majLignePred(row));
+      row.querySelector('.s-pred-mode').addEventListener('change', () => majLignePred(row));
+    });
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
     document.getElementById('m-submit').addEventListener('click', async () => {
       const msg = document.getElementById('m-msg');
@@ -2344,15 +2372,16 @@
           duree_manuelle_h: card.querySelector('.s-manuel').value,
         };
         if (card.dataset.verrou !== '1') etape.machine_id = card.querySelector('.s-machine').value || null;
-        const choixPred = card.querySelectorAll('.s-pred-mode');
+        const choixPred = card.querySelectorAll('.pred-row');
         if (choixPred.length) {
           const preds = []; const dependances = {};
-          choixPred.forEach(sel => {
-            if (sel.value === 'aucun') return;
+          choixPred.forEach(row => {
+            if (!row.querySelector('.s-pred-check').checked) return;
+            const sel = row.querySelector('.s-pred-mode');
             const seq = Number(sel.dataset.seq);
             preds.push(seq);
             if (sel.value === 'progressif') {
-              const pct = sel.closest('.pred-row').querySelector('.s-pred-pct').value;
+              const pct = row.querySelector('.s-pred-pct').value;
               dependances[seq] = { mode: 'progressif', seuil_pct: pct === '' ? 10 : Number(pct) };
             }
           });
@@ -2875,7 +2904,7 @@
           return;
         }
         const SUFFIXE = { 'planifié': ' — déjà planifiée', 'en cours': ' — en cours', 'terminé': ' — terminée' };
-        etapeSelect.innerHTML = gammes.map(g => `<option value="${g.id}" data-statut="${g.statut}" ${g.statut === 'en cours' || g.statut === 'terminé' ? 'disabled' : ''}>${g.sequence}. ${esc(g.operation.nom)}${SUFFIXE[g.statut] || ''}</option>`).join('');
+        etapeSelect.innerHTML = gammes.map(g => `<option value="${g.id}" data-statut="${g.statut}" ${g.statut === 'en cours' || g.statut === 'terminé' ? 'disabled' : ''}>${esc(g.operation.nom)}${SUFFIXE[g.statut] || ''}</option>`).join('');
         const defaut = gammes.find(g => g.statut === 'à planifier') || gammes.find(g => g.statut === 'planifié');
         if (defaut) etapeSelect.value = defaut.id;
         majNoteEtape(gammes);
