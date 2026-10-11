@@ -364,6 +364,11 @@
   .bar-fill { height: 100%; background: var(--accent-teal); transition: width .3s var(--ease); }
   .bar-fill.warn { background: var(--accent-amber); }
   .bar-fill.danger { background: var(--danger); }
+  .bar-track.tall { height: 10px; position: relative; margin: 4px 0; }
+  .jauge-prevu { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink-900, #222); opacity: .65; }
+  .sp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .sp-table th { text-align: left; font-size: 11px; color: var(--ink-500); padding: 4px 8px; }
+  .sp-table td { padding: 8px; border-top: 1px solid var(--line); vertical-align: top; }
 
   .hidden { display: none !important; }
 
@@ -842,6 +847,7 @@
             <button class="btn" id="sem-auj">Aujourd'hui</button>
             <button class="btn" id="sem-suiv" title="Semaine suivante">▶</button>
             <button class="btn" id="feuille-jour">Feuille du jour (PDF)</button>
+            <button class="btn" id="saisie-prod">Saisie de production</button>
           </div>
           <button class="btn primary" id="add-of-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Affecter un OF</button>
         </div>
@@ -855,6 +861,7 @@
     `);
     wrap.appendChild(legend);
 
+    legend.querySelector('#saisie-prod').addEventListener('click', () => ouvrirModaleSaisieProduction());
     legend.querySelector('#feuille-jour').addEventListener('click', ouvrirModaleFeuilleJournaliere);
     legend.querySelector('#sem-prec').addEventListener('click', () => changerSemaine(-1));
     legend.querySelector('#sem-suiv').addEventListener('click', () => changerSemaine(1));
@@ -1044,6 +1051,128 @@
     });
   }
 
+  // ---------- Suivi de production : saisie de fin de journée, jauges, glissement du planning ----------
+  function jaugeAvancement(pct, prevu, retard) {
+    const p = Math.max(0, Math.min(100, Number(pct) || 0));
+    const cls = retard ? 'danger' : (prevu != null && p + 2 < prevu ? 'warn' : '');
+    const marque = prevu != null ? `<span class="jauge-prevu" style="left:${Math.max(0, Math.min(100, prevu))}%" title="Prévu à ce jour : ${prevu} %"></span>` : '';
+    return `<div class="bar-track tall"><div class="bar-fill ${cls}" style="width:${p}%"></div>${marque}</div>`;
+  }
+  const nbFr = (n) => Number(n).toLocaleString('fr-FR').replace(/[  ]/g, ' ');
+  const dateLocaleIso = () => maintenantLocal().slice(0, 10);
+
+  async function ouvrirModaleSaisieProduction(dateInit) {
+    afficherModale(`
+      <h3>Saisie de production — fin de journée</h3>
+      <div class="field" style="max-width:220px;"><label>Journée</label><input id="sp-date" type="date" value="${dateInit || dateLocaleIso()}"></div>
+      <div id="sp-liste"><div class="msg">Chargement…</div></div>
+      <label style="display:flex;gap:8px;align-items:center;margin:12px 0 4px;font-size:13px;"><input type="checkbox" id="sp-recaler" checked> Décaler automatiquement le planning si une tâche n'est pas terminée comme prévu</label>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="sp-go" disabled>Enregistrer</button></div>
+    `, 'xlarge');
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    let taches = [];
+    async function charger() {
+      const date = document.getElementById('sp-date').value;
+      const box = document.getElementById('sp-liste');
+      document.getElementById('sp-go').disabled = true;
+      if (!date) { box.innerHTML = ''; return; }
+      box.innerHTML = '<div class="msg">Chargement…</div>';
+      try {
+        const res = await fetch(`${API}/lecture-production?date=${date}`);
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        taches = d.taches;
+        if (!taches.length) { box.innerHTML = `<div class="msg">Aucune tâche planifiée le ${dateCourte(date)}.</div>`; return; }
+        box.innerHTML = `<div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Tâche</th><th style="min-width:150px;">Avancement</th><th>Produit ce jour</th><th>Terminée</th><th></th></tr></thead><tbody>${taches.map((t, i) => {
+          const s = t.saisie || {};
+          return `<tr data-i="${i}">
+            <td><strong>${esc(t.operation)}</strong> <span class="plan-note">— ${esc(t.machine)}</span><br>
+              <span class="plan-note">${esc(t.of)} · ${esc(t.titre)}${t.client ? ' (' + esc(t.client) + ')' : ''}<br>${t.debut ? esc(t.debut) + '–' + esc(t.fin) + ' · ' : ''}${esc(t.personnel.join(', ') || 'personnel à affecter')}</span></td>
+            <td>${jaugeAvancement(t.avancement_pct, null, false)}<div class="plan-note">${t.avancement_pct} % ${t.quantite_totale ? '· ' + nbFr(t.quantite_realisee) + ' / ' + nbFr(t.quantite_totale) : ''}</div></td>
+            <td><input class="sp-qte" type="number" min="0" step="any" value="${s.quantite ? s.quantite : ''}" placeholder="quantité" style="width:110px;"></td>
+            <td style="text-align:center;"><input class="sp-fini" type="checkbox" ${s.termine || t.statut === 'terminé' ? 'checked' : ''}></td>
+            <td><details><summary class="plan-note" style="cursor:pointer;">+</summary>
+              <div class="field"><label>Avancement cumulé (%) — si pas de quantité</label><input class="sp-pct" type="number" min="0" max="100" step="any" value="${s.pct_cumule ?? ''}"></div>
+              <div class="field"><label>Heures réelles</label><input class="sp-h" type="number" min="0" step="0.25" value="${s.heures_reelles ?? ''}"></div>
+              <div class="field"><label>Remarque</label><input class="sp-com" type="text" value="${esc(s.commentaire || '')}"></div></details></td>
+          </tr>`; }).join('')}</tbody></table></div>
+          <div class="plan-note" style="margin-top:6px;">Saisissez la quantité réellement produite aujourd'hui (en exemplaires). Les lignes laissées vides sont ignorées. Pour une tâche sans quantité (travail manuel), utilisez « + » pour indiquer l'avancement en %.</div>`;
+        document.getElementById('sp-go').disabled = false;
+      } catch (e) { box.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    }
+    document.getElementById('sp-date').addEventListener('change', charger);
+    charger();
+
+    document.getElementById('sp-go').addEventListener('click', async () => {
+      const date = document.getElementById('sp-date').value;
+      const msg = document.getElementById('m-msg');
+      const saisies = Array.from(document.querySelectorAll('.sp-table tbody tr')).map(tr => {
+        const t = taches[Number(tr.dataset.i)];
+        const val = (c) => tr.querySelector(c).value;
+        return { gamme_id: t.gamme_id, quantite: val('.sp-qte'), pct: val('.sp-pct'), termine: tr.querySelector('.sp-fini').checked && t.statut !== 'terminé', heures_reelles: val('.sp-h'), commentaire: val('.sp-com') };
+      }).filter(s => s.quantite !== '' || s.pct !== '' || s.termine);
+      if (!saisies.length) { msg.innerHTML = '<div class="msg error">Aucune saisie à enregistrer.</div>'; return; }
+      msg.innerHTML = '<div class="msg">Enregistrement et recalage du planning…</div>';
+      document.getElementById('sp-go').disabled = true;
+      try {
+        const res = await fetch(`${API}/saisir-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, saisies, recaler: document.getElementById('sp-recaler').checked }) });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        afficherBilanProduction(d);
+        chargerDonneesReelles();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; document.getElementById('sp-go').disabled = false; }
+    });
+  }
+
+  function afficherBilanProduction(d) {
+    const erreurs = d.etapes.filter(e => e.erreur).map(e => `<div class="msg error">${esc(e.erreur)}</div>`).join('');
+    const blocs = d.ofs.map(o => {
+      const r = o.recalage;
+      let etat = '<span class="tag ok">Dans les temps</span>';
+      let detail = '';
+      if (r && r.retard) {
+        const lignes = r.retards.map(x => `<li><strong>${esc(x.operation)}</strong> : ${x.reel_pct} % réalisé (prévu ${x.prevu_pct} %) — ${fmtH(x.minutes_manquantes / 60)} de travail en plus à replacer</li>`).join('');
+        if (r.applique) {
+          etat = '<span class="tag warn">Planning décalé</span>';
+          detail = `<ul class="plan-note" style="margin:6px 0;">${lignes}</ul>
+            <div class="plan-resume"><div><span class="plan-k">Fin prévue avant</span><strong>${fmtDateHeure(r.ancienne_fin)}</strong></div><div><span class="plan-k">Nouvelle fin</span><strong>${fmtDateHeure(r.nouvelle_fin)}</strong></div>
+            <div>${r.delai_tenu === false ? `<span class="tag danger">Délai dépassé</span> <span class="plan-note">(délai ${fmtDateHeure(r.delai)} — ${fmtH(r.retard_delai_min / 60)} de retard${r.alternative_heures_sup ? ' ; avec heures sup : fin ' + fmtDateHeure(r.alternative_heures_sup.fin) + (r.alternative_heures_sup.respecte_delai ? ', délai tenu' : '') : ''})</span>` : (r.delai_tenu ? '<span class="tag ok">Délai tenu</span>' : '')}</div></div>
+            <div class="plan-note">Étapes replacées : ${r.etapes_decalees.map(x => esc(x.operation) + ' (' + fmtDateHeure(x.debut) + ' → ' + fmtDateHeure(x.fin) + ')').join(' ; ')}</div>`;
+        } else {
+          etat = '<span class="tag danger">Retard — planning non recalé</span>';
+          detail = `<ul class="plan-note" style="margin:6px 0;">${lignes}</ul><div class="msg error">${esc(r.raison || 'Recalage impossible')}${(r.bloquants || []).map(b => `<br>• ${esc(b.operation)} : ${esc(b.detail)}`).join('')}</div>`;
+        }
+      }
+      return `<div class="panel" style="margin:0 0 10px;padding:12px;"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center;"><strong>${esc(o.numero)}</strong>${etat}</div>
+        <div class="plan-note" style="margin-top:4px;">Avancement global : <strong>${o.avancement_of ?? '—'} %</strong></div>${jaugeAvancement(o.avancement_of, null, false)}${detail}</div>`;
+    }).join('');
+    afficherModale(`<h3>Production du ${dateCourte(d.date)} enregistrée</h3>${erreurs}${blocs || '<div class="msg">Rien d\'enregistré.</div>'}
+      <div class="actions"><button class="btn primary" id="m-cancel">Fermer</button></div>`, 'large');
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+  }
+
+  async function ouvrirModaleAvancementOf(ofUuid, ofNumero) {
+    afficherModale(`<h3>Avancement — ${esc(ofNumero)}</h3><div id="av-corps"><div class="msg">Chargement…</div></div>
+      <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="av-saisie">Saisir la production du jour</button></div>`, 'large');
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.getElementById('av-saisie').addEventListener('click', () => ouvrirModaleSaisieProduction());
+    try {
+      const res = await fetch(`${API}/lecture-production?of_id=${ofUuid}`);
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+      const etapes = d.etapes.slice().sort((a, b) => (a.debut_prevu || '9').localeCompare(b.debut_prevu || '9'));
+      document.getElementById('av-corps').innerHTML = `
+        <div style="margin-bottom:14px;"><div style="display:flex;justify-content:space-between;align-items:baseline;"><strong>${esc(d.of.titres ? d.of.titres.nom : '')}</strong><span><strong style="font-size:20px;">${d.avancement_global} %</strong> <span class="plan-note">global${d.of.delai ? ' · délai ' + dateCourte(d.of.delai) : ''}</span></span></div>${jaugeAvancement(d.avancement_global, null, false)}</div>
+        ${etapes.map(e => `<div style="padding:8px 0;border-top:1px solid var(--line);">
+          <div style="display:flex;justify-content:space-between;gap:10px;"><span><strong>${esc(e.operation)}</strong> <span class="plan-note">${esc(e.machine || 'manuel')}</span></span>
+            <span>${e.statut === 'terminé' ? '<span class="tag ok">Terminée</span>' : (e.en_retard ? '<span class="tag danger">En retard</span>' : '')} <strong>${e.avancement_pct} %</strong></span></div>
+          ${jaugeAvancement(e.avancement_pct, e.statut === 'terminé' ? null : e.prevu_pct, e.en_retard)}
+          <div class="plan-note">${e.quantite_totale ? nbFr(e.quantite_realisee) + ' / ' + nbFr(e.quantite_totale) + ' · ' : ''}${e.debut_prevu ? 'prévu du ' + dateCourte(e.debut_prevu) + ' au ' + dateCourte(e.fin_prevue) : 'non planifiée'}${e.fin_reelle ? ' · terminée le ' + dateCourte(e.fin_reelle) : ''}</div></div>`).join('')}
+        <div class="plan-note" style="margin-top:8px;">Le trait sur la jauge indique l'avancement prévu à ce jour d'après le planning.</div>`;
+    } catch (e) { document.getElementById('av-corps').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+  }
+
   function ouvrirMenuOf(btn, ofUuid, ofNumero, ofStatut) {
     document.querySelectorAll('.row-menu').forEach(m => m.remove());
     const menu = el(`
@@ -1053,6 +1182,7 @@
         <button data-action="chiffrage">Chiffrage des temps</button>
         <button data-action="planifier">Planifier à l'heure</button>
         <button data-action="affecter">Affecter au planning</button>
+        <button data-action="avancement">Avancement / production</button>
         <button data-action="deplanifier">Déplanifier l'OF</button>
         <button data-action="supprimer" class="danger">Supprimer l'OF</button>
       </div>
@@ -1069,6 +1199,10 @@
     menu.querySelector('[data-action="affecter"]').addEventListener('click', () => {
       menu.remove();
       ouvrirModaleAffectation({ ofUuid });
+    });
+    menu.querySelector('[data-action="avancement"]').addEventListener('click', () => {
+      menu.remove();
+      ouvrirModaleAvancementOf(ofUuid, ofNumero);
     });
     menu.querySelector('[data-action="deplanifier"]').addEventListener('click', () => {
       menu.remove();
