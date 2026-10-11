@@ -462,6 +462,9 @@
   .produit-box { border: 1px solid var(--accent-teal); background: var(--accent-teal-soft); border-radius: var(--radius-md); padding: 11px 14px; margin-bottom: 12px; }
   .produit-titre { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
   .import-lignes { max-height: 260px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-md); margin-top: 10px; }
+  .pl-pers-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .pl-heures-wrap { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-500); white-space: nowrap; }
+  .pl-heures { width: 110px; padding: 3px 6px; font-size: 12px; }
   .pred-list { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--field-bg); }
   .pred-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
   .pred-name { font-size: 12.5px; min-width: 200px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
@@ -2160,15 +2163,28 @@
       const nomDeSeq = (sq) => { const x = plan.etapes.find(y => y.sequence === sq); return x ? esc(x.operation) : '?'; };
       const etapesHtml = plan.etapes.slice().sort((a, b) => (a.debut || '9').localeCompare(b.debut || '9')).map(e => {
         if (e.fixe) return `<div class="plan-step fixe"><strong>${esc(e.operation)}</strong> <span class="plan-note">— déjà planifiée (cochez « Replanifier » pour la reprendre)</span></div>`;
-        const choisis = Array.from(new Map(e.phases.flatMap(ph => ph.personnes).map(p => [p.id, p])).keys());
+        // Personnes « de départ » : les remplaçants arrivés en relais ne sont pas imposés (ils sont déduits).
+        const choisis = Array.from(new Map(e.phases.flatMap(ph => {
+          if (!ph.relais) return ph.personnes;
+          const premier = ph.relais.map(r => r.debut).sort()[0];
+          const departs = new Set(ph.relais.filter(r => r.debut === premier).map(r => r.id));
+          return ph.personnes.filter(p => departs.has(p.id));
+        }).map(p => [p.id, p])).keys());
         const imp = etat.imposes[e.gamme_id] || {};
         const selectedPersons = imp.personnel_ids || choisis;
         const machOpts = `<option value="">— Automatique —</option>` + e.machines_possibles.map(m => `<option value="${m.id}" ${(imp.machine_id || '') === m.id ? 'selected' : ''}>${esc(m.nom)}</option>`).join('');
-        const persHtml = refs.personnel.map(p => `<label><input type="checkbox" class="pl-pers" value="${p.id}" ${selectedPersons.includes(p.id) ? 'checked' : ''}> ${esc(p.nom)}</label>`).join('');
+        const heuresImp = imp.personnel_heures || {};
+        const persHtml = refs.personnel.map(p => {
+          const coche = selectedPersons.includes(p.id);
+          return `<div class="pl-pers-row"><label><input type="checkbox" class="pl-pers" value="${p.id}" ${coche ? 'checked' : ''}> ${esc(p.nom)}</label>
+            <span class="pl-heures-wrap ${coche ? '' : 'hidden'}"><input class="pl-heures" data-id="${p.id}" type="number" min="0" step="0.25" placeholder="toute la tâche" value="${heuresImp[p.id] ?? ''}" title="Heures de présence sur cette tâche (vide = toute la tâche)"> h</span></div>`;
+        }).join('');
         const phasesHtml = e.phases.map(ph => `
           <li><span>${esc(ph.nom)}</span>
               <span class="mono">${ph.tranches.map(t => `${t.date.slice(8)}/${t.date.slice(5, 7)} ${t.debut}–${t.fin}`).join(' · ')}</span>
-              <small>${ph.besoin_machine ? 'machine' : 'manuel'} — ${ph.personnes.length ? esc(ph.personnes.map(p => p.nom).join(', ')) : '<em>personnel à affecter</em>'}</small></li>`).join('');
+              <small>${ph.besoin_machine ? 'machine' : 'manuel'} — ${ph.relais
+                ? ph.relais.slice().sort((a, b) => a.debut.localeCompare(b.debut)).map(r => r.toute_la_tache ? esc(r.nom) : `${esc(r.nom)} (${fmtH(r.minutes / 60)} ${r.debut === ph.relais.map(x => x.debut).sort()[0] ? 'au début' : 'en relais'})`).join(' → ')
+                : (ph.personnes.length ? esc(ph.personnes.map(p => p.nom).join(', ')) : '<em>personnel à affecter</em>')}</small></li>`).join('');
         const alertes = e.problemes.map(p => `<div class="msg ${p.bloquant ? 'error' : ''}" style="margin:4px 0 0; ${p.bloquant ? '' : 'color:var(--accent-amber-text);'}">${p.bloquant ? '⛔' : '⚠️'} ${esc(p.detail)}</div>`).join('');
         return `
           <div class="plan-step" data-gamme="${e.gamme_id}">
@@ -2193,7 +2209,7 @@
         ${alt}${bloquants}
         ${ganttHoraire(plan)}
         ${reseauPert(plan)}
-        <div class="plan-hint">Pour imposer une machine ou du personnel, modifiez-les ci-dessous puis cliquez sur « Calculer ».</div>
+        <div class="plan-hint">Pour imposer une machine ou du personnel, modifiez-les ci-dessous puis cliquez sur « Calculer ». Pour une personne présente seulement une partie de la tâche, indiquez ses heures : un remplaçant compétent prend automatiquement le relais.</div>
         ${etapesHtml}`;
 
       // Mémoriser les choix manuels de machine / personnel
@@ -2202,9 +2218,21 @@
         bloc.querySelector('.pl-machine').addEventListener('change', (ev) => {
           etat.imposes[g] = { ...(etat.imposes[g] || {}), machine_id: ev.target.value || undefined };
         });
+        const majHeures = () => {
+          const h = {};
+          bloc.querySelectorAll('.pl-heures').forEach(i => {
+            const ligne = i.closest('.pl-pers-row');
+            if (i.value !== '' && Number(i.value) > 0 && ligne.querySelector('.pl-pers').checked) h[i.dataset.id] = Number(i.value);
+          });
+          const ids = Array.from(bloc.querySelectorAll('.pl-pers:checked')).map(x => x.value);
+          etat.imposes[g] = { ...(etat.imposes[g] || {}), personnel_ids: ids.length ? ids : undefined, personnel_heures: Object.keys(h).length ? h : undefined };
+        };
+        bloc.querySelectorAll('.pl-heures').forEach(i => i.addEventListener('change', majHeures));
         bloc.querySelectorAll('.pl-pers').forEach(cb => cb.addEventListener('change', () => {
+          cb.closest('.pl-pers-row').querySelector('.pl-heures-wrap').classList.toggle('hidden', !cb.checked);
           const ids = Array.from(bloc.querySelectorAll('.pl-pers:checked')).map(x => x.value);
           etat.imposes[g] = { ...(etat.imposes[g] || {}), personnel_ids: ids.length ? ids : undefined };
+          majHeures();
           bloc.querySelector('summary').textContent = ids.length ? `${ids.length} personne(s)` : 'Automatique';
         }));
       });
