@@ -2210,9 +2210,15 @@
       });
       const rienAPlanifier = plan.etapes.length > 0 && plan.etapes.every(e => e.fixe);
       $('pl-appliquer').disabled = !(plan.bloquants.length === 0 && r.complet) || rienAPlanifier;
-      $('m-msg').innerHTML = rienAPlanifier
-        ? `<div class="msg">Toutes les étapes de cet OF sont <strong>déjà planifiées</strong> : il n'y a rien à appliquer. Pour les replanifier, cochez « Replanifier aussi les étapes déjà planifiées » puis recalculez, ou retirez-les du planning avec « Déplanifier l'OF » (menu ···).</div>`
-        : '';
+      $('m-msg').innerHTML = '';
+      if (rienAPlanifier) {
+        // Message bien visible en haut du résultat (et non en bas de la fenêtre) + action directe.
+        $('pl-resultat').insertAdjacentHTML('afterbegin', `
+          <div class="msg" style="margin:0 0 12px;"><strong>Rien à calculer :</strong> toutes les étapes de cet OF sont déjà planifiées, donc le calcul ne change rien.
+            <div class="note-actions"><button class="btn primary" id="pl-tout-replan">Tout replanifier maintenant</button></div>
+            <div class="plan-note" style="margin-top:6px;">Cette action recalcule le planning de toutes les étapes à partir du début souhaité (les étapes déjà démarrées ou terminées sont conservées). Vous pouvez aussi cocher « Replanifier aussi les étapes déjà planifiées » puis recalculer.</div></div>`);
+        $('pl-tout-replan').addEventListener('click', () => { $('pl-replan').checked = true; calculer(); });
+      }
     }
 
     $('pl-calc').addEventListener('click', calculer);
