@@ -32,12 +32,13 @@ exports.handler = async (event) => {
       ...(body.personnel_id ? [body.personnel_id] : []),
     ].filter(Boolean)));
 
-    if (!gamme_operatoire_id || !date || !machine_id) {
+    if (!gamme_operatoire_id || !date) {
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: 'gamme_operatoire_id, date et machine_id sont requis.' }),
+        body: JSON.stringify({ error: 'gamme_operatoire_id et date sont requis (la machine est facultative : opération manuelle).' }),
       };
     }
+    const machineId = machine_id || null;
 
     const supabase = getSupabase();
 
@@ -62,33 +63,36 @@ exports.handler = async (event) => {
     //   };
     // }
 
-    // Respect du séquencement : les étapes précédentes de la même
-    // gamme doivent déjà être planifiées à une date <= celle demandée.
-    const { data: etapesPrecedentes, error: precError } = await supabase
+    // Respect de l'enchaînement : les opérations dont celle-ci dépend (colonne
+    // predecesseurs ; à défaut, l'étape saisie juste avant) doivent déjà être planifiées.
+    const { data: toutes, error: precError } = await supabase
       .from('gammes_operatoires')
-      .select('sequence, statut, planning_jour(date)')
-      .eq('of_id', gamme.of_id)
-      .lt('sequence', gamme.sequence);
+      .select('sequence, statut, predecesseurs, operations(nom)')
+      .eq('of_id', gamme.of_id);
     if (precError) throw precError;
-
-    const precedenteNonPlanifiee = etapesPrecedentes.find((e) => e.statut === 'à planifier');
+    const triees = toutes.slice().sort((x, y) => x.sequence - y.sequence);
+    const moi = triees.find((e) => e.sequence === gamme.sequence);
+    const idx = triees.indexOf(moi);
+    const requises = (moi && Array.isArray(moi.predecesseurs)) ? moi.predecesseurs : (idx > 0 ? [triees[idx - 1].sequence] : []);
+    const precedenteNonPlanifiee = triees.find((e) => requises.includes(e.sequence) && e.statut === 'à planifier');
     if (precedenteNonPlanifiee) {
+      const nom = precedenteNonPlanifiee.operations ? precedenteNonPlanifiee.operations.nom : `opération ${precedenteNonPlanifiee.sequence}`;
       return {
         statusCode: 409,
         body: JSON.stringify({
-          error: `L'étape ${precedenteNonPlanifiee.sequence} de cette gamme doit être planifiée avant celle-ci.`,
+          error: `« ${nom} » doit être planifiée avant cette opération.`,
           conflit: 'sequencement',
         }),
       };
     }
 
     // Vérifier que la machine est libre ce jour-là.
-    const { data: machineOccupee, error: machineError } = await supabase
+    const { data: machineOccupee, error: machineError } = machineId ? await supabase
       .from('planning_jour')
       .select('id')
-      .eq('machine_id', machine_id)
+      .eq('machine_id', machineId)
       .eq('date', date)
-      .neq('statut', 'annulé');
+      .neq('statut', 'annulé') : { data: [], error: null };
     if (machineError) throw machineError;
     if (machineOccupee.length > 0) {
       return {
@@ -137,7 +141,7 @@ exports.handler = async (event) => {
     const { data: creneau, error: insertError } = await supabase
       .from('planning_jour')
       .insert({
-        date, machine_id, personnel_id: personnelIds[0] || null, // 1re personne = référente (compatibilité)
+        date, machine_id: machineId, personnel_id: personnelIds[0] || null, // 1re personne = référente (compatibilité)
         of_id: gamme.of_id,
         operation_id: gamme.operation_id,
         gamme_operatoire_id: gamme.id,
@@ -156,7 +160,7 @@ exports.handler = async (event) => {
 
     const { error: updateError } = await supabase
       .from('gammes_operatoires')
-      .update({ statut: 'planifié', machine_id })
+      .update({ statut: 'planifié', machine_id: machineId })
       .eq('id', gamme.id);
     if (updateError) throw updateError;
 
