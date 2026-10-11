@@ -2256,6 +2256,8 @@
       aucune: 'Aucun temps standard défini pour cette opération — renseignez-le dans « Temps standards », ou saisissez une durée manuelle.',
     };
 
+    let catalogueOps = [];
+    try { catalogueOps = (await getReferentiels()).operations || []; } catch (_) { /* liste vide : l'ajout est alors indisponible */ }
     // Libellés : nom de l'opération ; si le même nom existe plusieurs fois dans l'OF, on ajoute « (1ʳᵉ) », « (2ᵉ)… ».
     const libelles = new Map();
     data.etapes.forEach(x => {
@@ -2301,7 +2303,7 @@
         <div class="step-card" data-gamme="${e.gamme_id}" data-verrou="${verrou ? 1 : 0}">
           <div class="step-head">
             <strong>${e.operation}</strong>
-            <span class="tag ${e.chiffre ? 'ok' : 'warn'}">${e.chiffre ? fmtH(e.total_h) : 'Non chiffré'}</span>
+            <span><span class="tag ${e.chiffre ? 'ok' : 'warn'}">${e.chiffre ? fmtH(e.total_h) : 'Non chiffré'}</span>${verrou ? '' : ` <button class="btn s-retirer" type="button" data-gamme="${e.gamme_id}" title="Retirer cette opération de l'OF">Retirer</button>`}</span>
           </div>
           <div class="step-source">${SOURCES[e.source]}${e.duree_manuelle_h !== null ? ' — <strong>durée manuelle appliquée</strong>' : ''}</div>
           <div class="step-grid">
@@ -2332,6 +2334,13 @@
       <h3>Chiffrage — ${ofNumero} <span style="font-weight:400; color:var(--ink-500); font-size:13px;">(${data.of.quantite.toLocaleString('fr-FR')} ex.)</span></h3>
       ${data.avertissements.map(a => `<div class="msg error">${a}</div>`).join('')}
       ${produitHtml}
+      <div class="produit-box">
+        <div class="produit-titre">Opérations de cet OF <span class="plan-note">— enregistrez vos saisies avant d'ajouter ou de retirer une opération</span></div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <select id="m-ajout-op" style="min-width:260px;"><option value="">— Ajouter une opération du catalogue —</option>${(catalogueOps || []).map(o => `<option value="${esc(o.code)}">${esc(o.nom)}</option>`).join('')}</select>
+          <button class="btn" type="button" id="m-ajout-btn">Ajouter</button>
+        </div>
+      </div>
       ${etapesHtml || '<div class="empty">Cet OF n\'a aucune étape de gamme.</div>'}
       <div class="totaux-box">
         <div><span>Temps total (étapes en séquence)</span><strong>${fmtH(t.total_h)}</strong></div>
@@ -2355,6 +2364,23 @@
       row.querySelector('.s-pred-check').addEventListener('change', () => majLignePred(row));
       row.querySelector('.s-pred-mode').addEventListener('change', () => majLignePred(row));
     });
+    const modifierGamme = async (corps) => {
+      const msg = document.getElementById('m-msg');
+      try {
+        const res = await fetch(`${API}/modifier-gamme`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: ofUuid, ...corps }) });
+        const r = await res.json();
+        if (!res.ok) throw new Error(r.error || 'Erreur inconnue');
+        if (r.avertissements && r.avertissements.length) toast(r.avertissements.join(' '));
+        ouvrirModaleChiffrage(ofUuid, ofNumero);
+      } catch (err) { msg.innerHTML = `<div class="msg error">${esc(err.message)}</div>`; }
+    };
+    document.getElementById('m-ajout-btn').addEventListener('click', () => {
+      const code = document.getElementById('m-ajout-op').value;
+      if (code) modifierGamme({ ajouter: [code] });
+    });
+    document.querySelectorAll('.s-retirer').forEach(b => b.addEventListener('click', () => {
+      if (confirm('Retirer cette opération de l\'OF ?')) modifierGamme({ supprimer: [b.dataset.gamme] });
+    }));
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
     document.getElementById('m-submit').addEventListener('click', async () => {
       const msg = document.getElementById('m-msg');
