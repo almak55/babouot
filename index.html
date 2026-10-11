@@ -841,6 +841,7 @@
             <button class="btn" id="sem-prec" title="Semaine précédente">◀</button>
             <button class="btn" id="sem-auj">Aujourd'hui</button>
             <button class="btn" id="sem-suiv" title="Semaine suivante">▶</button>
+            <button class="btn" id="feuille-jour">Feuille du jour (PDF)</button>
           </div>
           <button class="btn primary" id="add-of-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Affecter un OF</button>
         </div>
@@ -854,6 +855,7 @@
     `);
     wrap.appendChild(legend);
 
+    legend.querySelector('#feuille-jour').addEventListener('click', ouvrirModaleFeuilleJournaliere);
     legend.querySelector('#sem-prec').addEventListener('click', () => changerSemaine(-1));
     legend.querySelector('#sem-suiv').addEventListener('click', () => changerSemaine(1));
     legend.querySelector('#sem-auj').addEventListener('click', () => changerSemaine(0));
@@ -1216,6 +1218,140 @@
       });
     });
     return wrap;
+  }
+
+  // ---------- Feuille journalière de placement du personnel (PDF) ----------
+  function chargerScript(src) {
+    return new Promise((resolve, reject) => {
+      if ([...document.scripts].some(s => s.src === src)) return resolve();
+      const s = document.createElement('script');
+      s.src = src; s.onload = resolve; s.onerror = () => reject(new Error('Impossible de charger ' + src));
+      document.head.appendChild(s);
+    });
+  }
+  async function chargerLibsPdf() {
+    if (window.jspdf && window.jspdf.jsPDF && window.jspdf.jsPDF.API.autoTable) return;
+    await chargerScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    await chargerScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
+  }
+  const pdfTxt = (v) => String(v == null ? '' : v).replace(/[  ]/g, ' ').replace(/[→≥≤]/g, '-');
+  function dateFr(iso) {
+    const d = new Date(iso + 'T00:00:00Z');
+    const jours = ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
+    return `${jours[d.getUTCDay()]} ${d.getUTCDate()} ${MOIS_FR[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+  }
+  const dateCourte = (iso) => iso ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) : '';
+
+  async function genererFeuilleJournaliere(date) {
+    const res = await fetch(`${API}/feuille-journaliere?date=${date}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+    await chargerLibsPdf();
+    const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const W = doc.internal.pageSize.getWidth();
+    const maj = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+    doc.text('Feuille de placement du personnel', 10, 14);
+    doc.setFontSize(12);
+    doc.text(pdfTxt(maj(dateFr(date))), W - 10, 14, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90);
+    const nbAff = data.personnes.filter(p => p.creneaux.length).length;
+    doc.text(pdfTxt(`Atelier Babouot  -  ${nbAff} personne(s) affectee(s)  -  ${data.nb_creneaux} creneau(x)  -  edite le ${new Date().toLocaleString('fr-FR')}`), 10, 20);
+    doc.setTextColor(0);
+    let y = 24;
+
+    const absents = data.personnes.filter(p => !p.creneaux.length);
+    const absentsTxt = absents.map(p => `${p.nom} (${p.statut}${p.plage ? ' ' + p.plage : ''}${p.commentaire ? ' - ' + p.commentaire : ''})`).join('  ;  ');
+    if (absentsTxt) {
+      doc.autoTable({ startY: y, theme: 'plain', margin: { left: 10, right: 10 }, styles: { fontSize: 8.5, cellPadding: 1.5, fillColor: [253, 240, 230] },
+        body: [[pdfTxt('Indisponibles : ' + absentsTxt)]] });
+      y = doc.lastAutoTable.finalY + 3;
+    }
+
+    const COLS = ['Horaire', 'Operation', 'Machine', 'OF', 'Titre / Client / Caracteristiques', 'Qte', 'Livraison', 'Equipe', 'Observations', 'Visa'];
+    const ligne = (c) => [
+      c.debut && c.fin ? `${c.debut}\n${c.fin}` : 'Journee',
+      pdfTxt(c.operation),
+      pdfTxt(c.machine),
+      pdfTxt(c.of + (c.priorite && c.priorite !== 'normale' ? `\n(${c.priorite})` : '')),
+      pdfTxt([c.titre, c.client].filter(Boolean).join(' - ') + (c.caracteristiques.length ? '\n' + c.caracteristiques.join('  |  ') : '')),
+      c.quantite != null ? pdfTxt(Number(c.quantite).toLocaleString('fr-FR')) : '',
+      dateCourte(c.delai),
+      pdfTxt(c.equipe.join(', ')),
+      '', '',
+    ];
+    const colStyles = { 0: { cellWidth: 16, fontStyle: 'bold' }, 1: { cellWidth: 32 }, 2: { cellWidth: 34 }, 3: { cellWidth: 22 }, 4: { cellWidth: 58 }, 5: { cellWidth: 14, halign: 'right' }, 6: { cellWidth: 18 }, 7: { cellWidth: 36 }, 8: { cellWidth: 'auto' }, 9: { cellWidth: 14 } };
+
+    data.personnes.filter(p => p.creneaux.length).forEach(p => {
+      if (y > 175) { doc.addPage(); y = 12; }
+      doc.autoTable({
+        startY: y, margin: { left: 10, right: 10 }, theme: 'grid',
+        head: [[{ content: pdfTxt(`${p.nom}${p.poste ? '  -  ' + p.poste : ''}${p.plage ? '   (disponible ' + p.plage + ')' : ''}`), colSpan: 10, styles: { fillColor: [30, 90, 100], textColor: 255, fontSize: 10, halign: 'left' } }], COLS],
+        body: p.creneaux.map(ligne), showHead: 'everyPage',
+        styles: { fontSize: 8, cellPadding: 1.6, valign: 'middle', lineColor: [200, 200, 200] },
+        headStyles: { fillColor: [235, 238, 240], textColor: 40, fontStyle: 'bold' },
+        columnStyles: colStyles,
+        didParseCell: (h) => { if (h.section === 'head' && h.row.index === 0) h.cell.styles.fillColor = [30, 90, 100]; if (h.section === 'head' && h.row.index === 0) h.cell.styles.textColor = 255; },
+      });
+      y = doc.lastAutoTable.finalY + 5;
+    });
+
+    if (data.sans_personnel.length) {
+      if (y > 165) { doc.addPage(); y = 12; }
+      doc.autoTable({
+        startY: y, margin: { left: 10, right: 10 }, theme: 'grid',
+        head: [[{ content: 'ATTENTION - Creneaux sans personnel affecte', colSpan: 10, styles: { fillColor: [180, 80, 40], textColor: 255, fontSize: 10, halign: 'left' } }], COLS],
+        body: data.sans_personnel.map(ligne),
+        styles: { fontSize: 8, cellPadding: 1.6, valign: 'middle' }, headStyles: { fillColor: [235, 238, 240], textColor: 40 }, columnStyles: colStyles,
+      });
+      y = doc.lastAutoTable.finalY + 5;
+    }
+    if (data.presents_sans_tache.length) {
+      if (y > 185) { doc.addPage(); y = 12; }
+      doc.autoTable({ startY: y, theme: 'plain', margin: { left: 10, right: 10 }, styles: { fontSize: 8.5, cellPadding: 1.5, fillColor: [238, 244, 238] },
+        body: [[pdfTxt('Presents sans tache planifiee : ' + data.presents_sans_tache.map(p => p.nom).join(', '))]] });
+      y = doc.lastAutoTable.finalY + 5;
+    }
+    if (!data.nb_creneaux) {
+      doc.setFontSize(11); doc.text('Aucun creneau planifie ce jour-la.', 10, y + 6);
+    }
+
+    const n = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= n; i++) {
+      doc.setPage(i); doc.setFontSize(8); doc.setTextColor(110);
+      doc.text(pdfTxt(`Chef d'atelier : ____________________    Date/visa : ____________________`), 10, 205);
+      doc.text(`Page ${i} / ${n}`, W - 10, 205, { align: 'right' });
+    }
+    doc.save(`placement-personnel-${date}.pdf`);
+  }
+
+  function ouvrirModaleFeuilleJournaliere() {
+    const defaut = DAYS_ISO.includes(AUJOURDHUI_ISO) ? AUJOURDHUI_ISO : DAYS_ISO[0];
+    afficherModale(`
+      <h3>Feuille de placement du personnel</h3>
+      <p style="font-size:13px;color:var(--ink-500);margin:0 0 10px;">PDF par personne : horaires, machine, OF, titre, client, quantité, caractéristiques, équipe, avec colonnes d'observations et de visa.</p>
+      <div class="field"><label>Jour</label><input id="fj-date" type="date" value="${defaut}"></div>
+      <div id="m-msg"></div>
+      <div class="actions">
+        <button class="btn" id="m-cancel">Annuler</button>
+        <button class="btn primary" id="fj-go">Télécharger le PDF</button>
+      </div>
+    `);
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.getElementById('fj-go').addEventListener('click', async () => {
+      const date = document.getElementById('fj-date').value;
+      const msg = document.getElementById('m-msg');
+      if (!date) { msg.innerHTML = `<div class="msg error">Choisissez un jour.</div>`; return; }
+      msg.innerHTML = `<div class="msg">Génération du PDF…</div>`;
+      try {
+        await genererFeuilleJournaliere(date);
+        toast('Feuille de placement téléchargée.');
+        fermerModale();
+      } catch (e) {
+        msg.innerHTML = `<div class="msg error">${e.message}</div>`;
+      }
+    });
   }
 
   async function ouvrirModaleDisponibilite(personne) {
