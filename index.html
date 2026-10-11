@@ -1338,6 +1338,10 @@
       ...data.personnes.map(p => ({ nom: p.nom, poste: p.poste, statut: p.statut, plage: p.plage, commentaire: p.commentaire, creneaux: p.creneaux })),
       ...data.presents_sans_tache.map(p => ({ nom: p.nom, poste: p.poste, statut: 'présent', plage: '', commentaire: '', creneaux: [] })),
     ].sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+    // Créneaux planifiés mais sans personne : une ligne « NON AFFECTÉ » par machine, pour que rien ne manque sur l'affichage.
+    const parMachine = {};
+    data.sans_personnel.forEach(c => { (parMachine[c.machine] = parMachine[c.machine] || []).push(c); });
+    Object.entries(parMachine).forEach(([mach, cs]) => gens.push({ nom: 'NON AFFECTE', poste: mach.replace(/\s*\(.*\)$/, ''), statut: 'présent', plage: '', commentaire: '', creneaux: cs, sansPers: true }));
 
     // Axe horaire : 7h-17h au minimum, élargi si besoin
     let h0 = 7 * 60, h1 = 17 * 60;
@@ -1404,8 +1408,10 @@
 
       // nom
       doc.setFont('helvetica', 'bold'); doc.setFontSize(grand ? 11 : 10);
+      if (g.sansPers) { doc.setFillColor(253, 232, 224); doc.rect(M, y, nomW, hRow, 'F'); doc.setTextColor(180, 60, 30); }
       doc.text(pdfTxt(g.nom), M + 2, y + hRow / 2 - (g.poste ? 0.5 : -1.2), { maxWidth: nomW - 3 });
-      if (g.poste) { doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(100); doc.text(pdfTxt(g.poste), M + 2, y + hRow / 2 + 3.2, { maxWidth: nomW - 3 }); doc.setTextColor(0); }
+      doc.setTextColor(0);
+      if (g.poste) { doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(g.sansPers ? 180 : 100, g.sansPers ? 60 : 100, g.sansPers ? 30 : 100); doc.text(pdfTxt(g.poste), M + 2, y + hRow / 2 + 3.2, { maxWidth: nomW - 3 }); doc.setTextColor(0); }
 
       if (!g.creneaux.length) {
         const indispo = !['présent', 'disponible'].includes(g.statut);
@@ -1417,7 +1423,9 @@
         const bx = px(c._d), bw = px(c._f) - bx - 0.4, by = y + c._l * hLane + 0.8, bh = hLane - 1.6;
         const col = couleurOf[c.of] || [230, 230, 230];
         doc.setFillColor(...col); doc.setDrawColor(90); doc.setLineWidth(0.25);
+        if (g.sansPers) { doc.setDrawColor(180, 60, 30); doc.setLineDashPattern([1.2, 0.8], 0); }
         doc.roundedRect(bx + 0.2, by, bw, bh, 1, 1, 'FD');
+        doc.setLineDashPattern([], 0);
         const fs = grand ? 8.5 : 7.5; doc.setFontSize(fs);
         const maxL = Math.max(1, Math.floor((bh - 1) / (fs * 0.42)));
         const lignes = [];
@@ -1450,7 +1458,7 @@
     });
     if (data.sans_personnel.length) {
       doc.setTextColor(180, 60, 30); doc.setFont('helvetica', 'bold');
-      doc.text(pdfTxt(`Attention : ${data.sans_personnel.length} creneau(x) sans personnel affecte (voir feuille detaillee).`), W - M, H - 7, { align: 'right' });
+      doc.text(pdfTxt(`Attention : ${data.sans_personnel.length} creneau(x) planifie(s) sans personnel affecte (lignes NON AFFECTE).`), W - M, H - 7, { align: 'right' });
       doc.setTextColor(0);
     }
     doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(110);
@@ -1459,7 +1467,11 @@
   }
 
   function ouvrirModaleFeuilleJournaliere() {
-    const defaut = DAYS_ISO.includes(AUJOURDHUI_ISO) ? AUJOURDHUI_ISO : DAYS_ISO[0];
+    const joursPlanifies = DAYS_ISO.filter((iso, i) => Object.values(state.planning || {}).some(l => l.some(s => s.day === i)));
+    const defaut = joursPlanifies.includes(AUJOURDHUI_ISO) ? AUJOURDHUI_ISO : (joursPlanifies[0] || (DAYS_ISO.includes(AUJOURDHUI_ISO) ? AUJOURDHUI_ISO : DAYS_ISO[0]));
+    const indice = joursPlanifies.length
+      ? `Jours planifiés cette semaine : ${joursPlanifies.map(iso => DAYS[DAYS_ISO.indexOf(iso)]).join(', ')}`
+      : 'Aucun créneau planifié sur la semaine affichée.';
     afficherModale(`
       <h3>Feuille de placement du personnel</h3>
       <div class="field"><label>Modèle</label>
@@ -1468,7 +1480,7 @@
           <option value="detail">Feuille détaillée — une section par personne (observations, visa)</option>
         </select>
       </div>
-      <div class="field"><label>Jour</label><input id="fj-date" type="date" value="${defaut}"></div>
+      <div class="field"><label>Jour</label><input id="fj-date" type="date" value="${defaut}"><div style="font-size:12px;color:var(--ink-500);margin-top:4px;">${indice}</div></div>
       <div id="m-msg"></div>
       <div class="actions">
         <button class="btn" id="m-cancel">Annuler</button>
