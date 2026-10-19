@@ -77,6 +77,7 @@ async function majAvancementOf(supabase, ofId) {
   const { data: of } = await supabase.from('ordres_fabrication').select('statut').eq('id', ofId).single();
   const maj = { avancement_pct: av.tous_termines ? 100 : av.global };
   if (av.tous_termines) maj.statut = 'terminé';
+  else if (of && of.statut === 'terminé') maj.statut = 'en cours';   // une correction a rouvert une étape
   else if (av.global > 0 && of && ['planifié', 'validé', 'en attente de validation'].includes(of.statut)) maj.statut = 'en cours';
   const { error } = await supabase.from('ordres_fabrication').update(maj).eq('id', ofId);
   if (error) throw error;
