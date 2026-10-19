@@ -3182,6 +3182,7 @@
 
     afficherModale(`
       <h3>Planifier ${esc(ofNumero)} à l'heure</h3>
+      ${titreTravail(ofUuid)}
       <div class="plan-controls">
         <div class="field"><label>Mode</label>
           <select id="pl-mode">
@@ -3371,6 +3372,13 @@
   }
 
   // Chiffrage d'un OF : durée de chaque étape + total
+  // Bandeau « titre du travail — client » d'un OF, pour savoir de quoi on parle dans les fenêtres de chiffrage / planification.
+  function titreTravail(ofUuid) {
+    const o = state.ordres.find(x => x.uuid === ofUuid);
+    if (!o) return '';
+    return `<div style="margin:-4px 0 12px;font-size:15px;"><strong>${esc(o.produit || '')}</strong>${o.client ? ` <span class="plan-note">— ${esc(o.client)}</span>` : ''}${o.delai ? ` <span class="plan-note">· délai ${dateCourte(String(o.delai).slice(0, 10))}</span>` : ''}</div>`;
+  }
+
   async function ouvrirModaleChiffrage(ofUuid, ofNumero, donnees) {
     let data = donnees;
     if (!data) {
@@ -3473,6 +3481,7 @@
 
     afficherModale(`
       <h3>Chiffrage — ${ofNumero} <span style="font-weight:400; color:var(--ink-500); font-size:13px;">(${data.of.quantite.toLocaleString('fr-FR')} ex.)</span></h3>
+      ${titreTravail(ofUuid)}
       ${data.avertissements.map(a => `<div class="msg error">${a}</div>`).join('')}
       <div class="produit-box">
         <div class="produit-titre">Production <span class="plan-note">— quantité reprise de la fiche de fabrication, corrigeable ; le type de production choisit les temps de machine</span></div>
