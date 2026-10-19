@@ -23,6 +23,7 @@ exports.handler = async (event) => {
     // Opération sans machine ? Oui si toutes ses phases standard sont manuelles,
     // ou si elle n'a aucune phase et aucune machine compatible.
     const opIds = Array.from(new Set(data.map((g) => g.operations && g.operations.id).filter(Boolean)));
+    if (!opIds.length) return { statusCode: 200, body: JSON.stringify(data.map((g) => ({ id: g.id, sequence: g.sequence, statut: g.statut, operation: g.operations, sans_machine: false }))) };
     const [phasesRes, machRes, liaisonRes] = await Promise.all([
       supabase.from('phases_standard').select('operation_id, occupe_machine').in('operation_id', opIds),
       supabase.from('machines').select('operation_id').in('operation_id', opIds).eq('actif', true),
