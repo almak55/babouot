@@ -1067,6 +1067,39 @@
   const nbFr = (n) => Number(n).toLocaleString('fr-FR').replace(/[  ]/g, ' ');
   const dateLocaleIso = () => maintenantLocal().slice(0, 10);
 
+  // Valeurs à pré-remplir quand on coche « Tâche terminée » : le reste à produire, 100 %, la durée planifiée.
+  function valeursTerminee(t) {
+    const dejaAutres = Math.max(0, (Number(t.quantite_realisee) || 0) - (Number((t.saisie || {}).quantite) || 0));
+    const qte = t.quantite_totale ? Math.max(0, Math.round((Number(t.quantite_totale) - dejaAutres) * 100) / 100) : null;
+    let h = null;
+    if (t.debut && t.fin) {
+      const m = (x) => { const [a, b] = x.split(':'); return Number(a) * 60 + Number(b); };
+      let min = m(t.fin) - m(t.debut);
+      if (m(t.debut) < 720 && m(t.fin) > 750) min -= 30;   // pause méridienne
+      if (min > 0) h = Math.round(min / 60 * 100) / 100;
+    }
+    return { qte, pct: 100, h };
+  }
+  // Applique ces valeurs à un conteneur ; mémorise ce qui a été rempli automatiquement pour pouvoir l'annuler.
+  function remplirTerminee(conteneur, t, coche, sel) {
+    const champs = { qte: conteneur.querySelector(sel.qte), pct: conteneur.querySelector(sel.pct), h: conteneur.querySelector(sel.h) };
+    if (coche) {
+      const v = valeursTerminee(t);
+      const auto = {};
+      for (const k of ['qte', 'pct', 'h']) {
+        if (v[k] === null || !champs[k]) continue;
+        if (k === 'h' && champs.h.value !== '') continue;            // heures déjà saisies : on les garde
+        champs[k].value = v[k]; auto[k] = String(v[k]);
+      }
+      conteneur.dataset.auto = JSON.stringify(auto);
+      const det = conteneur.querySelector('details'); if (det) det.open = true;
+    } else {
+      let auto = {}; try { auto = JSON.parse(conteneur.dataset.auto || '{}'); } catch (e) {}
+      for (const k of Object.keys(auto)) if (champs[k] && champs[k].value === auto[k]) champs[k].value = '';
+      conteneur.dataset.auto = '{}';
+    }
+  }
+
   async function ouvrirModaleSaisieProduction(dateInit) {
     afficherModale(`
       <h3>Saisie de production — fin de journée</h3>
@@ -1154,6 +1187,11 @@
       } catch (e) { box.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
     }
     document.getElementById('sp-date').addEventListener('change', charger);
+    document.getElementById('sp-liste').addEventListener('change', (ev) => {
+      if (!ev.target.classList.contains('sp-fini')) return;
+      const tr = ev.target.closest('tr'); if (!tr) return;
+      remplirTerminee(tr, taches[Number(tr.dataset.i)], ev.target.checked, { qte: '.sp-qte', pct: '.sp-pct', h: '.sp-h' });
+    });
     charger();
 
     document.getElementById('sp-go').addEventListener('click', async () => {
@@ -1213,6 +1251,8 @@
       <div id="m-msg"></div>
       <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn" id="mt-of">Avancement de l'OF</button><button class="btn primary" id="mt-go">Enregistrer</button></div>`, 'large');
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    const corps = document.querySelector('.modal');
+    document.getElementById('mt-fini').addEventListener('change', (ev) => remplirTerminee(corps, t, ev.target.checked, { qte: '#mt-qte', pct: '#mt-pct', h: '#mt-h' }));
     document.getElementById('mt-of').addEventListener('click', () => ouvrirModaleAvancementOf(t.of_id, t.of));
     document.getElementById('mt-go').addEventListener('click', async () => {
       const msg = document.getElementById('m-msg');
