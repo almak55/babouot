@@ -41,7 +41,7 @@ exports.handler = async (event) => {
         .in('statut', ['en attente de validation', 'validé', 'en cours', 'en pause']),
       supabase.from('stocks').select('id, nom, unite, quantite, seuil_alerte'),
       supabase.from('planning_jour')
-        .select('id, date, heure_debut, heure_fin, phase, machine_id, personnel_id, of_id, operation_id, statut, planning_jour_personnel(personnel_id)')
+        .select('id, date, heure_debut, heure_fin, phase, machine_id, personnel_id, of_id, operation_id, gamme_operatoire_id, statut, planning_jour_personnel(personnel_id)')
         .gte('date', dateDebut).lte('date', dateFin)
         .order('date').order('heure_debut', { nullsFirst: true }),
       supabase.from('personnel_planning_jour')
