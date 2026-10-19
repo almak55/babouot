@@ -7,7 +7,8 @@
 
 const { getSupabase } = require('./lib/supabaseclient');
 const { avancementOf, dureeCreneau } = require('./lib/recalage');
-const { etapesBloquees } = require('./lib/dependances');
+let etapesBloquees = () => ({});
+try { ({ etapesBloquees } = require('./lib/dependances')); } catch (e) { console.warn('lib/dependances.js introuvable.', e.message); }
 
 const hhmm = (t) => (t ? String(t).slice(0, 5) : null);
 const nombre = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
