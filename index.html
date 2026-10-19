@@ -1050,7 +1050,7 @@
       try {
         const res = await fetch(`${API}/valider-of`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: ofUuid, forcer: true, maintenant: maintenantLocal() }) });
         const d = await res.json();
-        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         fermerModale(); chargerDonneesReelles();
         afficherResultatValidation(ofUuid, ofNumero, d);
       } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
@@ -1153,7 +1153,7 @@
         const base64 = await fichierEnBase64(file);
         const res = await fetch(`${API}/extraire-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file_base64: base64, file_name: file.name, mime_type: mime, date: document.getElementById('sp-date').value }) });
         const d = await res.json();
-        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         // Le document porte sa propre date : on bascule sur cette journée.
         if (d.date && d.date !== document.getElementById('sp-date').value) {
           document.getElementById('sp-date').value = d.date;
@@ -1179,7 +1179,7 @@
       try {
         const res = await fetch(`${API}/lecture-production?date=${date}`);
         const d = await res.json();
-        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         taches = d.taches;
         lus = {};
         rendreTable();
@@ -1208,7 +1208,7 @@
       try {
         const res = await fetch(`${API}/saisir-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, saisies, recaler: document.getElementById('sp-recaler').checked }) });
         const d = await res.json();
-        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         afficherBilanProduction(d);
         chargerDonneesReelles();
       } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; document.getElementById('sp-go').disabled = false; }
@@ -1226,7 +1226,7 @@
     try {
       const res = await fetch(`${API}/lecture-production?date=${date}`);
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+      if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
       t = d.taches.find(x => x.gamme_id === gammeId);
       if (!t) throw new Error('Tâche introuvable pour ce jour.');
     } catch (e) {
@@ -1264,7 +1264,7 @@
       try {
         const res = await fetch(`${API}/saisir-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, saisies: [saisie], recaler: document.getElementById('mt-recaler').checked }) });
         const d = await res.json();
-        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         afficherBilanProduction(d);
         chargerDonneesReelles();
       } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; document.getElementById('mt-go').disabled = false; }
@@ -1305,7 +1305,7 @@
     try {
       const res = await fetch(`${API}/lecture-production?gamme_id=${gammeId}`);
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+      if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
       t = d.tache; hist = d.historique;
     } catch (e) {
       afficherModale(`<h3>Saisies de production</h3><div class="msg error">${esc(e.message)}</div><div class="actions"><button class="btn primary" id="m-cancel">Fermer</button></div>`);
@@ -1385,7 +1385,7 @@
       try {
         const res = await fetch(`${API}/saisir-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: dateLocaleIso(), saisies, recaler: document.getElementById('se-recaler').checked }) });
         const d = await res.json();
-        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         afficherBilanProduction(d);
         chargerDonneesReelles();
       } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; document.getElementById('se-go').disabled = false; }
@@ -1400,7 +1400,7 @@
     try {
       const res = await fetch(`${API}/lecture-production?of_id=${ofUuid}`);
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+      if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
       const etapes = d.etapes.slice().sort((a, b) => (a.debut_prevu || '9').localeCompare(b.debut_prevu || '9'));
       document.getElementById('av-corps').innerHTML = `
         <div style="margin-bottom:14px;"><div style="display:flex;justify-content:space-between;align-items:baseline;"><strong>${esc(d.of.titres ? d.of.titres.nom : '')}</strong><span><strong style="font-size:20px;">${d.avancement_global} %</strong> <span class="plan-note">global${d.of.delai ? ' · délai ' + dateCourte(d.of.delai) : ''}</span></span></div>${jaugeAvancement(d.avancement_global, null, false)}</div>
@@ -1425,7 +1425,7 @@
     try {
       const res = await fetch(`${API}/gerer-couts`);
       d = await res.json();
-      if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+      if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
     } catch (e) { document.getElementById('co-corps').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; return; }
     const val = (v) => (v === null || v === undefined ? '' : v);
     document.getElementById('co-corps').innerHTML = `
@@ -1469,7 +1469,7 @@
     const post = async (corps) => {
       const res = await fetch(`${API}/calculer-devis`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+      if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
       return d;
     };
     try {
@@ -1558,7 +1558,7 @@
       const statutSel = document.getElementById('dv-statut');
       const res = await fetch(`${API}/gerer-devis`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: devisId || undefined, of_id: ofUuid, client, titre, notes, statut: statutSel ? statutSel.value : undefined, saisie: S }) });
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+      if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
       R = d.resultat;
       if (!devisId) { devisId = d.id; devisNumero = d.numero; info.saisis.unshift({ id: d.id, numero: d.numero, total_ht: R.totaux.ht, statut: 'brouillon' }); structure(); }
       return { numero: devisNumero || d.numero };
@@ -1704,7 +1704,7 @@
         try {
           const res = await fetch(`${API}/deplanifier-etape`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: ofUuid }) });
           const d = await res.json();
-          if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+          if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
           toast(d.deplanifiees.length ? `${d.deplanifiees.length} étape(s) déplanifiée(s).${d.conservees.length ? ' ' + d.conservees.length + ' conservée(s) (déjà démarrées).' : ''}` : 'Aucune étape planifiée à retirer.');
           fermerModale(); chargerDonneesReelles();
         } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
@@ -2438,7 +2438,7 @@
     const charger = async () => {
       const res = await fetch(`${API}/profils-machine?machine_id=${machine.id}`);
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+      if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
       return d;
     };
     try { donnees = await charger(); }
@@ -2539,7 +2539,7 @@
       try {
         const res = await fetch(`${API}/profils-machine`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'ajouter_type', libelle }) });
         const d = await res.json();
-        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         donnees.types.push({ code: d.code, libelle: d.libelle });
         $('pf-type').insertAdjacentHTML('beforeend', `<option value="${esc(d.code)}">${esc(d.libelle)}</option>`);
         $('pf-type').value = d.code;
@@ -2559,7 +2559,7 @@
           }),
         });
         const d = await res.json();
-        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         toast('Profil enregistré.');
         donnees = await charger(); dessiner(); $('pf-msg').innerHTML = '';
       } catch (e) { $('pf-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
@@ -2874,7 +2874,7 @@
           try {
             const r = await fetch(`${API}/gerer-caracteristiques?cle=${encodeURIComponent(c.cle)}`, { method: 'DELETE' });
             const d = await r.json();
-            if (!r.ok) throw new Error(d.error || 'Erreur inconnue');
+            if (!r.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
             toast('Caractéristique supprimée.'); fermerModale(); render();
           } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
         });
@@ -2914,7 +2914,7 @@
       try {
         const res = await fetch(`${API}/gerer-caracteristiques`, { method: edition ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
         const d = await res.json();
-        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         toast(edition ? 'Caractéristique mise à jour.' : `Caractéristique « ${d.cle} » créée.`); fermerModale(); render();
       } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
     });
@@ -2965,7 +2965,7 @@
         const res = await fetch(`${API}/gerer-temps-standards`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'copier', operation_id: $('cp-op').value, source_machine_id: $('cp-source').value || null, cibles, remplacer: $('cp-remplacer').checked }) });
         const d = await res.json();
-        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         const ign = d.ignorees.length ? ` ${d.ignorees.length} ignorée(s) (déjà des phases : ${d.ignorees.map(x => esc(nomMachine(x.machine_id))).join(', ')}).` : '';
         toast(`Phases copiées vers ${d.copiees.length} machine(s).${ign}`, d.copiees.length ? 'ok' : 'error');
         fermerModale(); render();
@@ -2978,7 +2978,7 @@
     try {
       const res = await fetch(`${API}/exporter-temps-standards`);
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+      if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
       const bin = atob(d.fichier_base64); const octets = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) octets[i] = bin.charCodeAt(i);
       const blob = new Blob([octets], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -4076,7 +4076,7 @@
       try {
         const res = await fetch(`${API}/deplanifier-etape`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
         const d = await res.json();
-        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         toast(`${d.deplanifiees.length} étape(s) déplanifiée(s).${d.conservees.length ? ' ' + d.conservees.length + ' conservée(s) (déjà démarrées).' : ''}`);
         msg.innerHTML = '';
         chargerDonneesReelles();
