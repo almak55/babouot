@@ -921,7 +921,7 @@
   function renderOrdres(){
     const wrap = el(`
       <div class="panel">
-        <div class="panel-head"><h2>Ordres de fabrication</h2><div style="display:flex;gap:8px;"><button class="btn" id="couts-btn">Coûts & tarifs</button><button class="btn primary" id="new-of"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvel OF</button></div></div>
+        <div class="panel-head"><h2>Ordres de fabrication</h2><div style="display:flex;gap:8px;"><button class="btn" id="couts-btn">Coûts & tarifs</button><button class="btn" id="import-lot">Importer des fiches (PDF)</button><button class="btn primary" id="new-of"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvel OF</button></div></div>
         <table class="row-table">
           <thead><tr><th></th><th>Production</th><th>Client</th><th>Qté</th><th>Délai</th><th>État</th><th>Avancement</th><th></th></tr></thead>
           <tbody id="of-tbody"></tbody>
@@ -3706,6 +3706,8 @@
     const newOfBtn = document.getElementById('new-of');
     if (addOfBtn) addOfBtn.addEventListener('click', () => ouvrirModaleAffectation({}));
     if (newOfBtn) newOfBtn.addEventListener('click', ouvrirModaleNouvelOf);
+    const importLotBtn = document.getElementById('import-lot');
+    if (importLotBtn) importLotBtn.addEventListener('click', ouvrirModaleImportLot);
     const coutsBtn = document.getElementById('couts-btn');
     if (coutsBtn) coutsBtn.addEventListener('click', ouvrirModaleCouts);
   }
@@ -3924,6 +3926,183 @@
     canvas.getContext('2d').drawImage(img, 0, 0, width, height);
     const compressedDataUrl = canvas.toDataURL('image/jpeg', qualite);
     return { base64: compressedDataUrl.split(',')[1], mimeType: 'image/jpeg' };
+  }
+
+  // ---------- Import d'un lot de fiches de fabrication (PDF de plusieurs fiches) ----------
+  const PDFJS_VERSION = '3.11.174';
+  async function chargerPdfJs() {
+    if (window.pdfjsLib) return window.pdfjsLib;
+    await chargerScript(`https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.min.js`);
+    // Le worker doit venir de la même origine : on le récupère puis on le sert depuis un blob.
+    const w = await fetch(`https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.js`);
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(await w.blob());
+    return window.pdfjsLib;
+  }
+  async function pagesEnImages(file, onPage) {
+    const sorties = [];
+    if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+      const pdfjs = await chargerPdfJs();
+      const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+      for (let n = 1; n <= doc.numPages; n++) {
+        const page = await doc.getPage(n);
+        const base = page.getViewport({ scale: 1 });
+        const vp = page.getViewport({ scale: Math.min(2.2, 1500 / base.width) });
+        const canvas = document.createElement('canvas'); canvas.width = vp.width; canvas.height = vp.height;
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+        sorties.push({ page: n, mime_type: 'image/jpeg', image_base64: canvas.toDataURL('image/jpeg', 0.82).split(',')[1] });
+        if (onPage) onPage(n, doc.numPages);
+      }
+    } else {
+      const { base64, mimeType } = await compresserImage(file);
+      sorties.push({ page: 1, mime_type: mimeType, image_base64: base64 });
+    }
+    return sorties;
+  }
+
+  // Classement automatique : les fiches avec date de livraison d'abord (échéance la plus proche en premier),
+  // puis celles sans date, selon la date de réception du papier (« ici » = déjà reçu → date du jour).
+  function cleClassement(f, aujourdhui) {
+    if (f.delai) return `0|${f.delai}`;
+    if (f.reception && f.reception.etat === 'ici') return `1|${aujourdhui}`;
+    if (f.reception && f.reception.date) return `1|${f.reception.date}`;
+    return '2|9999-12-31';
+  }
+  function classerFiches(liste, aujourdhui) {
+    return liste.slice().sort((a, b) => cleClassement(a, aujourdhui).localeCompare(cleClassement(b, aujourdhui)) || a.page - b.page);
+  }
+
+  async function ouvrirModaleImportLot() {
+    let refs;
+    try { refs = await getReferentiels(); }
+    catch (e) { afficherModale(`<h3>Importer des fiches</h3><div class="msg error">Backend indisponible. (${esc(e.message)})</div><div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`); document.getElementById('m-cancel').addEventListener('click', fermerModale); return; }
+    afficherModale(`
+      <h3>Importer des fiches de fabrication</h3>
+      <div class="import-box">
+        <input type="file" id="il-file" accept=".pdf,.jpg,.jpeg,.png,.webp" class="hidden">
+        <label for="il-file" class="import-label">${svgIcon('<path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M20 16v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3"/>')}
+          <span><strong>Choisir un PDF de plusieurs fiches</strong> (ou une photo)<br>chaque fiche est lue, puis vous vérifiez avant de créer les OF</span></label>
+        <div id="il-status"></div>
+      </div>
+      <div id="il-corps"></div>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary hidden" id="il-go">Créer les OF</button></div>`, 'xlarge');
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    let fiches = [];      // lignes de relecture
+    let aujourdhui = dateLocaleIso();
+    let ordreManuel = false;
+
+    const libellePriorite = (f) => f.delai ? `livraison ${dateCourte(f.delai)}` : (f.reception.etat === 'ici' ? 'papier reçu (ici)' : f.reception.date ? `réception ${dateCourte(f.reception.date)}` : 'sans date');
+    const complete = (f) => f.titre && f.quantite > 0 && f.operation_codes.length > 0;
+
+    function rendre() {
+      const corps = document.getElementById('il-corps');
+      if (!fiches.length) { corps.innerHTML = ''; return; }
+      corps.innerHTML = `
+        <div class="plan-note" style="margin:6px 0 8px;">${fiches.length} fiche(s) lue(s). <strong>Ordre de passage</strong> : d'abord les fiches avec une date de livraison (la plus proche en premier), puis celles sans date, selon la réception du papier. Corrigez avec ▲▼ ou en modifiant les dates.
+          <button class="btn" id="il-auto" style="padding:2px 10px;font-size:12px;margin-left:6px;">Reclasser automatiquement</button></div>
+        <div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Rang</th><th></th><th>Titre / client</th><th>Qté</th><th>Livraison (date max. de fin)</th><th>Réception papier</th><th>Opérations</th></tr></thead><tbody>
+        ${fiches.map((f, i) => `<tr data-i="${i}" ${complete(f) ? '' : 'style="background:var(--field-bg);"'}>
+          <td style="white-space:nowrap;"><strong>${i + 1}</strong> <button class="btn il-up" style="padding:0 7px;" ${i === 0 ? 'disabled' : ''}>▲</button><button class="btn il-down" style="padding:0 7px;" ${i === fiches.length - 1 ? 'disabled' : ''}>▼</button>
+            <div class="plan-note">${esc(libellePriorite(f))}</div></td>
+          <td style="text-align:center;"><input class="il-ok" type="checkbox" ${f.creer && complete(f) ? 'checked' : ''} ${complete(f) ? '' : 'disabled'} title="Créer cet OF"></td>
+          <td><input class="il-titre" type="text" value="${esc(f.titre || '')}" placeholder="Titre" style="min-width:190px;"><br><input class="il-client" type="text" value="${esc(f.client || '')}" placeholder="Client" style="min-width:190px;margin-top:3px;">
+            <div class="plan-note">page ${f.page}${f.confiance !== 'haute' ? ' · lecture ' + esc(f.confiance) : ''}${f.notes ? ' · ' + esc(f.notes) : ''}</div></td>
+          <td><input class="il-qte" type="number" min="1" value="${f.quantite || ''}" style="width:90px;"></td>
+          <td><input class="il-delai" type="date" value="${f.delai || ''}">${f.delai_libelle && !f.delai ? `<div class="plan-note">lu : « ${esc(f.delai_libelle)} »</div>` : ''}</td>
+          <td><input class="il-rec" type="date" value="${f.reception.date || (f.reception.etat === 'ici' ? aujourdhui : '')}">${f.reception.etat === 'ici' && !f.reception.date ? '<div class="plan-note">« ici » : déjà reçu</div>' : ''}</td>
+          <td><details><summary class="plan-note" style="cursor:pointer;">${f.operation_codes.length} opération(s)${f.operation_codes.length ? '' : ' — à choisir'}</summary>
+            <div class="op-list" style="max-height:170px;overflow:auto;min-width:230px;">${refs.operations.map(o => `<label><input type="checkbox" class="il-op" value="${esc(o.code)}" ${f.operation_codes.includes(o.code) ? 'checked' : ''}> ${esc(o.nom)}</label>`).join('')}</div></details></td>
+        </tr>`).join('')}</tbody></table></div>`;
+      const lire = (tr) => {
+        const f = fiches[Number(tr.dataset.i)];
+        f.titre = tr.querySelector('.il-titre').value.trim() || null; f.client = tr.querySelector('.il-client').value.trim() || null;
+        f.quantite = parseInt(tr.querySelector('.il-qte').value, 10) || null;
+        f.delai = tr.querySelector('.il-delai').value || null;
+        const rec = tr.querySelector('.il-rec').value || null;
+        if (rec !== (f.reception.date || (f.reception.etat === 'ici' ? aujourdhui : null))) f.reception = { etat: rec ? 'date' : 'inconnue', date: rec };
+        f.operation_codes = Array.from(tr.querySelectorAll('.il-op:checked')).map(x => x.value);
+        f.creer = tr.querySelector('.il-ok').checked;
+        return f;
+      };
+      corps.querySelectorAll('tr[data-i]').forEach(tr => {
+        tr.addEventListener('change', (ev) => {
+          const f = lire(tr);
+          if (ev.target.classList.contains('il-op')) { tr.querySelector('summary').textContent = `${f.operation_codes.length} opération(s)`; return; }
+          if (!ordreManuel) fiches = classerFiches(fiches, aujourdhui);
+          rendre();
+        });
+        tr.querySelector('.il-up').addEventListener('click', () => { const i = Number(tr.dataset.i); fiches.forEach((_, k) => lire(corps.querySelector(`tr[data-i="${k}"]`))); [fiches[i - 1], fiches[i]] = [fiches[i], fiches[i - 1]]; ordreManuel = true; rendre(); });
+        tr.querySelector('.il-down').addEventListener('click', () => { const i = Number(tr.dataset.i); fiches.forEach((_, k) => lire(corps.querySelector(`tr[data-i="${k}"]`))); [fiches[i + 1], fiches[i]] = [fiches[i], fiches[i + 1]]; ordreManuel = true; rendre(); });
+      });
+      document.getElementById('il-auto').addEventListener('click', () => { fiches.forEach((_, k) => lire(corps.querySelector(`tr[data-i="${k}"]`))); ordreManuel = false; fiches = classerFiches(fiches, aujourdhui); rendre(); });
+      const nb = fiches.filter(f => f.creer && complete(f)).length;
+      const go = document.getElementById('il-go'); go.classList.remove('hidden'); go.textContent = `Créer ${nb} OF`;
+    }
+
+    document.getElementById('il-file').addEventListener('change', async (ev) => {
+      const file = ev.target.files[0]; if (!file) return;
+      const st = document.getElementById('il-status');
+      fiches = []; rendre();
+      try {
+        st.innerHTML = '<div class="msg">Découpage du document en pages…</div>';
+        const pages = await pagesEnImages(file, (n, tot) => { st.innerHTML = `<div class="msg">Préparation de la page ${n} / ${tot}…</div>`; });
+        const resultats = new Array(pages.length); let faites = 0;
+        const analyser = async (p, idx) => {
+          for (let essai = 0; essai < 2; essai++) {
+            try {
+              const res = await fetch(`${API}/analyser-fiches-lot`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pages: [p] }) });
+              const d = await lireJson(res);
+              if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+              if (d.aujourdhui) aujourdhui = d.aujourdhui;
+              resultats[idx] = { ok: true, fiches: d.fiches }; break;
+            } catch (e) { if (essai === 1) resultats[idx] = { ok: false, page: p.page, erreur: e.message }; }
+          }
+          faites++; st.innerHTML = `<div class="msg">Lecture des fiches : ${faites} / ${pages.length}…</div>`;
+        };
+        const file_d = pages.map((p, i) => [p, i]);
+        await Promise.all([0, 1, 2].map(async () => { while (file_d.length) { const [p, i] = file_d.shift(); await analyser(p, i); } }));
+        const erreurs = resultats.filter(r => !r.ok);
+        const lues = [];
+        resultats.filter(r => r.ok).forEach(r => r.fiches.forEach(f => {
+          if (f.fiche === false) return;
+          if (f.suite && lues.length) { const p = lues[lues.length - 1]; p.operation_codes = [...new Set([...p.operation_codes, ...f.operation_codes])]; p.notes = [p.notes, f.notes].filter(Boolean).join(' '); return; }
+          lues.push({ ...f, creer: true });
+        }));
+        fiches = classerFiches(lues, aujourdhui);
+        st.innerHTML = `<div class="msg ${erreurs.length ? 'error' : 'ok'}">${lues.length} fiche(s) trouvée(s) dans ${pages.length} page(s).${erreurs.length ? ' Pages non lues : ' + erreurs.map(e => e.page + ' (' + esc(e.erreur) + ')').join(' ; ') + '.' : ' Vérifiez les champs avant de créer les OF.'}</div>`;
+        rendre();
+      } catch (e) { st.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+      ev.target.value = '';
+    });
+
+    document.getElementById('il-go').addEventListener('click', async () => {
+      const msg = document.getElementById('m-msg');
+      const aCreer = fiches.filter(f => f.creer && complete(f));
+      if (!aCreer.length) { msg.innerHTML = '<div class="msg error">Aucune fiche complète sélectionnée.</div>'; return; }
+      document.getElementById('il-go').disabled = true;
+      const crees = [], echecs = [];
+      for (let i = 0; i < aCreer.length; i++) {
+        const f = aCreer[i];
+        msg.innerHTML = `<div class="msg">Création des OF : ${i} / ${aCreer.length}…</div>`;
+        try {
+          const dateRec = f.reception.date || (f.reception.etat === 'ici' ? aujourdhui : null);
+          const res = await fetch(`${API}/creer-ordre`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+            titre: { nom: f.titre, client: f.client || '' }, quantite: f.quantite, delai: f.delai, priorite: 'normale', operations: f.operation_codes,
+            type_production: f.type_production || null, caracteristiques: f.caracteristiques || {}, date_reception: dateRec, rang_priorite: i + 1 }) });
+          const d = await lireJson(res);
+          if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+          crees.push({ numero: d.numero, f, rang: i + 1 });
+        } catch (e) { echecs.push({ f, erreur: e.message }); }
+      }
+      chargerDonneesReelles();
+      afficherModale(`<h3>${crees.length} OF créé(s)</h3>
+        <div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Rang</th><th>OF</th><th>Titre</th><th>Client</th><th>Qté</th><th>Date max. de fin</th></tr></thead><tbody>
+        ${crees.map(c => `<tr><td>${c.rang}</td><td><strong>${esc(c.numero)}</strong></td><td>${esc(c.f.titre)}</td><td>${esc(c.f.client || '')}</td><td>${nbFr(c.f.quantite)}</td><td>${c.f.delai ? dateCourte(c.f.delai) : '<span class="plan-note">— (priorité selon réception)</span>'}</td></tr>`).join('')}</tbody></table></div>
+        ${echecs.length ? `<div class="msg error" style="margin-top:8px;">${echecs.length} échec(s) : ${echecs.map(e => esc(e.f.titre) + ' — ' + esc(e.erreur)).join(' ; ')}</div>` : ''}
+        <div class="plan-note" style="margin-top:8px;">Les OF sont « en attente de validation ». La date de livraison sert de date maximale de fin : « Planifier à l'heure » vérifie le délai et le planning automatique passe d'abord les OF dont l'échéance est la plus proche, puis ceux sans date selon ce rang.</div>
+        <div class="actions"><button class="btn primary" id="m-cancel">Fermer</button></div>`, 'large');
+      document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    });
   }
 
   async function ouvrirModaleNouvelOf() {
