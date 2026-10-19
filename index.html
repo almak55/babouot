@@ -367,6 +367,9 @@
   .bar-track.tall { height: 10px; position: relative; margin: 4px 0; }
   .jauge-prevu { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink-900, #222); opacity: .65; }
   .sp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .co-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .co-tab.active { background: var(--accent-teal); color: #fff; }
+  .dv-h { margin: 16px 0 6px; font-size: 14px; }
   .sp-table th { text-align: left; font-size: 11px; color: var(--ink-500); padding: 4px 8px; }
   .sp-table td { padding: 8px; border-top: 1px solid var(--line); vertical-align: top; }
 
@@ -885,14 +888,14 @@
             const col = s.statut==='danger' ? 'var(--danger)' : s.statut==='warn' ? 'var(--accent-amber)' : 'var(--accent-teal)';
             const heures = s.debut ? `${s.debut}–${s.fin}` : 'journée';
             const nom = s.phase ? `${s.of} · ${s.phase}` : s.of;
-            return `<div class="bar compact" style="background:${col}" title="${esc(nom)} — ${heures}${s.nbPers > 1 ? ' — ' + s.nbPers + ' pers.' : ''}"><span class="b-text"><span class="b-name">${esc(nom)}</span></span><span class="b-time">${heures}</span></div>`;
+            return `<div class="bar compact clic-tache" data-gamme="${s.gamme||''}" data-date="${s.date||''}" data-of="${esc(s.of)}" style="background:${col};cursor:pointer;" title="Cliquer pour saisir l'avancement — ${esc(nom)} — ${heures}${s.nbPers > 1 ? ' — ' + s.nbPers + ' pers.' : ''}"><span class="b-text"><span class="b-name">${esc(nom)}</span></span><span class="b-time">${heures}</span></div>`;
           }).join('');
           rows += `<td class="slot"><div class="stack">${barres}</div></td>`;
         } else if(slot){
           const of = state.ordres.find(o=>o.id===slot.of);
           const color = slot.statut==='danger' ? 'var(--danger)' : slot.statut==='warn' ? 'var(--accent-amber)' : 'var(--accent-teal)';
           const pctBadge = of ? `<span class="b-pct">${of.avancement}%</span>` : '';
-          rows += `<td class="slot"><div class="bar" style="background:${color}"><span class="b-text"><span class="b-of">${slot.of}${slot.nbPers > 1 ? ` · ${slot.nbPers} pers.` : ''}</span><span class="b-name">${of?of.produit:''}</span></span>${pctBadge}</div></td>`;
+          rows += `<td class="slot"><div class="bar clic-tache" data-gamme="${slot.gamme||''}" data-date="${slot.date||''}" data-of="${esc(slot.of)}" title="Cliquer pour saisir l'avancement" style="background:${color};cursor:pointer;"><span class="b-text"><span class="b-of">${slot.of}${slot.nbPers > 1 ? ` · ${slot.nbPers} pers.` : ''}</span><span class="b-name">${of?of.produit:''}</span></span>${pctBadge}</div></td>`;
         } else {
           rows += `<td class="slot clickable" data-machine-uuid="${m.uuid||''}" data-machine-name="${m.name}" data-day="${d}"></td>`;
         }
@@ -901,6 +904,9 @@
     });
     table.innerHTML = thead + rows;
 
+    table.querySelectorAll('.clic-tache').forEach(b=>{
+      b.addEventListener('click', (ev)=>{ ev.stopPropagation(); ouvrirModaleTache(b.dataset.gamme, b.dataset.date, b.dataset.of); });
+    });
     table.querySelectorAll('.slot.clickable').forEach(td=>{
       td.addEventListener('click', ()=> ouvrirModaleAffectation({
         machineUuid: td.dataset.machineUuid,
@@ -915,7 +921,7 @@
   function renderOrdres(){
     const wrap = el(`
       <div class="panel">
-        <div class="panel-head"><h2>Ordres de fabrication</h2><button class="btn primary" id="new-of"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvel OF</button></div>
+        <div class="panel-head"><h2>Ordres de fabrication</h2><div style="display:flex;gap:8px;"><button class="btn" id="couts-btn">Coûts & tarifs</button><button class="btn primary" id="new-of"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvel OF</button></div></div>
         <table class="row-table">
           <thead><tr><th></th><th>Production</th><th>Client</th><th>Qté</th><th>Délai</th><th>État</th><th>Avancement</th><th></th></tr></thead>
           <tbody id="of-tbody"></tbody>
@@ -1171,6 +1177,59 @@
     });
   }
 
+  // Saisie d'avancement d'une seule tâche, depuis un clic sur son bloc dans le planning.
+  async function ouvrirModaleTache(gammeId, date, ofNumero) {
+    if (!gammeId || !date) {
+      afficherModale(`<h3>${esc(ofNumero || 'Tâche')}</h3><div class="msg">Ce créneau n'est pas rattaché à une étape de gamme (planifié avant le suivi de production) : replanifiez l'OF pour pouvoir y saisir l'avancement.</div><div class="actions"><button class="btn primary" id="m-cancel">Fermer</button></div>`);
+      document.getElementById('m-cancel').addEventListener('click', fermerModale); return;
+    }
+    afficherModale('<h3>Avancement de la tâche</h3><div class="msg">Chargement…</div>', 'large');
+    let t;
+    try {
+      const res = await fetch(`${API}/lecture-production?date=${date}`);
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+      t = d.taches.find(x => x.gamme_id === gammeId);
+      if (!t) throw new Error('Tâche introuvable pour ce jour.');
+    } catch (e) {
+      afficherModale(`<h3>Avancement de la tâche</h3><div class="msg error">${esc(e.message)}</div><div class="actions"><button class="btn primary" id="m-cancel">Fermer</button></div>`);
+      document.getElementById('m-cancel').addEventListener('click', fermerModale); return;
+    }
+    const s = t.saisie || {};
+    const fini = t.statut === 'terminé';
+    afficherModale(`
+      <h3>${esc(t.operation)} <span class="plan-note">— ${esc(t.machine)}</span></h3>
+      <div class="plan-note" style="margin-bottom:8px;">${esc(t.of)} · ${esc(t.titre)}${t.client ? ' (' + esc(t.client) + ')' : ''}<br>${dateCourte(date)}${t.debut ? ' · ' + esc(t.debut) + '–' + esc(t.fin) : ''} · ${esc((t.personnel || []).join(', ') || 'personnel à affecter')}</div>
+      ${jaugeAvancement(t.avancement_pct, null, false)}
+      <div class="plan-note" style="margin:3px 0 10px;">${t.avancement_pct} % ${t.quantite_totale ? '· ' + nbFr(t.quantite_realisee) + ' / ' + nbFr(t.quantite_totale) + ' exemplaires' : ''}${fini ? ' · terminée' : ''}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="field"><label>Produit ce jour (exemplaires)</label><input id="mt-qte" type="number" min="0" step="any" value="${s.quantite || ''}" placeholder="quantité"></div>
+        <div class="field"><label>Ou avancement cumulé (%)</label><input id="mt-pct" type="number" min="0" max="100" step="any" value="${s.pct_cumule ?? ''}"></div>
+        <div class="field"><label>Heures réelles</label><input id="mt-h" type="number" min="0" step="0.25" value="${s.heures_reelles ?? ''}"></div>
+        <div class="field"><label>Remarque</label><input id="mt-com" type="text" value="${esc(s.commentaire || '')}"></div>
+      </div>
+      <label style="display:flex;gap:8px;align-items:center;margin:8px 0 2px;font-size:13px;"><input type="checkbox" id="mt-fini" ${fini || s.termine ? 'checked' : ''} ${fini ? 'disabled' : ''}> Tâche terminée</label>
+      <label style="display:flex;gap:8px;align-items:center;margin:2px 0 4px;font-size:13px;"><input type="checkbox" id="mt-recaler" checked> Décaler automatiquement le planning en cas de retard</label>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn" id="mt-of">Avancement de l'OF</button><button class="btn primary" id="mt-go">Enregistrer</button></div>`, 'large');
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.getElementById('mt-of').addEventListener('click', () => ouvrirModaleAvancementOf(t.of_id, t.of));
+    document.getElementById('mt-go').addEventListener('click', async () => {
+      const msg = document.getElementById('m-msg');
+      const saisie = { gamme_id: gammeId, quantite: document.getElementById('mt-qte').value, pct: document.getElementById('mt-pct').value, termine: document.getElementById('mt-fini').checked && !fini, heures_reelles: document.getElementById('mt-h').value, commentaire: document.getElementById('mt-com').value };
+      if (saisie.quantite === '' && saisie.pct === '' && !saisie.termine) { msg.innerHTML = '<div class="msg error">Renseignez une quantité, un pourcentage ou cochez « terminée ».</div>'; return; }
+      msg.innerHTML = '<div class="msg">Enregistrement et recalage du planning…</div>';
+      document.getElementById('mt-go').disabled = true;
+      try {
+        const res = await fetch(`${API}/saisir-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, saisies: [saisie], recaler: document.getElementById('mt-recaler').checked }) });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        afficherBilanProduction(d);
+        chargerDonneesReelles();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; document.getElementById('mt-go').disabled = false; }
+    });
+  }
+
   function afficherBilanProduction(d) {
     const erreurs = d.etapes.filter(e => e.erreur).map(e => `<div class="msg error">${esc(e.erreur)}</div>`).join('');
     const blocs = d.ofs.map(o => {
@@ -1219,6 +1278,245 @@
     } catch (e) { document.getElementById('av-corps').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
   }
 
+  // ---------- Devis : coûts personnel / machines / matières ----------
+  const eur = (n) => (Number(n) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/[  ]/g, ' ') + ' €';
+
+  async function ouvrirModaleCouts() {
+    afficherModale(`<h3>Coûts & tarifs</h3><div id="co-corps"><div class="msg">Chargement…</div></div>
+      <div id="m-msg"></div><div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="co-save" disabled>Enregistrer</button></div>`, 'xlarge');
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    let d;
+    try {
+      const res = await fetch(`${API}/gerer-couts`);
+      d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+    } catch (e) { document.getElementById('co-corps').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; return; }
+    const val = (v) => (v === null || v === undefined ? '' : v);
+    document.getElementById('co-corps').innerHTML = `
+      <div class="co-tabs"><button class="btn co-tab active" data-t="gen">Réglages</button><button class="btn co-tab" data-t="mac">Machines (amortissement)</button><button class="btn co-tab" data-t="per">Personnel</button><button class="btn co-tab" data-t="mat">Matières</button></div>
+      <div class="co-pane" data-p="gen">${d.parametres.map(p => `<div class="field" style="max-width:520px;"><label>${esc(p.libelle)} <span class="plan-note">(${esc(p.unite || '')})</span></label><input class="co-param" data-cle="${esc(p.cle)}" type="number" step="any" min="0" value="${p.valeur}"></div>`).join('')}</div>
+      <div class="co-pane hidden" data-p="mac"><p class="plan-note">Coût horaire = prix d'achat ÷ (durée d'amortissement × heures par an) + entretien annuel ÷ heures par an. Vous pouvez aussi imposer directement un coût horaire.</p>
+        <div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Machine</th><th>Prix d'achat (€)</th><th>Durée (ans)</th><th>Heures / an</th><th>Entretien (€/an)</th><th>Coût horaire imposé</th><th>Coût horaire</th></tr></thead><tbody>
+        ${d.machines.map(m => `<tr data-id="${m.id}"><td><strong>${esc(m.nom)}</strong></td>${['prix_achat', 'duree_amortissement_ans', 'heures_an', 'entretien_an', 'cout_horaire_force'].map(k => `<td><input class="co-m" data-k="${k}" type="number" step="any" min="0" style="width:105px;" value="${val(m[k])}"></td>`).join('')}<td class="co-ch"><strong>${m.cout_horaire === null ? '—' : eur(m.cout_horaire) + '/h'}</strong></td></tr>`).join('')}</tbody></table></div></div>
+      <div class="co-pane hidden" data-p="per"><p class="plan-note">Salaire chargé par heure. Laissé vide : le coût moyen des réglages est utilisé. Ce coût sert au coût de revient et à la marge, jamais affiché au client.</p>
+        <div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Personne</th><th>Poste</th><th>Coût horaire (€/h)</th></tr></thead><tbody>
+        ${d.personnel.map(p => `<tr data-id="${p.id}"><td><strong>${esc(p.nom)}</strong></td><td class="plan-note">${esc(p.poste || '')}</td><td><input class="co-p" type="number" step="any" min="0" style="width:105px;" value="${val(p.cout_horaire)}"></td></tr>`).join('')}</tbody></table></div></div>
+      <div class="co-pane hidden" data-p="mat"><p class="plan-note">Prix par unité de stock. La « consommation type » est une formule (ex. <code>quantite * 0.002</code>, avec les caractéristiques de la fiche) qui pré-remplit la quantité dans le devis.</p>
+        <div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Matière</th><th>Unité</th><th>Prix unitaire (€)</th><th>Consommation type par OF (formule)</th></tr></thead><tbody>
+        ${d.stocks.map(s => `<tr data-id="${s.id}"><td><strong>${esc(s.nom)}</strong></td><td class="plan-note">${esc(s.unite)}</td><td><input class="co-s-prix" type="number" step="any" min="0" style="width:105px;" value="${val(s.prix_unitaire)}"></td><td><input class="co-s-f" type="text" style="width:260px;" value="${esc(s.conso_formule || '')}" placeholder="facultatif"></td></tr>`).join('') || '<tr><td colspan="4" class="plan-note">Aucune matière en stock.</td></tr>'}</tbody></table></div></div>`;
+    document.querySelectorAll('.co-tab').forEach(b => b.addEventListener('click', () => {
+      document.querySelectorAll('.co-tab').forEach(x => x.classList.toggle('active', x === b));
+      document.querySelectorAll('.co-pane').forEach(pn => pn.classList.toggle('hidden', pn.dataset.p !== b.dataset.t));
+    }));
+    document.getElementById('co-save').disabled = false;
+    document.getElementById('co-save').addEventListener('click', async () => {
+      const msg = document.getElementById('m-msg');
+      const body = { parametres: {}, machines: [], personnel: [], stocks: [] };
+      document.querySelectorAll('.co-param').forEach(i => { body.parametres[i.dataset.cle] = i.value; });
+      document.querySelectorAll('.co-pane[data-p="mac"] tbody tr').forEach(tr => { const m = { id: tr.dataset.id }; tr.querySelectorAll('.co-m').forEach(i => { m[i.dataset.k] = i.value; }); body.machines.push(m); });
+      document.querySelectorAll('.co-p').forEach(i => body.personnel.push({ id: i.closest('tr').dataset.id, cout_horaire: i.value }));
+      document.querySelectorAll('.co-pane[data-p="mat"] tbody tr[data-id]').forEach(tr => body.stocks.push({ id: tr.dataset.id, prix_unitaire: tr.querySelector('.co-s-prix').value, conso_formule: tr.querySelector('.co-s-f').value }));
+      msg.innerHTML = '<div class="msg">Enregistrement…</div>';
+      try {
+        const res = await fetch(`${API}/gerer-couts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const r = await res.json();
+        if (!res.ok) throw new Error(r.error || 'Erreur inconnue');
+        toast('Coûts et tarifs enregistrés.');
+        fermerModale();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
+  }
+
+  async function ouvrirModaleDevis(ofUuid, ofNumero) {
+    afficherModale(`<h3>Devis — ${esc(ofNumero)}</h3><div id="dv-corps"><div class="msg">Calcul du devis d'après le chiffrage…</div></div>`, 'xlarge');
+    let S, R, info, devisId = null, devisNumero = null;
+    const post = async (corps) => {
+      const res = await fetch(`${API}/calculer-devis`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+      return d;
+    };
+    try {
+      const [d, listeRes] = await Promise.all([post({ of_id: ofUuid }), fetch(`${API}/gerer-devis?of_id=${ofUuid}`).then(r => r.json()).catch(() => ({ devis: [] }))]);
+      info = { of: d.of, matieres: d.matieres_disponibles, avertissements: d.avertissements, saisis: listeRes.devis || [] };
+      S = d.saisie; R = d.resultat;
+    } catch (e) { document.getElementById('dv-corps').innerHTML = `<div class="msg error">${esc(e.message)}</div><div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`; document.getElementById('m-cancel').addEventListener('click', fermerModale); return; }
+    let client = info.of.client || '', titre = info.of.titre || '', notes = '', statut = 'brouillon';
+
+    const pf = (k) => S.parametres[k];
+    function structure() {
+      const dispo = info.matieres;
+      document.getElementById('dv-corps').innerHTML = `
+        ${info.saisis.length ? `<div class="field" style="max-width:520px;"><label>Devis déjà enregistrés pour cet OF</label><div style="display:flex;gap:8px;"><select id="dv-ouvrir">${info.saisis.map(x => `<option value="${x.id}">${esc(x.numero)} — ${eur(x.total_ht)} HT — ${esc(x.statut)}</option>`).join('')}</select><button class="btn" id="dv-charger">Ouvrir</button></div></div>` : ''}
+        ${devisNumero ? `<div class="plan-note" style="margin-bottom:6px;">Devis <strong>${esc(devisNumero)}</strong> — statut : <select id="dv-statut">${['brouillon', 'envoyé', 'accepté', 'refusé'].map(s => `<option ${s === statut ? 'selected' : ''}>${s}</option>`).join('')}</select></div>` : ''}
+        ${info.avertissements.length ? `<div class="msg" style="color:var(--accent-amber-text);">${info.avertissements.map(a => '⚠️ ' + esc(a)).join('<br>')} <a href="#" id="dv-couts" style="margin-left:6px;">Ouvrir Coûts & tarifs</a></div>` : ''}
+        <div class="step-grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+          <div class="field"><label>Client</label><input id="dv-client" value="${esc(client)}"></div>
+          <div class="field"><label>Titre</label><input id="dv-titre" value="${esc(titre)}"></div>
+          <div class="field"><label>Quantité (exemplaires)</label><input id="dv-qte" type="number" min="1" value="${S.quantite}"></div>
+          <div class="field"><label>Main d'œuvre facturée (€/h)</label><input class="dv-p" data-k="taux_horaire_client" type="number" step="any" min="0" value="${pf('taux_horaire_client')}"></div>
+          <div class="field"><label>Marge matières (%)</label><input class="dv-p" data-k="marge_matiere_pct" type="number" step="any" min="0" value="${pf('marge_matiere_pct')}"></div>
+          <div class="field"><label>Marge machines (%)</label><input class="dv-p" data-k="marge_machine_pct" type="number" step="any" min="0" value="${pf('marge_machine_pct')}"></div>
+          <div class="field"><label>TVA (%)</label><input class="dv-p" data-k="tva_pct" type="number" step="any" min="0" value="${pf('tva_pct')}"></div>
+          <div class="field"><label>Remise (%)</label><input id="dv-remise" type="number" step="any" min="0" max="100" value="${S.remise_pct || 0}"></div>
+        </div>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:0 0 10px;"><input type="checkbox" id="dv-fm" ${Number(pf('facturer_machine')) === 1 ? 'checked' : ''}> Facturer l'utilisation des machines en plus de la main d'œuvre (sinon elle est incluse dans le taux horaire)</label>
+
+        <h4 class="dv-h">Main d'œuvre</h4>
+        <table class="sp-table"><thead><tr><th>Opération</th><th>Heures</th><th>Coût horaire</th><th>Coût de revient</th><th>Prix de vente</th></tr></thead><tbody>
+        ${S.mo.map((l, i) => `<tr><td>${esc(l.operation)}</td><td><input class="dv-l" data-g="mo" data-i="${i}" data-k="heures" type="number" step="any" min="0" style="width:80px;" value="${l.heures}"></td><td>${eur(l.cout_horaire)}</td><td class="dv-c" data-g="mo" data-i="${i}" data-k="cout"></td><td class="dv-c" data-g="mo" data-i="${i}" data-k="vente"></td></tr>`).join('') || '<tr><td colspan="5" class="plan-note">Aucune opération chiffrée.</td></tr>'}</tbody></table>
+
+        <h4 class="dv-h">Utilisation des machines (amortissement)</h4>
+        <table class="sp-table"><thead><tr><th>Opération — machine</th><th>Heures</th><th>Coût horaire (€/h)</th><th>Coût de revient</th><th>Prix de vente</th></tr></thead><tbody>
+        ${S.machine.map((l, i) => `<tr><td>${esc(l.operation)} — ${esc(l.machine)}</td><td><input class="dv-l" data-g="machine" data-i="${i}" data-k="heures" type="number" step="any" min="0" style="width:80px;" value="${l.heures}"></td><td><input class="dv-l" data-g="machine" data-i="${i}" data-k="cout_horaire" type="number" step="any" min="0" style="width:80px;" value="${l.cout_horaire}"></td><td class="dv-c" data-g="machine" data-i="${i}" data-k="cout"></td><td class="dv-c" data-g="machine" data-i="${i}" data-k="vente"></td></tr>`).join('') || '<tr><td colspan="5" class="plan-note">Aucune utilisation machine.</td></tr>'}</tbody></table>
+
+        <h4 class="dv-h">Matières premières <button class="btn" id="dv-add-mat" style="margin-left:8px;">+ Ajouter</button></h4>
+        <table class="sp-table"><thead><tr><th>Matière</th><th>Unité</th><th>Quantité</th><th>Prix unitaire (€)</th><th>Coût d'achat</th><th>Prix de vente</th><th></th></tr></thead><tbody>
+        ${S.matieres.map((l, i) => `<tr><td><input class="dv-l" data-g="matieres" data-i="${i}" data-k="nom" list="dv-mats" style="width:190px;" value="${esc(l.nom || '')}"></td><td><input class="dv-l" data-g="matieres" data-i="${i}" data-k="unite" style="width:60px;" value="${esc(l.unite || '')}"></td><td><input class="dv-l" data-g="matieres" data-i="${i}" data-k="quantite" type="number" step="any" min="0" style="width:90px;" value="${l.quantite}"></td><td><input class="dv-l" data-g="matieres" data-i="${i}" data-k="prix_unitaire" type="number" step="any" min="0" style="width:90px;" value="${l.prix_unitaire}"></td><td class="dv-c" data-g="matieres" data-i="${i}" data-k="cout"></td><td class="dv-c" data-g="matieres" data-i="${i}" data-k="vente"></td><td><button class="btn dv-del" data-g="matieres" data-i="${i}">✕</button></td></tr>`).join('') || '<tr><td colspan="7" class="plan-note">Aucune matière : ajoutez le papier, la colle, le fil, la couverture…</td></tr>'}</tbody></table>
+        <datalist id="dv-mats">${dispo.map(m => `<option value="${esc(m.nom)}"></option>`).join('')}</datalist>
+
+        <h4 class="dv-h">Autres frais (transport, sous-traitance…) <button class="btn" id="dv-add-aut" style="margin-left:8px;">+ Ajouter</button></h4>
+        <table class="sp-table"><thead><tr><th>Libellé</th><th>Coût (€)</th><th>Prix de vente (€)</th><th></th></tr></thead><tbody>
+        ${S.autres.map((l, i) => `<tr><td><input class="dv-l" data-g="autres" data-i="${i}" data-k="libelle" style="width:260px;" value="${esc(l.libelle || '')}"></td><td><input class="dv-l" data-g="autres" data-i="${i}" data-k="cout" type="number" step="any" min="0" style="width:100px;" value="${l.cout}"></td><td><input class="dv-l" data-g="autres" data-i="${i}" data-k="vente" type="number" step="any" min="0" style="width:100px;" value="${l.vente}"></td><td><button class="btn dv-del" data-g="autres" data-i="${i}">✕</button></td></tr>`).join('') || '<tr><td colspan="4" class="plan-note">Aucun autre frais.</td></tr>'}</tbody></table>
+
+        <div id="dv-totaux"></div>
+        <div class="field" style="margin-top:8px;"><label>Notes / conditions</label><input id="dv-notes" value="${esc(notes)}" placeholder="ex. délai de livraison, conditions de paiement"></div>
+        <div id="m-msg"></div>
+        <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn" id="dv-pdf-int">PDF interne (marge)</button><button class="btn" id="dv-save">Enregistrer</button><button class="btn primary" id="dv-pdf">PDF client</button></div>`;
+      brancher(); majAffichage();
+    }
+
+    let minuterie = null;
+    function lire() {
+      client = document.getElementById('dv-client').value; titre = document.getElementById('dv-titre').value; notes = document.getElementById('dv-notes').value;
+      S.quantite = Number(document.getElementById('dv-qte').value) || 0;
+      S.remise_pct = Number(document.getElementById('dv-remise').value) || 0;
+      document.querySelectorAll('.dv-p').forEach(i => { S.parametres[i.dataset.k] = Number(i.value) || 0; });
+      S.parametres.facturer_machine = document.getElementById('dv-fm').checked ? 1 : 0;
+      document.querySelectorAll('.dv-l').forEach(i => { S[i.dataset.g][Number(i.dataset.i)][i.dataset.k] = i.type === 'number' ? i.value : i.value; });
+    }
+    async function recalculer() {
+      lire();
+      try { R = (await post({ saisie: S })).resultat; majAffichage(); } catch (e) { document.getElementById('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    }
+    function majAffichage() {
+      document.querySelectorAll('.dv-c').forEach(td => { const v = R[td.dataset.g][Number(td.dataset.i)]; td.textContent = v ? eur(v[td.dataset.k]) : ''; });
+      const t = R.totaux;
+      const ligne = (l, v, cls) => `<tr class="${cls || ''}"><td>${l}</td><td style="text-align:right;">${v}</td></tr>`;
+      document.getElementById('dv-totaux').innerHTML = `<div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:12px;">
+        <table class="sp-table" style="max-width:420px;"><tbody>
+          ${ligne(`Main d'œuvre (${t.mo_heures} h)`, eur(t.mo_vente))}${ligne('Utilisation machines', eur(t.machine_vente))}${ligne('Matières premières', eur(t.matieres_vente))}${ligne('Autres frais', eur(t.autres_vente))}
+          ${t.remise ? ligne(`Remise (${R.remise_pct} %)`, '− ' + eur(t.remise)) : ''}
+          ${ligne('<strong>Total HT</strong>', '<strong>' + eur(t.ht) + '</strong>')}${ligne('TVA ' + R.parametres.tva_pct + ' %', eur(t.tva))}${ligne('<strong>Total TTC</strong>', '<strong>' + eur(t.ttc) + '</strong>')}
+          ${t.prix_unitaire_ht !== null ? ligne('Prix par exemplaire HT', (t.prix_unitaire_ht).toLocaleString('fr-FR', { minimumFractionDigits: 3 }) + ' €') + ligne('Prix pour 1 000 HT', eur(t.prix_mille_ht)) : ''}
+        </tbody></table>
+        <table class="sp-table" style="max-width:340px;background:var(--field-bg);"><tbody>
+          <tr><td colspan="2" class="plan-note"><strong>Interne (jamais montré au client)</strong></td></tr>
+          ${ligne('Coût de revient', eur(t.cout_revient))}${ligne('Marge', '<strong style="color:' + (t.marge >= 0 ? 'inherit' : 'var(--danger-text)') + ';">' + eur(t.marge) + '</strong>')}${ligne('Taux de marge', t.marge_pct + ' %')}
+        </tbody></table></div>`;
+    }
+    function planifier() { clearTimeout(minuterie); minuterie = setTimeout(recalculer, 250); }
+
+    async function enregistrer() {
+      lire();
+      const statutSel = document.getElementById('dv-statut');
+      const res = await fetch(`${API}/gerer-devis`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: devisId || undefined, of_id: ofUuid, client, titre, notes, statut: statutSel ? statutSel.value : undefined, saisie: S }) });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+      R = d.resultat;
+      if (!devisId) { devisId = d.id; devisNumero = d.numero; info.saisis.unshift({ id: d.id, numero: d.numero, total_ht: R.totaux.ht, statut: 'brouillon' }); structure(); }
+      return { numero: devisNumero || d.numero };
+    }
+    function brancher() {
+      document.getElementById('m-cancel').addEventListener('click', fermerModale);
+      document.querySelectorAll('#dv-corps input:not(#dv-notes), #dv-fm').forEach(i => i.addEventListener('input', planifier));
+      document.getElementById('dv-couts') && document.getElementById('dv-couts').addEventListener('click', (e) => { e.preventDefault(); ouvrirModaleCouts(); });
+      document.getElementById('dv-add-mat').addEventListener('click', () => { lire(); S.matieres.push({ nom: '', unite: '', quantite: 0, prix_unitaire: 0 }); structure(); recalculer(); });
+      document.getElementById('dv-add-aut').addEventListener('click', () => { lire(); S.autres.push({ libelle: '', cout: 0, vente: 0 }); structure(); recalculer(); });
+      document.querySelectorAll('.dv-del').forEach(b => b.addEventListener('click', () => { lire(); S[b.dataset.g].splice(Number(b.dataset.i), 1); structure(); recalculer(); }));
+      // Choisir une matière du stock : unité, prix et quantité type sont repris.
+      document.querySelectorAll('.dv-l[data-k="nom"]').forEach(inp => inp.addEventListener('change', () => {
+        const m = info.matieres.find(x => x.nom === inp.value);
+        if (!m) return;
+        lire();
+        const l = S.matieres[Number(inp.dataset.i)];
+        l.nom = m.nom; l.unite = m.unite; l.prix_unitaire = m.prix_unitaire ?? 0; if (m.quantite_proposee !== null && !Number(l.quantite)) l.quantite = m.quantite_proposee;
+        structure(); recalculer();
+      }));
+      const ouvrir = document.getElementById('dv-charger');
+      if (ouvrir) ouvrir.addEventListener('click', async () => {
+        try {
+          const d = await (await fetch(`${API}/gerer-devis?id=${document.getElementById('dv-ouvrir').value}`)).json();
+          const { totaux, ...saisie } = d.contenu; S = saisie; R = d.contenu;
+          client = d.client || ''; titre = d.titre || ''; notes = d.notes || ''; statut = d.statut; devisId = d.id; devisNumero = d.numero;
+          structure();
+        } catch (e) { document.getElementById('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+      });
+      document.getElementById('dv-save').addEventListener('click', async () => {
+        const msg = document.getElementById('m-msg'); msg.innerHTML = '<div class="msg">Enregistrement…</div>';
+        try { const r = await enregistrer(); toast(`Devis ${r.numero} enregistré.`); document.getElementById('m-msg').innerHTML = ''; } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+      });
+      const pdf = (interne) => async () => {
+        const msg = document.getElementById('m-msg'); msg.innerHTML = '<div class="msg">Génération du PDF…</div>';
+        try { const r = await enregistrer(); await genererPdfDevis({ numero: r.numero, client, titre, notes, R, interne }); document.getElementById('m-msg').innerHTML = ''; } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+      };
+      document.getElementById('dv-pdf').addEventListener('click', pdf(false));
+      document.getElementById('dv-pdf-int').addEventListener('click', pdf(true));
+    }
+    structure();
+  }
+
+  async function genererPdfDevis({ numero, client, titre, notes, R, interne }) {
+    await chargerLibsPdf();
+    const doc = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const W = doc.internal.pageSize.getWidth(), M = 14;
+    const t = R.totaux, p = R.parametres;
+    const ajd = new Date();
+    const dateTxt = ajd.toLocaleDateString('fr-FR');
+    const fin = new Date(ajd.getTime() + (Number(p.validite_jours) || 30) * 86400000).toLocaleDateString('fr-FR');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(20); doc.text('Ateliers Babouot', M, 20);
+    doc.setFontSize(10); doc.setFont('helvetica', 'normal'); doc.setTextColor(110); doc.text('Reliure industrielle et industrie graphique', M, 26); doc.setTextColor(0);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.text(interne ? 'DEVIS - VERSION INTERNE' : 'DEVIS', W - M, 20, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    doc.text(pdfTxt(`N° ${numero}`), W - M, 26, { align: 'right' });
+    doc.text(pdfTxt(`Date : ${dateTxt}`), W - M, 31, { align: 'right' });
+    doc.text(pdfTxt(`Valable jusqu'au ${fin}`), W - M, 36, { align: 'right' });
+    let y = 46;
+    doc.setFont('helvetica', 'bold'); doc.text('Client', M, y); doc.setFont('helvetica', 'normal'); doc.text(pdfTxt(client || '-'), M + 28, y); y += 6;
+    doc.setFont('helvetica', 'bold'); doc.text('Ouvrage', M, y); doc.setFont('helvetica', 'normal'); doc.text(pdfTxt(titre || '-'), M + 28, y); y += 6;
+    doc.setFont('helvetica', 'bold'); doc.text('Quantite', M, y); doc.setFont('helvetica', 'normal'); doc.text(pdfTxt(`${Number(R.quantite).toLocaleString('fr-FR')} exemplaires`), M + 28, y); y += 8;
+
+    const E = (n) => pdfTxt(eur(n));
+    const corps = [];
+    const vide = (v) => Number(v) === 0;
+    if (interne) {
+      R.mo.filter(l => !vide(l.heures)).forEach(l => corps.push([pdfTxt(`Main d'oeuvre - ${l.operation}`), `${l.heures} h`, `${E(l.cout_horaire)}/h`, E(l.cout), E(l.vente)]));
+      R.machine.filter(l => !vide(l.heures)).forEach(l => corps.push([pdfTxt(`Machine - ${l.machine} (${l.operation})`), `${l.heures} h`, `${E(l.cout_horaire)}/h`, E(l.cout), E(l.vente)]));
+      R.matieres.filter(l => l.nom || l.cout).forEach(l => corps.push([pdfTxt(`Matiere - ${l.nom}`), pdfTxt(`${l.quantite} ${l.unite || ''}`), `${E(l.prix_unitaire)}`, E(l.cout), E(l.vente)]));
+      R.autres.filter(l => l.libelle || l.cout || l.vente).forEach(l => corps.push([pdfTxt(l.libelle), '', '', E(l.cout), E(l.vente)]));
+      doc.autoTable({ startY: y, margin: { left: M, right: M }, head: [['Poste', 'Quantite', 'Cout unitaire', 'Cout de revient', 'Prix de vente']], body: corps, styles: { fontSize: 8.5, cellPadding: 1.8 }, headStyles: { fillColor: [30, 90, 100] }, columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } } });
+    } else {
+      // Version client : main d'oeuvre détaillée par opération (heures x taux), machines regroupées, matières, autres frais. Aucun coût de revient.
+      R.mo.filter(l => !vide(l.heures)).forEach(l => corps.push([pdfTxt(`Main d'oeuvre - ${l.operation}`), `${l.heures} h`, `${E(p.taux_horaire_client)}/h`, E(l.vente)]));
+      if (t.machine_vente > 0) corps.push(['Utilisation des machines', `${t.machine_heures} h`, '', E(t.machine_vente)]);
+      R.matieres.filter(l => l.nom || l.vente).forEach(l => corps.push([pdfTxt(`Matiere - ${l.nom}`), pdfTxt(`${l.quantite} ${l.unite || ''}`), '', E(l.vente)]));
+      R.autres.filter(l => l.libelle || l.vente).forEach(l => corps.push([pdfTxt(l.libelle), '', '', E(l.vente)]));
+      doc.autoTable({ startY: y, margin: { left: M, right: M }, head: [['Designation', 'Quantite', 'Prix unitaire', 'Montant HT']], body: corps, styles: { fontSize: 9, cellPadding: 2 }, headStyles: { fillColor: [30, 90, 100] }, columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } } });
+    }
+    y = doc.lastAutoTable.finalY + 6;
+    const tot = [];
+    if (t.remise) tot.push(['Sous-total HT', E(t.brut_ht)], [`Remise ${R.remise_pct} %`, '- ' + E(t.remise)]);
+    tot.push(['Total HT', E(t.ht)], [`TVA ${p.tva_pct} %`, E(t.tva)], ['Total TTC', E(t.ttc)]);
+    if (t.prix_unitaire_ht !== null) tot.push(['Prix par exemplaire HT', pdfTxt(t.prix_unitaire_ht.toLocaleString('fr-FR', { minimumFractionDigits: 3 }) + ' EUR')], ['Prix pour 1 000 HT', E(t.prix_mille_ht)]);
+    if (interne) tot.push(['Cout de revient', E(t.cout_revient)], ['Marge', E(t.marge)], ['Taux de marge', `${t.marge_pct} %`]);
+    doc.autoTable({ startY: y, margin: { left: W - M - 90, right: M }, body: tot, theme: 'plain', styles: { fontSize: 9.5, cellPadding: 1.6 }, columnStyles: { 1: { halign: 'right' } },
+      didParseCell: (h) => { if (['Total HT', 'Total TTC'].includes(h.row.raw[0])) h.cell.styles.fontStyle = 'bold'; } });
+    y = doc.lastAutoTable.finalY + 8;
+    if (notes) { doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.text(doc.splitTextToSize(pdfTxt(notes), W - 2 * M), M, y); y += 10; }
+    if (!interne) { doc.setFontSize(8.5); doc.setTextColor(110); doc.text(pdfTxt(`Devis valable ${p.validite_jours} jours. Bon pour accord (date, signature et cachet) :`), M, y + 4); doc.rect(M, y + 7, 80, 24); doc.setTextColor(0); }
+    doc.save(`${interne ? 'devis-interne' : 'devis'}-${numero}.pdf`);
+  }
+
   function ouvrirMenuOf(btn, ofUuid, ofNumero, ofStatut) {
     document.querySelectorAll('.row-menu').forEach(m => m.remove());
     const menu = el(`
@@ -1229,6 +1527,7 @@
         <button data-action="planifier">Planifier à l'heure</button>
         <button data-action="affecter">Affecter au planning</button>
         <button data-action="avancement">Avancement / production</button>
+        <button data-action="devis">Devis</button>
         <button data-action="deplanifier">Déplanifier l'OF</button>
         <button data-action="supprimer" class="danger">Supprimer l'OF</button>
       </div>
@@ -1245,6 +1544,10 @@
     menu.querySelector('[data-action="affecter"]').addEventListener('click', () => {
       menu.remove();
       ouvrirModaleAffectation({ ofUuid });
+    });
+    menu.querySelector('[data-action="devis"]').addEventListener('click', () => {
+      menu.remove();
+      ouvrirModaleDevis(ofUuid, ofNumero);
     });
     menu.querySelector('[data-action="avancement"]').addEventListener('click', () => {
       menu.remove();
@@ -3267,6 +3570,8 @@
     const newOfBtn = document.getElementById('new-of');
     if (addOfBtn) addOfBtn.addEventListener('click', () => ouvrirModaleAffectation({}));
     if (newOfBtn) newOfBtn.addEventListener('click', ouvrirModaleNouvelOf);
+    const coutsBtn = document.getElementById('couts-btn');
+    if (coutsBtn) coutsBtn.addEventListener('click', ouvrirModaleCouts);
   }
 
   document.querySelectorAll('.navbtn').forEach(btn=>{
@@ -3392,6 +3697,8 @@
           debut: creneau.heure_debut ? String(creneau.heure_debut).slice(0, 5) : null,
           fin: creneau.heure_fin ? String(creneau.heure_fin).slice(0, 5) : null,
           phase: creneau.phase || null,
+          gamme: creneau.gamme_operatoire_id || null,
+          date: creneau.date,
         });
       });
       state.planning = planningParMachine;
