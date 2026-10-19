@@ -8,6 +8,7 @@
 //   quantite: 2000,
 //   delai: "2026-10-15",
 //   priorite: "normale" | "haute" | "urgente",
+//   date_reception?: "2026-10-02", rang_priorite?: 3,   // issus de l'import d'un lot de fiches
 //   operations: ["MASSICOT", "PRESSURE_COLLE", "COUTURE", ...]  // codes, dans l'ordre de la gamme
 // }
 //
@@ -24,6 +25,9 @@ exports.handler = async (event) => {
     const { titre, titre_id, quantite, delai, priorite, operations } = body;
     const typeProduction = body.type_production ? String(body.type_production) : null;
     const caracteristiques = body.caracteristiques && typeof body.caracteristiques === 'object' ? body.caracteristiques : null;
+
+    const dateReception = /^\d{4}-\d{2}-\d{2}$/.test(body.date_reception || '') ? body.date_reception : null;
+    const rang = Number.isInteger(Number(body.rang_priorite)) && Number(body.rang_priorite) > 0 ? Number(body.rang_priorite) : null;
 
     if (!quantite || !Array.isArray(operations) || operations.length === 0) {
       return {
@@ -102,6 +106,12 @@ exports.handler = async (event) => {
       const valides = new Set((cat || []).map((c) => c.cle));
       const propres = Object.fromEntries(Object.entries(caracteristiques).filter(([k, v]) => valides.has(k) && v !== null && v !== ''));
       if (Object.keys(propres).length) await supabase.from('ordres_fabrication').update({ caracteristiques: propres }).eq('id', of.id);
+    }
+
+    // Date de réception du papier et rang de priorité (migration 27) : sans elle, l'OF est créé quand même.
+    if (of && (dateReception || rang)) {
+      const { error: rErr } = await supabase.from('ordres_fabrication').update({ date_reception: dateReception, rang_priorite: rang }).eq('id', of.id);
+      if (rErr) console.warn('date_reception / rang_priorite non enregistrés (migration 27 non exécutée ?)', rErr.message);
     }
 
     // 5. Créer la gamme opératoire, dans l'ordre fourni.
