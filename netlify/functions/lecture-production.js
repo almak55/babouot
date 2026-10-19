@@ -17,6 +17,30 @@ exports.handler = async (event) => {
     const p = event.queryStringParameters || {};
     const supabase = getSupabase();
 
+    if (p.gamme_id) {
+      // Une étape et tout l'historique de ses saisies (pour les corriger depuis la fenêtre d'avancement de l'OF).
+      const { data: g, error: gE } = await supabase.from('gammes_operatoires')
+        .select('id, of_id, sequence, statut, avancement_pct, quantite_realisee, parametres, date_fin_reelle, operations(nom), machines(nom), ordres_fabrication(numero, quantite, titres(nom, client))').eq('id', p.gamme_id).maybeSingle();
+      if (gE) throw gE;
+      if (!g) return { statusCode: 404, body: JSON.stringify({ error: 'Étape introuvable.' }) };
+      const [hRes, tRes, cRes] = await Promise.all([
+        supabase.from('production_jour').select('date, quantite, pct_cumule, termine, heures_reelles, commentaire').eq('gamme_operatoire_id', g.id).order('date'),
+        supabase.from('gammes_operatoires').select('id, sequence, statut, predecesseurs, dependances, operations(nom)').eq('of_id', g.of_id),
+        supabase.from('planning_jour').select('date, heure_debut, heure_fin').eq('gamme_operatoire_id', g.id).neq('statut', 'annulé'),
+      ]);
+      for (const r of [hRes, tRes, cRes]) if (r.error) throw r.error;
+      const of = g.ordres_fabrication || {};
+      const dates = cRes.data.map((c) => c.date).sort();
+      return { statusCode: 200, body: JSON.stringify({
+        tache: { gamme_id: g.id, of_id: g.of_id, of: of.numero || '', titre: (of.titres && of.titres.nom) || '', client: (of.titres && of.titres.client) || '',
+          operation: g.operations ? g.operations.nom : '', machine: g.machines ? g.machines.nom : 'Travail manuel', statut: g.statut,
+          quantite_totale: nombre(g.parametres && g.parametres.quantite) || of.quantite || null, quantite_realisee: nombre(g.quantite_realisee) || 0,
+          avancement_pct: Math.round(Number(g.avancement_pct || 0) * 10) / 10, bloquee_par: etapesBloquees(tRes.data)[g.id] || [],
+          debut_prevu: dates[0] || null, fin_prevue: dates[dates.length - 1] || null },
+        historique: hRes.data,
+      }) };
+    }
+
     if (p.of_id) {
       const av = await avancementOf(supabase, p.of_id);
       if (!av) return { statusCode: 404, body: JSON.stringify({ error: 'OF introuvable.' }) };
