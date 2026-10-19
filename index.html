@@ -1298,6 +1298,100 @@
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
   }
 
+  // Historique des saisies d'une opération : ajouter, corriger ou supprimer les données de production.
+  async function ouvrirModaleSaisiesEtape(gammeId, ofUuid, ofNumero) {
+    afficherModale('<h3>Saisies de production</h3><div class="msg">Chargement…</div>', 'xlarge');
+    let t, hist;
+    try {
+      const res = await fetch(`${API}/lecture-production?gamme_id=${gammeId}`);
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+      t = d.tache; hist = d.historique;
+    } catch (e) {
+      afficherModale(`<h3>Saisies de production</h3><div class="msg error">${esc(e.message)}</div><div class="actions"><button class="btn primary" id="m-cancel">Fermer</button></div>`);
+      document.getElementById('m-cancel').addEventListener('click', fermerModale); return;
+    }
+    const fini = t.statut === 'terminé';
+    const bloque = !fini && (t.bloquee_par || []).length > 0;
+    const ligneHtml = (l, i) => `<tr data-i="${i}" data-orig='${l ? esc(JSON.stringify(l)) : ''}'>
+      <td><input class="se-date" type="date" value="${l ? l.date : dateLocaleIso()}" style="width:140px;"></td>
+      <td><input class="se-qte" type="number" min="0" step="any" value="${l && l.quantite ? l.quantite : ''}" style="width:100px;" placeholder="quantité"></td>
+      <td><input class="se-pct" type="number" min="0" max="100" step="any" value="${l && l.pct_cumule !== null && l.pct_cumule !== undefined ? l.pct_cumule : ''}" style="width:80px;"></td>
+      <td><input class="se-h" type="number" min="0" step="0.25" value="${l && l.heures_reelles !== null && l.heures_reelles !== undefined ? l.heures_reelles : ''}" style="width:80px;"></td>
+      <td><input class="se-com" type="text" value="${l ? esc(l.commentaire || '') : ''}" style="min-width:140px;"></td>
+      <td style="text-align:center;"><input class="se-fini" type="checkbox" ${l && l.termine ? 'checked' : ''} ${bloque && !(l && l.termine) ? 'disabled title="Attend la fin de : ' + esc(t.bloquee_par.join(', ')) + '"' : ''}></td>
+      <td><button class="btn se-del" title="Supprimer cette saisie" style="padding:2px 9px;">✕</button></td></tr>`;
+    afficherModale(`
+      <h3>${esc(t.operation)} <span class="plan-note">— ${esc(t.machine)}</span></h3>
+      <div class="plan-note" style="margin-bottom:8px;">${esc(t.of)} · ${esc(t.titre)}${t.client ? ' (' + esc(t.client) + ')' : ''}${t.debut_prevu ? ' · prévu du ' + dateCourte(t.debut_prevu) + ' au ' + dateCourte(t.fin_prevue) : ''}</div>
+      <div id="se-jauge">${jaugeAvancement(t.avancement_pct, null, false)}</div>
+      <div class="plan-note" style="margin:3px 0 10px;">${t.avancement_pct} % ${t.quantite_totale ? '· ' + nbFr(t.quantite_realisee) + ' / ' + nbFr(t.quantite_totale) + ' exemplaires' : ''}${fini ? ' · terminée' : ''}${bloque ? ' · attend la fin de ' + esc(t.bloquee_par.join(', ')) : ''}</div>
+      <div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Journée</th><th>Quantité produite</th><th>% cumulé</th><th>Heures</th><th>Remarque</th><th>Terminée</th><th></th></tr></thead><tbody id="se-corps">${hist.map((l, i) => ligneHtml(l, i)).join('')}</tbody></table></div>
+      <div id="se-vide" class="plan-note" style="margin:6px 0;${hist.length ? 'display:none;' : ''}">Aucune saisie enregistrée pour cette opération.</div>
+      <div style="margin:8px 0;"><button class="btn" id="se-add">+ Ajouter une saisie</button></div>
+      <div class="plan-note">Quantité = exemplaires produits ce jour-là ; « % cumulé » sert aux tâches sans quantité. Cocher « Terminée » remplit le reste à produire. Supprimer une ligne retire sa production de l'avancement.</div>
+      <label style="display:flex;gap:8px;align-items:center;margin:10px 0 4px;font-size:13px;"><input type="checkbox" id="se-recaler" checked> Décaler automatiquement le planning en cas de retard</label>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn" id="se-of">Retour à l'OF</button><button class="btn primary" id="se-go">Enregistrer</button></div>`, 'xlarge');
+    const corps = document.getElementById('se-corps');
+    let prochain = hist.length;
+    const supprimes = [];
+    const majVide = () => { document.getElementById('se-vide').style.display = corps.children.length ? 'none' : ''; };
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.getElementById('se-of').addEventListener('click', () => ouvrirModaleAvancementOf(ofUuid || t.of_id, ofNumero || t.of));
+    document.getElementById('se-add').addEventListener('click', () => {
+      corps.insertAdjacentHTML('beforeend', ligneHtml(null, prochain++)); majVide();
+    });
+    corps.addEventListener('click', (ev) => {
+      if (!ev.target.classList.contains('se-del')) return;
+      const tr = ev.target.closest('tr');
+      if (tr.dataset.orig) supprimes.push(JSON.parse(tr.dataset.orig));
+      tr.remove(); majVide();
+    });
+    corps.addEventListener('change', (ev) => {
+      if (!ev.target.classList.contains('se-fini')) return;
+      const tr = ev.target.closest('tr'), q = tr.querySelector('.se-qte'), p = tr.querySelector('.se-pct');
+      if (ev.target.checked) {
+        const autres = Array.from(corps.querySelectorAll('tr')).filter(x => x !== tr).reduce((a, x) => a + (Number(x.querySelector('.se-qte').value) || 0), 0);
+        if (t.quantite_totale) { q.value = Math.max(0, Math.round((t.quantite_totale - autres) * 100) / 100); q.dataset.auto = q.value; }
+        p.value = 100; p.dataset.auto = '100';
+        const h = tr.querySelector('.se-h');
+      } else {
+        if (q.dataset.auto !== undefined && q.value === q.dataset.auto) q.value = '';
+        if (p.dataset.auto !== undefined && p.value === p.dataset.auto) p.value = '';
+        delete q.dataset.auto; delete p.dataset.auto;
+      }
+    });
+    document.getElementById('se-go').addEventListener('click', async () => {
+      const msg = document.getElementById('m-msg');
+      const saisies = [];
+      const dates = new Set();
+      for (const tr of Array.from(corps.querySelectorAll('tr'))) {
+        const v = (c) => tr.querySelector(c).value;
+        const date = v('.se-date');
+        if (!date) { msg.innerHTML = '<div class="msg error">Chaque saisie doit avoir une date.</div>'; return; }
+        if (dates.has(date)) { msg.innerHTML = `<div class="msg error">Deux saisies portent la date du ${dateCourte(date)} : regroupez-les en une seule ligne.</div>`; return; }
+        dates.add(date);
+        const orig = tr.dataset.orig ? JSON.parse(tr.dataset.orig) : null;
+        const saisie = { gamme_id: gammeId, date, quantite: v('.se-qte'), pct: v('.se-pct'), termine: tr.querySelector('.se-fini').checked, heures_reelles: v('.se-h'), commentaire: v('.se-com') };
+        if (saisie.quantite === '' && saisie.pct === '' && !saisie.termine) { if (orig) supprimes.push(orig); continue; }   // ligne vidée = supprimée
+        if (orig && orig.date !== date) supprimes.push(orig);   // date changée : l'ancienne journée est supprimée
+        saisies.push(saisie);
+      }
+      supprimes.filter(o => !dates.has(o.date) || !saisies.some(x => x.date === o.date)).forEach(o => saisies.unshift({ gamme_id: gammeId, date: o.date, supprimer: true }));
+      if (!saisies.length) { msg.innerHTML = '<div class="msg error">Rien à enregistrer.</div>'; return; }
+      msg.innerHTML = '<div class="msg">Enregistrement et recalage du planning…</div>';
+      document.getElementById('se-go').disabled = true;
+      try {
+        const res = await fetch(`${API}/saisir-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: dateLocaleIso(), saisies, recaler: document.getElementById('se-recaler').checked }) });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.error || 'Erreur inconnue');
+        afficherBilanProduction(d);
+        chargerDonneesReelles();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; document.getElementById('se-go').disabled = false; }
+    });
+  }
+
   async function ouvrirModaleAvancementOf(ofUuid, ofNumero) {
     afficherModale(`<h3>Avancement — ${esc(ofNumero)}</h3><div id="av-corps"><div class="msg">Chargement…</div></div>
       <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="av-saisie">Saisir la production du jour</button></div>`, 'large');
@@ -1312,10 +1406,11 @@
         <div style="margin-bottom:14px;"><div style="display:flex;justify-content:space-between;align-items:baseline;"><strong>${esc(d.of.titres ? d.of.titres.nom : '')}</strong><span><strong style="font-size:20px;">${d.avancement_global} %</strong> <span class="plan-note">global${d.of.delai ? ' · délai ' + dateCourte(d.of.delai) : ''}</span></span></div>${jaugeAvancement(d.avancement_global, null, false)}</div>
         ${etapes.map(e => `<div style="padding:8px 0;border-top:1px solid var(--line);">
           <div style="display:flex;justify-content:space-between;gap:10px;"><span><strong>${esc(e.operation)}</strong> <span class="plan-note">${esc(e.machine || 'manuel')}</span></span>
-            <span>${e.statut === 'terminé' ? '<span class="tag ok">Terminée</span>' : (e.en_retard ? '<span class="tag danger">En retard</span>' : '')} <strong>${e.avancement_pct} %</strong></span></div>
+            <span>${e.statut === 'terminé' ? '<span class="tag ok">Terminée</span>' : (e.en_retard ? '<span class="tag danger">En retard</span>' : '')} <strong>${e.avancement_pct} %</strong> <button class="btn av-edit" data-g="${e.gamme_id}" style="padding:2px 10px;font-size:12px;margin-left:6px;">Saisies</button></span></div>
           ${jaugeAvancement(e.avancement_pct, e.statut === 'terminé' ? null : e.prevu_pct, e.en_retard)}
           <div class="plan-note">${e.quantite_totale ? nbFr(e.quantite_realisee) + ' / ' + nbFr(e.quantite_totale) + ' · ' : ''}${e.debut_prevu ? 'prévu du ' + dateCourte(e.debut_prevu) + ' au ' + dateCourte(e.fin_prevue) : 'non planifiée'}${e.fin_reelle ? ' · terminée le ' + dateCourte(e.fin_reelle) : ''}</div></div>`).join('')}
-        <div class="plan-note" style="margin-top:8px;">Le trait sur la jauge indique l'avancement prévu à ce jour d'après le planning.</div>`;
+        <div class="plan-note" style="margin-top:8px;">Le trait sur la jauge indique l'avancement prévu à ce jour d'après le planning. « Saisies » permet d'ajouter, corriger ou supprimer les données de production d'une opération.</div>`;
+      document.querySelectorAll('.av-edit').forEach(b => b.addEventListener('click', () => ouvrirModaleSaisiesEtape(b.dataset.g, ofUuid, ofNumero)));
     } catch (e) { document.getElementById('av-corps').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
   }
 
