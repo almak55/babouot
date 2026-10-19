@@ -17,6 +17,7 @@
 // pour chaque OF dont une étape est en retard sur le planning, replanifie la part
 // restante (et les étapes qui en dépendent) à partir du jour ouvré suivant.
 
+const { etapesBloquees } = require('./lib/dependances');
 const { getSupabase } = require('./lib/supabaseclient');
 const { majAvancementOf, recalerSiRetard } = require('./lib/recalage');
 const planifier = require('./planifier-of');
@@ -49,6 +50,14 @@ exports.handler = async (event) => {
       if (quantite === null && pctSaisi === null && !s.termine) continue;   // rien saisi pour cette ligne
       if (quantite !== null && quantite < 0) { resultats.push({ gamme_id: s.gamme_id, erreur: 'Quantité négative.' }); continue; }
       if (pctSaisi !== null && (pctSaisi < 0 || pctSaisi > 100)) { resultats.push({ gamme_id: s.gamme_id, erreur: 'Avancement entre 0 et 100 %.' }); continue; }
+
+      // Une étape qui attend la fin d'une étape précédente non terminée ne peut pas être déclarée terminée.
+      if (s.termine || (pctSaisi !== null && pctSaisi >= 99.99)) {
+        const { data: tout, error: tErr } = await supabase.from('gammes_operatoires').select('id, sequence, statut, predecesseurs, dependances, operations(nom)').eq('of_id', g.of_id);
+        if (tErr) throw tErr;
+        const bloq = etapesBloquees(tout)[g.id];
+        if (bloq) { resultats.push({ gamme_id: g.id, operation: g.operations.nom, erreur: `${g.operations.nom} ne peut pas être terminée : elle attend la fin de ${bloq.join(', ')}.` }); continue; }
+      }
 
       const ligne = {
         gamme_operatoire_id: g.id, of_id: g.of_id, date,
