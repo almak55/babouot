@@ -44,7 +44,7 @@ exports.handler = async (event) => {
     // 1. Charger les OF actifs, triés par priorité puis délai.
     const { data: ordres, error: ordresError } = await supabase
       .from('ordres_fabrication')
-      .select('id, numero, priorite, delai, statut')
+      .select('*')
       // Contrôle de validation mis en pause : on reprend tous les OF
       // actifs, validés ou non (pour réactiver, retirer 'en attente
       // de validation' de cette liste).
@@ -54,7 +54,12 @@ exports.handler = async (event) => {
     ordres.sort((a, b) => {
       const p = (PRIORITE_ORDRE[a.priorite] ?? 2) - (PRIORITE_ORDRE[b.priorite] ?? 2);
       if (p !== 0) return p;
-      return new Date(a.delai || '9999-12-31') - new Date(b.delai || '9999-12-31');
+      const d = new Date(a.delai || '9999-12-31') - new Date(b.delai || '9999-12-31');
+      if (d !== 0) return d;
+      // Sans date de livraison : ordre de passage décidé à l'import des fiches (modifiable), puis date de réception du papier.
+      const r = (a.rang_priorite ?? 1e9) - (b.rang_priorite ?? 1e9);
+      if (r !== 0) return r;
+      return new Date(a.date_reception || '9999-12-31') - new Date(b.date_reception || '9999-12-31');
     });
 
     // 2. Charger tout ce qui est nécessaire une seule fois (évite les
