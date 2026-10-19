@@ -1777,13 +1777,14 @@
       afficherModale(`<h3>Gamme opératoire — ${ofNumero}</h3><div id="gamme-list" class="empty">Chargement…</div>`);
       try {
         const res = await fetch(`${API}/gammes-ordre?of_id=${ofUuid}`);
-        const gammes = await res.json();
+        const gammes = await lireJson(res);
+        if (!res.ok || !Array.isArray(gammes)) throw new Error((gammes && gammes.error) || `réponse inattendue du serveur (HTTP ${res.status})`);
         const list = document.getElementById('gamme-list');
         const ETAT_LABEL2 = { 'à planifier': 'À planifier', 'planifié': 'Planifié', 'en cours': 'En cours', 'terminé': 'Terminé' };
         list.className = '';
         list.innerHTML = gammes.map(g => `
           <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px;">
-            <span>${g.operation.nom}</span>
+            <span>${g.operation ? g.operation.nom : '(opération supprimée)'}</span>
             <span class="tag ${g.statut==='terminé'?'ok':g.statut==='à planifier'?'warn':'ok'}">${ETAT_LABEL2[g.statut] || g.statut}</span>
           </div>
         `).join('') || '<div class="empty">Aucune étape.</div>';
@@ -4280,7 +4281,8 @@
       noteEtape.innerHTML = '';
       try {
         const res = await fetch(`${API}/gammes-ordre?of_id=${ofSel}`);
-        const gammes = await res.json();
+        const gammes = await lireJson(res);
+        if (!res.ok) { etapeSelect.innerHTML = `<option value="">Erreur : ${esc(gammes.error || 'HTTP ' + res.status)}</option>`; return; }
         if (!Array.isArray(gammes) || gammes.length === 0) {
           etapeSelect.innerHTML = `<option value="">Cet OF n'a aucune étape de gamme</option>`;
           return;
