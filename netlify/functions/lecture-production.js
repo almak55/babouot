@@ -7,6 +7,7 @@
 
 const { getSupabase } = require('./lib/supabaseclient');
 const { avancementOf, dureeCreneau } = require('./lib/recalage');
+const { etapesBloquees } = require('./lib/dependances');
 
 const hhmm = (t) => (t ? String(t).slice(0, 5) : null);
 const nombre = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
@@ -60,6 +61,14 @@ exports.handler = async (event) => {
     ]);
     for (const r of [gRes, prodRes, persRes]) if (r.error) throw r.error;
     const nom = Object.fromEntries(persRes.data.map((x) => [x.id, x.nom]));
+    // Étapes qui attendent la fin d'une étape précédente non terminée : elles ne peuvent pas être déclarées terminées.
+    const ofIds = [...new Set(creneaux.map((c) => c.of_id).filter(Boolean))];
+    let bloquees = {};
+    if (ofIds.length) {
+      const { data: toutes, error: gErr } = await supabase.from('gammes_operatoires').select('id, sequence, statut, predecesseurs, dependances, of_id, operations(nom)').in('of_id', ofIds);
+      if (gErr) throw gErr;
+      ofIds.forEach((id) => { Object.assign(bloquees, etapesBloquees(toutes.filter((g) => g.of_id === id))); });
+    }
 
     const taches = gids.map((gid) => {
       const cs = creneaux.filter((c) => c.gamme_operatoire_id === gid);
@@ -74,7 +83,7 @@ exports.handler = async (event) => {
         debut: debuts[0] || null, fin: fins[fins.length - 1] || null, personnel: pers.map((id) => nom[id]).filter(Boolean),
         quantite_totale: nombre(g.parametres && g.parametres.quantite) || of.quantite || null,
         avancement_pct: Math.round(Number(g.avancement_pct || 0) * 10) / 10, quantite_realisee: nombre(g.quantite_realisee) || 0,
-        statut: g.statut || '', saisie: sais,
+        statut: g.statut || '', saisie: sais, bloquee_par: bloquees[gid] || [],
       };
     });
     return { statusCode: 200, body: JSON.stringify({ date: p.date, taches }) };
