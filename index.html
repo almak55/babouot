@@ -1049,7 +1049,7 @@
       msg.innerHTML = '<div class="msg">Validation…</div>';
       try {
         const res = await fetch(`${API}/valider-of`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: ofUuid, forcer: true, maintenant: maintenantLocal() }) });
-        const d = await res.json();
+        const d = await lireJson(res);
         if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         fermerModale(); chargerDonneesReelles();
         afficherResultatValidation(ofUuid, ofNumero, d);
@@ -1152,7 +1152,7 @@
         const mime = file.type || (nom.endsWith('.pdf') ? 'application/pdf' : nom.endsWith('.csv') ? 'text/csv' : nom.endsWith('.xls') ? 'application/vnd.ms-excel' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         const base64 = await fichierEnBase64(file);
         const res = await fetch(`${API}/extraire-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file_base64: base64, file_name: file.name, mime_type: mime, date: document.getElementById('sp-date').value }) });
-        const d = await res.json();
+        const d = await lireJson(res);
         if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         // Le document porte sa propre date : on bascule sur cette journée.
         if (d.date && d.date !== document.getElementById('sp-date').value) {
@@ -1178,7 +1178,7 @@
       box.innerHTML = '<div class="msg">Chargement…</div>';
       try {
         const res = await fetch(`${API}/lecture-production?date=${date}`);
-        const d = await res.json();
+        const d = await lireJson(res);
         if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         taches = d.taches;
         lus = {};
@@ -1207,7 +1207,7 @@
       document.getElementById('sp-go').disabled = true;
       try {
         const res = await fetch(`${API}/saisir-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, saisies, recaler: document.getElementById('sp-recaler').checked }) });
-        const d = await res.json();
+        const d = await lireJson(res);
         if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         afficherBilanProduction(d);
         chargerDonneesReelles();
@@ -1225,7 +1225,7 @@
     let t;
     try {
       const res = await fetch(`${API}/lecture-production?date=${date}`);
-      const d = await res.json();
+      const d = await lireJson(res);
       if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
       t = d.taches.find(x => x.gamme_id === gammeId);
       if (!t) throw new Error('Tâche introuvable pour ce jour.');
@@ -1263,7 +1263,7 @@
       document.getElementById('mt-go').disabled = true;
       try {
         const res = await fetch(`${API}/saisir-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, saisies: [saisie], recaler: document.getElementById('mt-recaler').checked }) });
-        const d = await res.json();
+        const d = await lireJson(res);
         if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         afficherBilanProduction(d);
         chargerDonneesReelles();
@@ -1304,7 +1304,7 @@
     let t, hist;
     try {
       const res = await fetch(`${API}/lecture-production?gamme_id=${gammeId}`);
-      const d = await res.json();
+      const d = await lireJson(res);
       if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
       t = d.tache; hist = d.historique;
     } catch (e) {
@@ -1384,7 +1384,7 @@
       document.getElementById('se-go').disabled = true;
       try {
         const res = await fetch(`${API}/saisir-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: dateLocaleIso(), saisies, recaler: document.getElementById('se-recaler').checked }) });
-        const d = await res.json();
+        const d = await lireJson(res);
         if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         afficherBilanProduction(d);
         chargerDonneesReelles();
@@ -1399,7 +1399,7 @@
     document.getElementById('av-saisie').addEventListener('click', () => ouvrirModaleSaisieProduction());
     try {
       const res = await fetch(`${API}/lecture-production?of_id=${ofUuid}`);
-      const d = await res.json();
+      const d = await lireJson(res);
       if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
       const etapes = d.etapes.slice().sort((a, b) => (a.debut_prevu || '9').localeCompare(b.debut_prevu || '9'));
       document.getElementById('av-corps').innerHTML = `
@@ -1468,7 +1468,7 @@
     let S, R, info, devisId = null, devisNumero = null;
     const post = async (corps) => {
       const res = await fetch(`${API}/calculer-devis`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
-      const d = await res.json();
+      const d = await lireJson(res);
       if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
       return d;
     };
@@ -1557,7 +1557,7 @@
       lire();
       const statutSel = document.getElementById('dv-statut');
       const res = await fetch(`${API}/gerer-devis`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: devisId || undefined, of_id: ofUuid, client, titre, notes, statut: statutSel ? statutSel.value : undefined, saisie: S }) });
-      const d = await res.json();
+      const d = await lireJson(res);
       if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
       R = d.resultat;
       if (!devisId) { devisId = d.id; devisNumero = d.numero; info.saisis.unshift({ id: d.id, numero: d.numero, total_ht: R.totaux.ht, statut: 'brouillon' }); structure(); }
@@ -1703,7 +1703,7 @@
         msg.innerHTML = '<div class="msg">Déplanification…</div>';
         try {
           const res = await fetch(`${API}/deplanifier-etape`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: ofUuid }) });
-          const d = await res.json();
+          const d = await lireJson(res);
           if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
           toast(d.deplanifiees.length ? `${d.deplanifiees.length} étape(s) déplanifiée(s).${d.conservees.length ? ' ' + d.conservees.length + ' conservée(s) (déjà démarrées).' : ''}` : 'Aucune étape planifiée à retirer.');
           fermerModale(); chargerDonneesReelles();
@@ -2437,7 +2437,7 @@
     let donnees;
     const charger = async () => {
       const res = await fetch(`${API}/profils-machine?machine_id=${machine.id}`);
-      const d = await res.json();
+      const d = await lireJson(res);
       if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
       return d;
     };
@@ -2538,7 +2538,7 @@
       if (!libelle || !libelle.trim()) return;
       try {
         const res = await fetch(`${API}/profils-machine`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'ajouter_type', libelle }) });
-        const d = await res.json();
+        const d = await lireJson(res);
         if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         donnees.types.push({ code: d.code, libelle: d.libelle });
         $('pf-type').insertAdjacentHTML('beforeend', `<option value="${esc(d.code)}">${esc(d.libelle)}</option>`);
@@ -2558,7 +2558,7 @@
             unite_cadence: $('pf-unite').value.trim() || null, quantite_formule: $('pf-formule').value.trim() || null,
           }),
         });
-        const d = await res.json();
+        const d = await lireJson(res);
         if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         toast('Profil enregistré.');
         donnees = await charger(); dessiner(); $('pf-msg').innerHTML = '';
@@ -2913,7 +2913,7 @@
       msg.innerHTML = '<div class="msg">Enregistrement…</div>';
       try {
         const res = await fetch(`${API}/gerer-caracteristiques`, { method: edition ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
-        const d = await res.json();
+        const d = await lireJson(res);
         if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         toast(edition ? 'Caractéristique mise à jour.' : `Caractéristique « ${d.cle} » créée.`); fermerModale(); render();
       } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
@@ -2964,7 +2964,7 @@
       try {
         const res = await fetch(`${API}/gerer-temps-standards`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'copier', operation_id: $('cp-op').value, source_machine_id: $('cp-source').value || null, cibles, remplacer: $('cp-remplacer').checked }) });
-        const d = await res.json();
+        const d = await lireJson(res);
         if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         const ign = d.ignorees.length ? ` ${d.ignorees.length} ignorée(s) (déjà des phases : ${d.ignorees.map(x => esc(nomMachine(x.machine_id))).join(', ')}).` : '';
         toast(`Phases copiées vers ${d.copiees.length} machine(s).${ign}`, d.copiees.length ? 'ok' : 'error');
@@ -2977,7 +2977,7 @@
   async function exporterExcel() {
     try {
       const res = await fetch(`${API}/exporter-temps-standards`);
-      const d = await res.json();
+      const d = await lireJson(res);
       if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
       const bin = atob(d.fichier_base64); const octets = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) octets[i] = bin.charCodeAt(i);
@@ -3848,6 +3848,17 @@
 
   // ---------- Écriture : création d'OF et affectation planning ----------
   const API = '/.netlify/functions';
+  // Lecture tolérante d'une réponse : une page d'erreur HTML (502, délai dépassé…) donne un vrai message au lieu de « Unexpected token '<' ».
+  async function lireJson(res) {
+    const texte = await res.text();
+    try { return JSON.parse(texte); }
+    catch (e) {
+      const brut = texte.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+      return { error: res.status === 502 || res.status === 504
+        ? `Le serveur n'a pas répondu à temps ou a planté (HTTP ${res.status}). Réessayez en décochant « Décaler automatiquement le planning » ; si l'erreur persiste, consultez les logs Netlify de la fonction.${brut ? ' [' + brut + ']' : ''}`
+        : `Réponse inattendue du serveur (HTTP ${res.status}) ${brut}` };
+    }
+  }
   let referentielsCache = null;
 
   async function getReferentiels() {
@@ -4075,7 +4086,7 @@
       msg.innerHTML = `<div class="msg">Déplanification…</div>`;
       try {
         const res = await fetch(`${API}/deplanifier-etape`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
-        const d = await res.json();
+        const d = await lireJson(res);
         if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         toast(`${d.deplanifiees.length} étape(s) déplanifiée(s).${d.conservees.length ? ' ' + d.conservees.length + ' conservée(s) (déjà démarrées).' : ''}`);
         msg.innerHTML = '';
