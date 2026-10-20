@@ -16,6 +16,7 @@
 // }
 
 const { getSupabase } = require('./lib/supabaseclient');
+const { purgerObsoletes } = require('./lib/obsoletes');
 
 exports.handler = async (event) => {
   try {
@@ -30,6 +31,7 @@ exports.handler = async (event) => {
     }
 
     const supabase = getSupabase();
+    await purgerObsoletes(supabase);   // créneaux restants d'étapes déjà terminées
 
     const [machinesRes, personnelRes, competencesRes, machinesPersRes, ordresRes, stocksRes, planningRes, dispoRes] = await Promise.all([
       supabase.from('machines').select('id, code, nom').eq('actif', true).order('code'),
