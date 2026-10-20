@@ -854,6 +854,7 @@
           </div>
           <button class="btn primary" id="add-of-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Affecter un OF</button>
         </div>
+        <div id="alerte-absences">${bandeauAbsencesHtml()}</div>
         <div class="gantt-wrap"><table class="gantt" id="gantt-table"></table></div>
         <div class="legend">
           <span><i style="background:var(--accent-teal)"></i>Dans les temps</span>
@@ -3872,6 +3873,7 @@
       state.planning = planningParMachine;
 
       render();
+      chargerConflitsAbsence();
     } catch (e) {
       console.warn('Backend indisponible, affichage des données de démonstration.', e);
       render();
@@ -3881,6 +3883,184 @@
   // ---------- Écriture : création d'OF et affectation planning ----------
   const API = '/.netlify/functions';
   // Lecture tolérante d'une réponse : une page d'erreur HTML (502, délai dépassé…) donne un vrai message au lieu de « Unexpected token '<' ».
+  // ---------- Absences : créneaux touchés, remplaçants proposés, effet sur le délai ----------
+  function bandeauAbsencesHtml() {
+    const n = (state.conflitsAbsence || []).length;
+    if (!n) return '';
+    return `<div class="msg error" style="margin:0 0 10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <span>⚠️ <strong>${n} créneau(x) planifié(s) avec une personne absente</strong> (14 prochains jours).</span>
+      <button class="btn" data-conflits-open>Voir et résoudre</button></div>`;
+  }
+
+  async function chargerConflitsAbsence() {
+    try {
+      const res = await fetch(`${API}/conflits-absence?depuis=${AUJOURDHUI_ISO}&jours=14`);
+      const d = await lireJson(res);
+      state.conflitsAbsence = res.ok && Array.isArray(d.conflits) ? d.conflits : [];
+    } catch (e) { state.conflitsAbsence = []; }
+    const zone = document.getElementById('alerte-absences');
+    if (zone) zone.innerHTML = bandeauAbsencesHtml();
+  }
+  document.addEventListener('click', (ev) => {
+    if (ev.target.closest && ev.target.closest('[data-conflits-open]')) ouvrirModaleAbsences();
+  });
+
+  async function appelerAbsence(corps) {
+    const res = await fetch(`${API}/conflits-absence`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+    const d = await lireJson(res);
+    if (!res.ok) throw new Error(d.error || `Erreur serveur (HTTP ${res.status})`);
+    return d;
+  }
+
+  // Proposition automatique : un remplaçant (le mieux classé) s'il en existe, sinon la meilleure replanification
+  // (délai tenu d'abord, puis fin d'OF la plus proche).
+  async function proposerAbsence(c) {
+    const base = { planning_jour_id: c.planning_jour_id, absent_id: c.absent.id };
+    if (c.remplacants.length) {
+      const r = c.remplacants[0];
+      return { type: 'remplacer', remplacant: r, texte: `Remplacer ${c.absent.nom} par <strong>${esc(r.nom)}</strong> — ${r.deja_travaille ? 'a déjà travaillé sur cette tâche' : 'compétent(e) et libre, ' + r.charge + ' créneau(x) planifié(s)'} ; le planning ne bouge pas.` };
+    }
+    const essais = [];
+    for (const option of ['reduit', 'reporter']) {
+      try { essais.push({ option, d: await appelerAbsence({ ...base, action: 'apercu', option }) }); } catch (e) { /* option impossible */ }
+    }
+    if (!essais.length) return null;
+    essais.sort((x, y) => (Number(y.d.of.respecte_delai === true) - Number(x.d.of.respecte_delai === true)) || String(x.d.of.fin).localeCompare(String(y.d.of.fin)));
+    const m = essais[0];
+    const libelle = m.option === 'reduit' ? `Continuer sans ${esc(c.absent.nom)}` : `Attendre le retour de ${esc(c.absent.nom)}`;
+    return { type: 'replanifier', option: m.option, apercu: m.d, texte: `<strong>${libelle}</strong> — tâche terminée le ${fmtDateHeure(m.d.tache.fin)}, OF le ${fmtDateHeure(m.d.of.fin)} (${m.d.of.respecte_delai === false ? '<span class="tag danger">délai dépassé</span>' : '<span class="tag ok">délai respecté</span>'}).` };
+  }
+  async function appliquerProposition(c, prop) {
+    const base = { planning_jour_id: c.planning_jour_id, absent_id: c.absent.id };
+    if (prop.type === 'remplacer') return appelerAbsence({ ...base, action: 'remplacer', remplacant_id: prop.remplacant.id, portee: 'tache' });
+    return appelerAbsence({ ...base, action: 'appliquer', option: prop.option });
+  }
+
+  function modeAbsences() { try { return localStorage.getItem('absences_mode') === 'manuel' ? 'manuel' : 'auto'; } catch (_) { return 'auto'; } }
+
+  function ouvrirModaleAbsences() {
+    const liste = state.conflitsAbsence || [];
+    const mode = modeAbsences();
+    const jourLong = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+    const blocs = liste.map((c, i) => {
+      const remp = c.remplacants.length
+        ? `<select class="ab-remp">${c.remplacants.map(r => `<option value="${r.id}">${esc(r.nom)}${r.deja_travaille ? ' — a déjà travaillé sur cette tâche' : ''} · ${r.charge} créneau(x)</option>`).join('')}</select>
+           <label class="plan-note"><input type="checkbox" class="ab-tache"> pour tous les créneaux de cette tâche où ${esc(c.absent.nom)} est absent(e)</label>
+           <button class="btn primary ab-remplacer">Remplacer</button>`
+        : `<span class="plan-note">Aucune personne compétente et libre sur ce créneau.</span>`;
+      return `<div class="plan-step" data-i="${i}">
+        <div class="step-head"><strong>${esc(jourLong(c.date))}${c.heure_debut ? ' ' + c.heure_debut + '–' + c.heure_fin : ''}</strong>
+          <span class="plan-note">${esc(c.of || '')}${c.titre ? ' — ' + esc(c.titre) : ''} · ${esc(c.operation)}${c.machine ? ' · ' + esc(c.machine) : ''}${c.avancement_pct ? ' · ' + Math.round(c.avancement_pct) + ' % fait' : ''}</span></div>
+        <div><span class="tag danger">${esc(c.absent.nom)} ${c.absent.statut === 'en arrêt' ? 'en arrêt' : 'absent(e)'}</span>
+          <span class="plan-note"> ${c.absent.motif ? esc(c.absent.motif) + ' · ' : ''}équipe prévue : ${esc(c.equipe.map(p => p.nom).join(', '))}</span></div>
+        ${mode === 'auto' ? `<div class="msg ab-prop" style="margin:8px 0;"><div class="plan-note">Proposition du logiciel : calcul…</div></div>` : ''}
+        <details class="pl-details" ${mode === 'manuel' ? 'open' : ''}><summary>Choisir moi-même</summary>
+          <div class="field"><label>1. Remplacer ${esc(c.absent.nom)} <span style="font-weight:400">(le planning ne bouge pas)</span></label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${remp}</div></div>
+          <div class="field"><label>2. Ou replanifier le temps restant <span style="font-weight:400">(effet calculé avant d'appliquer)</span></label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn ab-apercu" data-option="reduit">Continuer sans ${esc(c.absent.nom)}</button>
+              <button class="btn ab-apercu" data-option="reporter">Attendre son retour</button></div>
+            <div class="ab-res"></div></div>
+        </details>
+      </div>`;
+    }).join('');
+    afficherModale(`<h3>Absences et planning</h3>
+      <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+        <label><input type="radio" name="ab-mode" value="auto" ${mode === 'auto' ? 'checked' : ''}> Le logiciel propose une solution</label>
+        <label><input type="radio" name="ab-mode" value="manuel" ${mode === 'manuel' ? 'checked' : ''}> Je choisis moi-même</label>
+        ${mode === 'auto' && liste.length > 1 ? '<button class="btn primary" id="ab-tout" disabled>Accepter toutes les propositions</button>' : ''}
+      </div>
+      <div class="plan-hint">Rien n'est modifié sans votre clic. « Remplacer » garde le même créneau ; les autres solutions replanifient le temps restant de la tâche (et des étapes qui en dépendent) et montrent l'effet sur le délai.</div>
+      ${blocs || '<div class="empty">Aucun conflit : toutes les personnes planifiées sont présentes.</div>'}
+      <div id="m-msg"></div><div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`, 'xlarge');
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.querySelectorAll('input[name="ab-mode"]').forEach(r => r.addEventListener('change', () => {
+      try { localStorage.setItem('absences_mode', r.value); } catch (_) { /* préférence non mémorisée */ }
+      ouvrirModaleAbsences();
+    }));
+    const msg = (h) => { document.getElementById('m-msg').innerHTML = h; };
+    const termine = () => { fermerModale(); chargerDonneesReelles().then(chargerConflitsAbsence); };
+
+    const propositions = new Map();
+    document.querySelectorAll('.plan-step[data-i]').forEach(bloc => {
+      const c = liste[Number(bloc.dataset.i)];
+      const base = { planning_jour_id: c.planning_jour_id, absent_id: c.absent.id };
+      const rem = bloc.querySelector('.ab-remplacer');
+      if (rem) rem.addEventListener('click', async () => {
+        rem.disabled = true;
+        try {
+          const d = await appelerAbsence({ ...base, action: 'remplacer', remplacant_id: bloc.querySelector('.ab-remp').value, portee: bloc.querySelector('.ab-tache').checked ? 'tache' : 'creneau' });
+          toast(`${d.remplaces.length} créneau(x) remplacé(s).`); termine();
+        } catch (e) { msg(`<div class="msg error">${esc(e.message)}</div>`); rem.disabled = false; }
+      });
+      bloc.querySelectorAll('.ab-apercu').forEach(btn => btn.addEventListener('click', async () => {
+        const zone = bloc.querySelector('.ab-res');
+        zone.innerHTML = '<div class="plan-note">Calcul…</div>';
+        try {
+          const d = await appelerAbsence({ ...base, action: 'apercu', option: btn.dataset.option });
+          const tag = d.of.respecte_delai === false ? '<span class="tag danger">Délai dépassé</span>' : (d.of.respecte_delai ? '<span class="tag ok">Délai respecté</span>' : '');
+          const jours = d.of.retard_min ? Math.round(d.of.retard_min / 1440) : 0;
+          zone.innerHTML = `<div class="plan-resume" style="margin-top:8px;">
+              <div><span class="plan-k">Tâche</span><strong>${d.tache.debut ? fmtDateHeure(d.tache.debut) + ' → ' + fmtDateHeure(d.tache.fin) : '—'}</strong></div>
+              <div><span class="plan-k">Fin de l'OF</span><strong>${fmtDateHeure(d.of.fin)}</strong></div>
+              <div>${tag} ${d.of.respecte_delai === false ? `<span class="plan-note">(≈ ${jours >= 1 ? jours + ' jour(s)' : 'moins d\'une journée'} de retard)</span>` : ''}</div></div>
+              <div class="plan-note">${d.tache.personnes.length ? 'Équipe : ' + esc(d.tache.personnes.join(', ')) : 'Personnel choisi automatiquement'}</div>
+              <button class="btn primary ab-go" style="margin-top:6px;">Appliquer cette solution</button>`;
+          zone.querySelector('.ab-go').addEventListener('click', async (e2) => {
+            e2.target.disabled = true;
+            try { await appelerAbsence({ ...base, action: 'appliquer', option: btn.dataset.option }); toast('Planning replanifié.'); termine(); }
+            catch (er) { zone.insertAdjacentHTML('beforeend', `<div class="msg error">${esc(er.message)}</div>`); e2.target.disabled = false; }
+          });
+        } catch (e) { zone.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+      }));
+    });
+
+    if (mode !== 'auto') return;
+    // Mode automatique : une proposition par créneau, calculée l'une après l'autre (limite de temps du serveur).
+    (async () => {
+      for (const bloc of document.querySelectorAll('.plan-step[data-i]')) {
+        const c = liste[Number(bloc.dataset.i)];
+        const zone = bloc.querySelector('.ab-prop');
+        if (!zone) return;
+        let prop = null;
+        try { prop = await proposerAbsence(c); } catch (e) { prop = null; }
+        if (!prop) { zone.innerHTML = '<div class="plan-note">Aucune solution automatique : choisissez ci-dessous.</div>'; bloc.querySelector('details').open = true; continue; }
+        propositions.set(bloc, { c, prop });
+        zone.innerHTML = `<div class="plan-note">Proposition du logiciel</div><div>${prop.texte}</div><button class="btn primary ab-accepter" style="margin-top:6px;">Accepter</button>`;
+        zone.querySelector('.ab-accepter').addEventListener('click', async (ev) => {
+          ev.target.disabled = true;
+          try { await appliquerProposition(c, prop); toast('Proposition appliquée.'); termine(); }
+          catch (er) { msg(`<div class="msg error">${esc(er.message)}</div>`); ev.target.disabled = false; }
+        });
+      }
+      const tout = document.getElementById('ab-tout');
+      if (tout && propositions.size) {
+        tout.disabled = false;
+        tout.addEventListener('click', async () => {
+          tout.disabled = true;
+          // Les replanifications changent le planning : on relit les conflits et on traite un créneau à la fois.
+          let faits = 0; let dernierId = null;
+          try {
+            for (let tour = 0; tour < 30; tour++) {
+              msg(`<div class="msg">Application des propositions… (${faits} faite(s))</div>`);
+              const r = await fetch(`${API}/conflits-absence?depuis=${AUJOURDHUI_ISO}&jours=14`);
+              const d = await lireJson(r);
+              const reste = (r.ok && d.conflits) || [];
+              if (!reste.length) break;
+              const c = reste[0];
+              if (c.planning_jour_id === dernierId) { msg(`<div class="msg error">Le conflit de ${esc(c.absent.nom)} le ${esc(c.date)} persiste : choisissez la solution manuellement.</div>`); break; }
+              dernierId = c.planning_jour_id;
+              const prop = await proposerAbsence(c);
+              if (!prop) { msg(`<div class="msg error">Aucune solution automatique pour ${esc(c.absent.nom)} le ${esc(c.date)} (${esc(c.operation)}) : choisissez-la manuellement.</div>`); break; }
+              await appliquerProposition(c, prop); faits++;
+            }
+            toast(`${faits} proposition(s) appliquée(s).`); termine();
+          } catch (er) { msg(`<div class="msg error">${esc(er.message)}</div>`); tout.disabled = false; }
+        });
+      }
+    })();
+  }
+
   async function lireJson(res) {
     const texte = await res.text();
     try { return JSON.parse(texte); }
