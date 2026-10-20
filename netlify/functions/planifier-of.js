@@ -91,19 +91,38 @@ exports.handler = async (event) => {
     // ---------- 2. Quelles étapes planifier, lesquelles sont figées ----------
     const gammeIds = etapesCalc.map((e) => e.gamme_id);
     const { data: lignesOf, error: lignesOfError } = gammeIds.length
-      ? await supabase.from('planning_jour').select('id, gamme_operatoire_id, date, heure_fin, statut').in('gamme_operatoire_id', gammeIds).neq('statut', 'annulé')
+      ? await supabase.from('planning_jour').select('id, gamme_operatoire_id, date, heure_debut, heure_fin, statut, personnel_id, planning_jour_personnel(personnel_id)').in('gamme_operatoire_id', gammeIds).neq('statut', 'annulé')
       : { data: [], error: null };
     if (lignesOfError) throw lignesOfError;
+    // Avancement des étapes (pour répartir le TEMPS RESTANT d'une tâche déjà entamée entre les personnes).
+    const { data: avRows } = gammeIds.length
+      ? await supabase.from('gammes_operatoires').select('id, avancement_pct').in('id', gammeIds)
+      : { data: [] };
+    const avancementDe = Object.fromEntries((avRows || []).map((r) => [r.id, Number(r.avancement_pct || 0)]));
 
     const idsReplan = new Set(Array.isArray(body.etapes_a_replanifier) ? body.etapes_a_replanifier : []);
     const restant = body.restant && typeof body.restant === 'object' ? body.restant : {};
     const depuisMin = lireDateHeure(body.depuis, '00:00');
+    // Tâche déjà entamée à laquelle on impose du personnel : le temps RESTANT est replanifié et réparti entre
+    // les personnes (celles déjà là comprises). Le passé est conservé.
+    const renforts = new Set(etapesCalc
+      .filter((e) => e.statut === 'en cours' && etapesImposees.some((x) => x.gamme_id === e.gamme_id && Array.isArray(x.personnel_ids) && x.personnel_ids.length))
+      .map((e) => e.gamme_id));
     const aPlanifier = new Set(etapesCalc
-      .filter((e) => e.statut === 'à planifier' || (replanifier && e.statut === 'planifié') || (idsReplan.has(e.gamme_id) && e.statut !== 'terminé'))
+      .filter((e) => e.statut === 'à planifier' || (replanifier && e.statut === 'planifié') || (idsReplan.has(e.gamme_id) && e.statut !== 'terminé') || renforts.has(e.gamme_id))
       .map((e) => e.gamme_id));
     // Avec « depuis », on garde les créneaux déjà passés (historique de ce qui s'est réellement déroulé).
+    const aTronquer = [];   // créneau d'une tâche entamée en cours de journée : on garde ce qui est passé
     const lignesARemplacer = lignesOf.filter((l) => aPlanifier.has(l.gamme_operatoire_id)
-      && (depuisMin === null || enMinutes(l.date, '00:00') + (l.heure_fin ? hhmm(String(l.heure_fin).slice(0, 5)) : MIN_JOUR) > depuisMin));
+      && (() => {
+        const renfort = renforts.has(l.gamme_operatoire_id);
+        const coupure = renfort ? Math.max(maintenantMin, depuisMin ?? -Infinity) : depuisMin;
+        const fin = enMinutes(l.date, '00:00') + (l.heure_fin ? hhmm(String(l.heure_fin).slice(0, 5)) : MIN_JOUR);
+        if (coupure === null || fin <= coupure) return false;
+        const debut = enMinutes(l.date, '00:00') + (l.heure_debut ? hhmm(String(l.heure_debut).slice(0, 5)) : 0);
+        if (renfort && debut < coupure) { aTronquer.push({ id: l.id, heure_fin: heureDe(coupure) }); return false; }
+        return true;
+      })());
     const idsARemplacer = new Set(lignesARemplacer.map((l) => l.id));
 
     // ---------- 3. Occupation des machines et du personnel ----------
@@ -128,7 +147,8 @@ exports.handler = async (event) => {
     const ajouter = (cat, id, iv) => { (occupation[cat][id] ??= []).push(iv); };
 
     planRes.data.filter((l) => !idsARemplacer.has(l.id)).forEach((l) => {
-      const iv = intervalleJournee(l.date, l.heure_debut && String(l.heure_debut).slice(0, 5), l.heure_fin && String(l.heure_fin).slice(0, 5));
+      const tronque = aTronquer.find((t) => t.id === l.id);
+      const iv = intervalleJournee(l.date, l.heure_debut && String(l.heure_debut).slice(0, 5), tronque ? tronque.heure_fin : (l.heure_fin && String(l.heure_fin).slice(0, 5)));
       if (l.machine_id) ajouter('machines', l.machine_id, iv);
       const personnes = new Set((l.planning_jour_personnel || []).map((x) => x.personnel_id));
       if (l.personnel_id) personnes.add(l.personnel_id);
@@ -191,7 +211,7 @@ exports.handler = async (event) => {
       }
       // Étape déjà entamée : seule la part restante est replanifiée. La mise en route et le réglage sont
       // déjà faits ; le nettoyage reste dû ; le reste (cadence, par élément, formule) est proratisé.
-      const rest = restant[e.gamme_id];
+      const rest = restant[e.gamme_id] !== undefined ? restant[e.gamme_id] : (renforts.has(e.gamme_id) ? Math.max(0, 1 - avancementDe[e.gamme_id] / 100) : undefined);
       if (rest !== undefined && Number(rest) < 1) {
         const r = Math.max(0, Number(rest));
         const reste = phases
@@ -199,6 +219,9 @@ exports.handler = async (event) => {
           .map((p) => (p.type_calcul === 'fixe' && /nettoy/i.test(p.nom)) ? p : { ...p, duree_min: Math.max(1, Math.round(p.duree_min * r)) });
         phases = reste.length ? reste : [{ ...phases[phases.length - 1], duree_min: 1 }];
       }
+      // Travail sans machine (mains, étuis, caisses, jaquettes…) : durée répartissable entre les personnes affectées.
+      const manuel = !phases.some((p) => p.besoin_machine);
+      phases = phases.map((p) => ({ ...p, repartissable: manuel }));
       return {
         index,
         predecesseurs: indicesDe(e),
@@ -233,7 +256,8 @@ exports.handler = async (event) => {
     // Réseau PERT : durées et dépendances seulement (sans ressources ni calendrier).
     const reseau = PL.analyserReseau(etapesMoteur.map((em, i) => ({
       index: i,
-      duree_min: em.fixe ? 0 : em.phases.reduce((total, p) => total + p.duree_min, 0),
+      duree_min: em.fixe ? 0 : em.phases.reduce((total, p) => total + (p.repartissable && em.personnes_imposees
+        ? PL.dureeAvecEffectif(p.duree_min, p.nb_personnes, em.personnes_imposees.length) : p.duree_min), 0),
       predecesseurs: em.predecesseurs ?? null,
       liens: em.liens || {},
     })));
@@ -262,12 +286,19 @@ exports.handler = async (event) => {
         predecesseurs: pert.etapes[r.index].predecesseurs,
         dependances: pert.etapes[r.index].dependances,
         fixe: !!r.fixe,
+        travail_manuel: !e.phases.some((p) => p.occupe_machine) && (e.duree_manuelle_h === null ? e.phases.length > 0 : e.machines_compatibles.length === 0),
+        avancement_pct: avancementDe[e.gamme_id] || 0,
+        renfort: renforts.has(e.gamme_id),
+        personnes_actuelles: r.fixe ? Array.from(new Set(lignesOf.filter((l) => l.gamme_operatoire_id === e.gamme_id)
+          .flatMap((l) => [l.personnel_id, ...(l.planning_jour_personnel || []).map((x) => x.personnel_id)]).filter(Boolean)))
+          .map((id) => ({ id, nom: nomPersonne[id] || '?' })) : [],
         machine: r.machine_id ? { id: r.machine_id, nom: nomMachine[r.machine_id] || '?' } : null,
         machines_possibles: e.machines_compatibles.map((m) => ({ id: m.id, nom: m.nom })),
         debut: r.debut_min !== null ? iso(r.debut_min) : null,
         fin: r.fin_min !== null ? iso(r.fin_min) : null,
         phases: r.phases.map((ph) => ({
           nom: ph.nom, duree_min: ph.duree_min, besoin_machine: ph.besoin_machine,
+          repartissable: ph.repartissable, effectif: ph.effectif, effectif_standard: ph.effectif_standard, duree_une_personne_min: ph.duree_une_personne_min,
           personnes: ph.personnes.map((id) => ({ id, nom: nomPersonne[id] || '?' })),
           tranches: ph.tranches.map((t) => ({ date: dateDe(t.d), debut: heureDe(t.d), fin: heureDe(t.f) })),
           // Relais : seulement quand une personne n'est pas là toute la tâche.
@@ -381,6 +412,11 @@ exports.handler = async (event) => {
 
     if (lignesARemplacer.length > 0) {
       const { error } = await supabase.from('planning_jour').delete().in('id', lignesARemplacer.map((l) => l.id));
+      if (error) throw error;
+    }
+
+    for (const t of aTronquer) {
+      const { error } = await supabase.from('planning_jour').update({ heure_fin: t.heure_fin }).eq('id', t.id);
       if (error) throw error;
     }
 
