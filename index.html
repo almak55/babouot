@@ -1263,7 +1263,7 @@
       msg.innerHTML = '<div class="msg">Enregistrement et recalage du planning…</div>';
       document.getElementById('mt-go').disabled = true;
       try {
-        const res = await fetch(`${API}/saisir-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date, saisies: [saisie], recaler: document.getElementById('mt-recaler').checked }) });
+        const res = await fetch(`${API}/saisir-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: (date > dateLocaleIso() ? dateLocaleIso() : date), saisies: [saisie], recaler: document.getElementById('mt-recaler').checked }) });
         const d = await lireJson(res);
         if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
         afficherBilanProduction(d);
