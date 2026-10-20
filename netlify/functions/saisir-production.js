@@ -20,6 +20,7 @@
 let etapesBloquees = () => ({});
 try { ({ etapesBloquees } = require('./lib/dependances')); } catch (e) { console.warn('lib/dependances.js introuvable : contrôle des dépendances désactivé.', e.message); }
 const { getSupabase } = require('./lib/supabaseclient');
+const { aujourdhuiParis } = require('./lib/debut-etape');
 const { majAvancementOf, recalerSiRetard } = require('./lib/recalage');
 const planifier = require('./planifier-of');
 
@@ -30,7 +31,10 @@ exports.handler = async (event) => {
   try {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: JSON.stringify({ error: 'Méthode non autorisée, utiliser POST.' }) };
     const body = JSON.parse(event.body || '{}');
-    const dateGlobale = /^\d{4}-\d{2}-\d{2}$/.test(body.date || '') ? body.date : new Date().toISOString().slice(0, 10);
+    const aujourdhuiP = aujourdhuiParis();
+    // Une production ne peut pas être saisie pour un jour à venir : la date est ramenée à aujourd'hui.
+    const borne = (d) => (d > aujourdhuiP ? aujourdhuiP : d);
+    const dateGlobale = borne(/^\d{4}-\d{2}-\d{2}$/.test(body.date || '') ? body.date : aujourdhuiP);
     const date = dateGlobale;
     const saisies = Array.isArray(body.saisies) ? body.saisies : [];
     const recaler = body.recaler !== false;
@@ -46,10 +50,10 @@ exports.handler = async (event) => {
     const parOf = {};   // of_id -> [gamme_id]
     const resultats = [];
     const valide = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || '');
-    const aujourdhui = new Date().toISOString().slice(0, 10);
+    const aujourdhui = aujourdhuiP;
     const statutCourant = {};
     for (const s of saisies) {
-      const date = valide(s.date) ? s.date : dateGlobale;   // chaque saisie peut viser sa propre journée (correction d'un jour passé)
+      const date = borne(valide(s.date) ? s.date : dateGlobale);   // chaque saisie peut viser sa propre journée (correction d'un jour passé)
       const g = gammeDe[s.gamme_id];
       if (!g) { resultats.push({ gamme_id: s.gamme_id, erreur: 'Étape introuvable.' }); continue; }
       const quantite = nombre(s.quantite);
@@ -115,7 +119,7 @@ exports.handler = async (event) => {
     }
 
     // Correction d'un jour passé : on recale à partir d'aujourd'hui, jamais dans le passé.
-    const dateRecalage = [dateGlobale, ...saisies.map((x) => x.date).filter(valide)].reduce((m, d) => (d > m ? d : m), aujourdhui);
+    const dateRecalage = [dateGlobale, ...saisies.map((x) => x.date).filter(valide).map(borne)].reduce((m, d) => (d > m ? d : m), aujourdhui);
     const recalages = [];
     for (const [ofId, gids] of Object.entries(parOf)) {
       const { data: of } = await supabase.from('ordres_fabrication').select('numero').eq('id', ofId).single();
