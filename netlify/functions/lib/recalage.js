@@ -158,4 +158,4 @@ async function recalerSiRetard(supabase, ofId, date, gammeIds, planifierHandler)
   };
 }
 
-module.exports = { avancementOf, majAvancementOf, recalerSiRetard, dureeCreneau, TOLERANCE_PCT };
+module.exports = { descendants, avancementOf, majAvancementOf, recalerSiRetard, dureeCreneau, TOLERANCE_PCT };
