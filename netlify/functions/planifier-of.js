@@ -31,6 +31,7 @@
 const { getSupabase } = require('./lib/supabaseclient');
 const { calculerEtapes } = require('./lib/durees');
 const PL = require('./lib/planification');
+const { purgerObsoletes } = require('./lib/obsoletes');
 
 const { enMinutes, dateDe, heureDe, debutDeJour, hhmm, MIN_JOUR, HORIZON_JOURS, libelleFerie } = PL;
 
@@ -66,6 +67,7 @@ exports.handler = async (event) => {
     const horairesCode = body.horaires === 'heures_sup' ? 'heures_sup' : 'normal';
 
     const supabase = getSupabase();
+    await purgerObsoletes(supabase);   // ne pas bloquer personnes et machines avec des créneaux d'étapes terminées
 
     // ---------- 1. OF, étapes chiffrées, calendrier ----------
     const calcul = await calculerEtapes(supabase, of_id);
