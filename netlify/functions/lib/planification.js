@@ -213,6 +213,19 @@ function segmenter(tranches, presences, cal) {
   return segments;
 }
 
+// Travail manuel (sans cadence machine) : la durée chiffrée représente un contenu de travail en
+// heures-personnes (durée standard x effectif standard). Avec n personnes, la durée écoulée est
+// contenu / n, arrondie au quart d'heure le plus proche (ex. 4 h pour une personne, 3 personnes :
+// 80 min -> 1 h 15). Si l'effectif est celui prévu, la durée n'est pas modifiée.
+function dureeAvecEffectif(dureeMin, effectifStandard, n) {
+  const std = Math.max(1, effectifStandard || 1);
+  const k = Math.max(1, n || std);
+  if (k === std) return dureeMin;
+  const brut = (dureeMin * std) / k;
+  const quart = Math.round(brut / 15) * 15;
+  return quart > 0 ? quart : Math.max(1, Math.round(brut));
+}
+
 function simulerEtape(etape, machineId, curseur, ctx, charge) {
   const cal = ctx.calendrier;
   const occMachine = machineId ? (ctx.occupation.machines[machineId] || []) : [];
@@ -223,9 +236,14 @@ function simulerEtape(etape, machineId, curseur, ctx, charge) {
   const problemes = [];
   let c = curseur;
 
-  for (const ph of etape.phases) {
-    if (ph.duree_min <= 0) continue;
-    const occMach = ph.besoin_machine ? occMachine : [];
+  for (const phase of etape.phases) {
+    if (phase.duree_min <= 0) continue;
+    const occMach = phase.besoin_machine ? occMachine : [];
+    // Durée écoulée : pour un travail manuel, elle dépend du nombre de personnes réellement présentes.
+    const effectifPrevu = imposees ? imposees.length : Math.min(Math.max(1, phase.nb_personnes || 1), pool.length || Infinity);
+    const duree = phase.repartissable && Number.isFinite(effectifPrevu)
+      ? dureeAvecEffectif(phase.duree_min, phase.nb_personnes, effectifPrevu) : phase.duree_min;
+    const ph = { ...phase, duree_min: duree, duree_standard_min: phase.duree_min };
     let choisis;
     if (imposees) {
       choisis = imposees;
@@ -280,6 +298,8 @@ function simulerEtape(etape, machineId, curseur, ctx, charge) {
     }
     phasesRes.push({
       nom: ph.nom, duree_min: ph.duree_min, besoin_machine: !!ph.besoin_machine,
+      repartissable: !!ph.repartissable, effectif: choisis.length || null, effectif_standard: Math.max(1, ph.nb_personnes || 1),
+      duree_une_personne_min: ph.repartissable ? Math.round(ph.duree_standard_min * Math.max(1, ph.nb_personnes || 1)) : null,
       personnes: presences ? Object.keys(presences) : choisis,
       presences, segments: presences ? segmenter(t, presences, cal) : null,
       tranches: fusionner(t, cal), brutes: t,
@@ -596,5 +616,5 @@ function analyserReseau(noeuds) {
 module.exports = {
   enMinutes, dateDe, heureDe, debutDeJour, hhmm, MIN_JOUR, HORIZON_JOURS,
   joursFeries, libelleFerie, estOuvre,
-  fenetresDuJour, soustraire, consommer, fusionner, ordreTopologique, contraintesLien, planifierAvant, planifierArriere, analyserReseau,
+  dureeAvecEffectif, fenetresDuJour, soustraire, consommer, fusionner, ordreTopologique, contraintesLien, planifierAvant, planifierArriere, analyserReseau,
 };
