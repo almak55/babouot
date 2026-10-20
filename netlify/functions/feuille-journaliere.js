@@ -7,6 +7,7 @@
 // client, quantité, opération, équipe) + absents + créneaux sans personne.
 
 const { getSupabase } = require('./lib/supabaseclient');
+const { purgerObsoletes } = require('./lib/obsoletes');
 
 const hhmm = (t) => (t ? String(t).slice(0, 5) : null);
 
@@ -17,6 +18,7 @@ exports.handler = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: 'Paramètre date (AAAA-MM-JJ) requis.' }) };
     }
     const supabase = getSupabase();
+    await purgerObsoletes(supabase);   // créneaux restants d'étapes déjà terminées
     const debug = (event.queryStringParameters || {}).debug === '1';
 
     const [persRes, planRes, dispoRes, catRes, compRes, persMachRes] = await Promise.all([
