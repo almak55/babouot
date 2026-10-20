@@ -3264,6 +3264,18 @@
 
       const nomDeSeq = (sq) => { const x = plan.etapes.find(y => y.sequence === sq); return x ? esc(x.operation) : '?'; };
       const etapesHtml = plan.etapes.slice().sort((a, b) => (a.debut || '9').localeCompare(b.debut || '9')).map(e => {
+        if (e.fixe && e.statut === 'en cours' && e.travail_manuel) {
+          // Tâche manuelle déjà entamée : on peut y affecter du monde ; le temps RESTANT est réparti entre toutes les personnes.
+          const actuelles = (e.personnes_actuelles || []).map(p => p.id);
+          const imp = etat.imposes[e.gamme_id] || {};
+          const choisies = imp.personnel_ids || actuelles;
+          const lignes = refs.personnel.map(p => `<div class="pl-pers-row"><label><input type="checkbox" class="pl-pers-renfort" value="${p.id}" ${choisies.includes(p.id) ? 'checked' : ''}> ${esc(p.nom)}</label></div>`).join('');
+          return `<div class="plan-step fixe" data-renfort="${e.gamme_id}"><div class="step-head"><strong>${esc(e.operation)}</strong>
+              <span class="plan-note">— en cours (${Math.round(e.avancement_pct)} % fait)${actuelles.length ? ', équipe actuelle : ' + esc((e.personnes_actuelles || []).map(p => p.nom).join(', ')) : ''}</span></div>
+            <div class="field"><label>Personnes sur le reste de la tâche</label>
+              <details class="pl-details"><summary>${choisies.length ? choisies.length + ' personne(s)' : 'Inchangé'}</summary><div class="op-list">${lignes}</div></details></div>
+            <div class="plan-note">Ajoutez des personnes puis « Calculer » : le temps restant (prévu pour une personne) est divisé par le nombre total de personnes, arrondi au quart d'heure.</div></div>`;
+        }
         if (e.fixe) return `<div class="plan-step fixe"><strong>${esc(e.operation)}</strong> <span class="plan-note">— déjà planifiée (cochez « Replanifier » pour la reprendre)</span></div>`;
         // Personnes « de départ » : les remplaçants arrivés en relais ne sont pas imposés (ils sont déduits).
         const choisis = Array.from(new Map(e.phases.flatMap(ph => {
@@ -3282,7 +3294,7 @@
             <span class="pl-heures-wrap ${coche ? '' : 'hidden'}"><input class="pl-heures" data-id="${p.id}" type="number" min="0" step="0.25" placeholder="toute la tâche" value="${heuresImp[p.id] ?? ''}" title="Heures de présence sur cette tâche (vide = toute la tâche)"> h</span></div>`;
         }).join('');
         const phasesHtml = e.phases.map(ph => `
-          <li><span>${esc(ph.nom)}</span>
+          <li><span>${esc(ph.nom)}</span>${ph.repartissable && ph.duree_une_personne_min && (ph.effectif || 1) > 1 ? `<span class="plan-note"> ${fmtH(ph.duree_une_personne_min / 60)} pour 1 pers. ÷ ${ph.effectif} = <strong>${fmtH(ph.duree_min / 60)}</strong></span>` : ''}
               <span class="mono">${ph.tranches.map(t => `${t.date.slice(8)}/${t.date.slice(5, 7)} ${t.debut}–${t.fin}`).join(' · ')}</span>
               <small>${ph.besoin_machine ? 'machine' : 'manuel'} — ${ph.relais
                 ? ph.relais.slice().sort((a, b) => a.debut.localeCompare(b.debut)).map(r => r.toute_la_tache ? esc(r.nom) : `${esc(r.nom)} (${fmtH(r.minutes / 60)} ${r.debut === ph.relais.map(x => x.debut).sort()[0] ? 'au début' : 'en relais'})`).join(' → ')
@@ -3336,6 +3348,14 @@
           etat.imposes[g] = { ...(etat.imposes[g] || {}), personnel_ids: ids.length ? ids : undefined };
           majHeures();
           bloc.querySelector('summary').textContent = ids.length ? `${ids.length} personne(s)` : 'Automatique';
+        }));
+      });
+      document.querySelectorAll('.plan-step[data-renfort]').forEach(bloc => {
+        const g = bloc.dataset.renfort;
+        bloc.querySelectorAll('.pl-pers-renfort').forEach(cb => cb.addEventListener('change', () => {
+          const ids = Array.from(bloc.querySelectorAll('.pl-pers-renfort:checked')).map(x => x.value);
+          etat.imposes[g] = { ...(etat.imposes[g] || {}), personnel_ids: ids.length ? ids : undefined };
+          bloc.querySelector('summary').textContent = ids.length ? `${ids.length} personne(s)` : 'Inchangé';
         }));
       });
       const rienAPlanifier = plan.etapes.length > 0 && plan.etapes.every(e => e.fixe);
