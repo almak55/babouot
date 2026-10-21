@@ -922,7 +922,7 @@
   function renderOrdres(){
     const wrap = el(`
       <div class="panel">
-        <div class="panel-head"><h2>Ordres de fabrication</h2><div style="display:flex;gap:8px;"><button class="btn" id="couts-btn">Coûts & tarifs</button><button class="btn" id="import-lot">Importer des fiches (PDF)</button><button class="btn primary" id="new-of"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvel OF</button></div></div>
+        <div class="panel-head"><h2>Ordres de fabrication</h2><div style="display:flex;gap:8px;"><button class="btn" id="couts-btn">Coûts & tarifs</button><button class="btn" id="import-lot">Importer des fiches (PDF)</button><button class="btn" id="pleiade-btn">Fiche Pléiade</button><button class="btn primary" id="new-of"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvel OF</button></div></div>
         <table class="row-table">
           <thead><tr><th></th><th>Production</th><th>Client</th><th>Qté</th><th>Délai</th><th>État</th><th>Avancement</th><th></th></tr></thead>
           <tbody id="of-tbody"></tbody>
@@ -3739,6 +3739,8 @@
     if (newOfBtn) newOfBtn.addEventListener('click', ouvrirModaleNouvelOf);
     const importLotBtn = document.getElementById('import-lot');
     if (importLotBtn) importLotBtn.addEventListener('click', ouvrirModaleImportLot);
+    const pleiadeBtn = document.getElementById('pleiade-btn');
+    if (pleiadeBtn) pleiadeBtn.addEventListener('click', ouvrirModalePleiade);
     const coutsBtn = document.getElementById('couts-btn');
     if (coutsBtn) coutsBtn.addEventListener('click', ouvrirModaleCouts);
   }
@@ -4312,6 +4314,176 @@
         <div class="plan-note" style="margin-top:8px;">Les OF sont « en attente de validation ». La date de livraison sert de date maximale de fin : « Planifier à l'heure » vérifie le délai et le planning automatique passe d'abord les OF dont l'échéance est la plus proche, puis ceux sans date selon ce rang.</div>
         <div class="actions"><button class="btn primary" id="m-cancel">Fermer</button></div>`, 'large');
       document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    });
+  }
+
+  // ---------- Fiche de fabrication Pléiade : génération automatique ----------
+  const PDFLIB_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js';
+  function chargerPdfLib() {
+    if (window.PDFLib) return Promise.resolve(window.PDFLib);
+    return new Promise((ok, ko) => {
+      const s = document.createElement('script'); s.src = PDFLIB_URL;
+      s.onload = () => ok(window.PDFLib); s.onerror = () => ko(new Error('Bibliothèque PDF indisponible (connexion ?).'));
+      document.head.appendChild(s);
+    });
+  }
+  const dateFrPl = (iso) => (/^\d{4}-\d{2}-\d{2}$/.test(iso || '') ? iso.split('-').reverse().join('/') : '');
+
+  async function remplirFichePleiade(d, o) {
+    const PL = await chargerPdfLib();
+    const res = await fetch('/fiche-pleiade-modele.pdf');
+    if (!res.ok) throw new Error('Modèle de fiche introuvable (fiche-pleiade-modele.pdf).');
+    const pdf = await PL.PDFDocument.load(await res.arrayBuffer());
+    const form = pdf.getForm();
+    const T = (nom, v) => { try { if (v !== undefined && v !== null && v !== '') form.getTextField(nom).setText(String(v)); } catch (e) { /* champ absent ou caractère non géré */ } };
+    const C = (nom, on) => { try { const f = form.getCheckBox(nom); if (on) f.check(); else f.uncheck(); } catch (e) { /* champ absent */ } };
+    const v = d.valeurs;
+    T('auteur', o.auteur); T('titre', o.titre); T('client', v.client); T('reference', o.reference);
+    T('date_fiche', dateFrPl(dateLocaleIso())); T('categorie', v.categorie_libelle);
+    T('tirage', o.quantite); T('livraison', dateFrPl(o.delai)); T('reception_papier', dateFrPl(o.date_reception));
+    T('reception_peaux', dateFrPl(o.date_reception_peaux));
+    C('prio_normale', (o.priorite || 'normale') === 'normale'); C('prio_haute', o.priorite === 'haute'); C('prio_urgente', o.priorite === 'urgente');
+    C('v_simple', o.simple); C('v_coffret', o.coffret); C('v_rhodoides', o.rhodoides); C('v_etuis', o.etuis);
+    T('couleur', v.couleur_peau); T('cuir', v.couleur_peau); T('format', v.format_bloc); T('nb_pages', o.nb_pages); T('nb_cahiers', o.nb_cahiers);
+    T('carton', v.carton); T('gardes', v.gardes); T('piece_pave', v.pave ? v.piece_pave : 'Pas de pavé'); T('couleur_tete', v.couleur_tete);
+    C('grainage_oui', true); C('signet_oui', !!v.signets); C('signet_non', !v.signets); T('signet_couleur', v.signets);
+    C('tranchefile_oui', !!v.tranchefile); C('tranchefile_non', !v.tranchefile); T('tranchefile_couleur', v.tranchefile);
+    d.gamme.forEach((g) => { C('op_' + g.operation_code, true); T('ordre_' + g.operation_code, g.sequence); });
+    T('remarques', v.notes);
+    form.updateFieldAppearances(await pdf.embedFont(PL.StandardFonts.Helvetica));
+    return pdf.save();
+  }
+
+  function telecharger(octets, nom) {
+    const url = URL.createObjectURL(new Blob([octets], { type: 'application/pdf' }));
+    const a = document.createElement('a'); a.href = url; a.download = nom; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  async function appelerPleiade(methode, corps, query) {
+    const res = await fetch(`${API}/gerer-pleiade${query || ''}`, { method: methode, headers: { 'Content-Type': 'application/json' }, body: corps ? JSON.stringify(corps) : undefined });
+    const d = await lireJson(res);
+    if (!res.ok) throw new Error(d.error || `Erreur serveur (HTTP ${res.status})`);
+    return d;
+  }
+
+  async function ouvrirModalePleiade() {
+    let ref;
+    try { ref = await appelerPleiade('GET'); }
+    catch (e) { afficherModale(`<h3>Fiche Pléiade</h3><div class="msg error">Référentiel indisponible (migration 28 exécutée ?). ${esc(e.message)}</div><div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`); document.getElementById('m-cancel').addEventListener('click', fermerModale); return; }
+    const cats = ref.categories.filter((c) => c.actif !== false);
+    afficherModale(`
+      <h3>Fiche de fabrication Pléiade</h3>
+      <div class="plan-note" style="margin-bottom:8px;">Choisissez la catégorie : couleurs de tête, gardes, cuir, tranchefile, signets, pavé, carton, format du bloc et <strong>gamme complète avec ses dépendances</strong> sont remplis automatiquement.</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:0 14px;">
+        <div class="field"><label>Catégorie</label><select id="pl-cat">${cats.map((c) => `<option value="${esc(c.code)}">${esc(c.libelle)}</option>`).join('')}</select></div>
+        <div class="field"><label>Auteur</label><input id="pl-auteur"></div>
+        <div class="field"><label>Titre</label><input id="pl-titre"></div>
+        <div class="field"><label>Quantité</label><input id="pl-qte" type="number" min="1"></div>
+        <div class="field"><label>Livraison (date max.)</label><input id="pl-delai" type="date"></div>
+        <div class="field"><label>Réception papier</label><input id="pl-recep" type="date"></div>
+        <div class="field"><label>Réception peaux</label><input id="pl-peaux" type="date"></div>
+        <div class="field"><label>Priorité</label><select id="pl-prio"><option value="normale">Normale</option><option value="haute">Haute</option><option value="urgente">Urgente</option></select></div>
+        <div class="field"><label>Nombre de pages</label><input id="pl-pages" type="number" min="1"></div>
+        <div class="field"><label>Nombre de cahiers</label><input id="pl-cahiers" type="number" min="1"></div>
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin:8px 0;">
+        <label><input type="checkbox" id="pl-simple"> Pléiade simple (refente)</label>
+        <label><input type="checkbox" id="pl-coffret"> Volumes en coffret (jaquettes)</label>
+        <label><input type="checkbox" id="pl-rhodo"> Rhodoïds</label>
+        <label><input type="checkbox" id="pl-etuis"> Mise en étuis</label>
+        <label><input type="checkbox" id="pl-repvol"> Réparations volumes (dans la gamme)</label>
+      </div>
+      <div id="pl-apercu"></div>
+      <div id="m-msg"></div>
+      <div class="actions" style="flex-wrap:wrap;">
+        <button class="btn" id="pl-cats">Modifier les catégories</button>
+        <button class="btn" id="m-cancel">Fermer</button>
+        <button class="btn" id="pl-pdf">Télécharger la fiche PDF</button>
+        <button class="btn primary" id="pl-creer">Créer l'OF</button>
+      </div>`, 'xlarge');
+    const $ = (id) => document.getElementById(id);
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    const opts = (action) => ({
+      action, categorie: $('pl-cat').value, auteur: $('pl-auteur').value.trim(), titre: $('pl-titre').value.trim(),
+      quantite: parseInt($('pl-qte').value, 10) || 0, delai: $('pl-delai').value || null, date_reception: $('pl-recep').value || null,
+      date_reception_peaux: $('pl-peaux').value || null, priorite: $('pl-prio').value,
+      nb_pages: parseInt($('pl-pages').value, 10) || null, nb_cahiers: parseInt($('pl-cahiers').value, 10) || null,
+      simple: $('pl-simple').checked, coffret: $('pl-coffret').checked, rhodoides: $('pl-rhodo').checked, etuis: $('pl-etuis').checked,
+      reparations_volumes: $('pl-repvol').checked,
+    });
+    const post = async (o) => {
+      const res = await fetch(`${API}/generer-of-pleiade`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o) });
+      const d = await lireJson(res);
+      if (!res.ok) throw new Error(d.error || `Erreur serveur (HTTP ${res.status})`);
+      return d;
+    };
+    let dernier = null;
+    async function apercu() {
+      const zone = $('pl-apercu');
+      try {
+        const d = await post(opts('apercu')); dernier = d; const v = d.valeurs;
+        const ligne = (k, val) => `<tr><td style="color:var(--muted);padding-right:12px;">${k}</td><td><strong>${esc(val || '—')}</strong></td></tr>`;
+        zone.innerHTML = `<div style="display:grid;grid-template-columns:minmax(220px,1fr) 2fr;gap:16px;align-items:start;">
+          <table style="font-size:13px;">${ligne('Couleur de tête', v.couleur_tete)}${ligne('Gardes', v.gardes)}${ligne('Cuir (grain chagrin)', v.couleur_peau)}${ligne('Tranchefile', v.tranchefile)}${ligne('Signets', v.signets)}${ligne('Pavé', v.pave ? 'Oui — ' + v.piece_pave : 'Non')}${ligne('Carton', v.carton)}${ligne('Format du bloc', v.format_bloc ? v.format_bloc + ' mm' : '')}${ligne('Applats', 'Toujours')}</table>
+          <ol style="margin:0;padding-left:20px;font-size:13px;">${d.gamme.map((g) => `<li><strong>${esc(g.libelle)}</strong>${g.predecesseurs_libelles.length ? ` <span style="color:var(--muted);">après ${g.predecesseurs_libelles.map(esc).join(' + ')}${Object.keys(g.dependances).length ? ' (en simultané)' : ''}</span>` : ' <span style="color:var(--muted);">— indépendante</span>'}</li>`).join('')}</ol></div>
+          ${d.avertissements.map((a) => `<div class="msg" style="margin-top:6px;">⚠ ${esc(a)}</div>`).join('')}`;
+      } catch (e) { zone.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; dernier = null; }
+    }
+    ['pl-cat', 'pl-simple', 'pl-coffret', 'pl-rhodo', 'pl-etuis', 'pl-repvol'].forEach((id) => $(id).addEventListener('change', apercu));
+    apercu();
+
+    $('pl-pdf').addEventListener('click', async () => {
+      const msg = $('m-msg'); msg.innerHTML = '<div class="msg">Génération du PDF…</div>';
+      try {
+        await apercu(); if (!dernier) throw new Error('Aperçu indisponible.');
+        const o = opts('apercu');
+        const octets = await remplirFichePleiade(dernier, o);
+        telecharger(octets, `fiche-fabrication-pleiade-${(o.titre || dernier.valeurs.categorie).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w-]+/g, '_')}.pdf`);
+        msg.innerHTML = '<div class="msg ok">Fiche téléchargée.</div>';
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
+    $('pl-creer').addEventListener('click', async () => {
+      const msg = $('m-msg'); const o = opts('creer');
+      if (!o.titre || !o.quantite) { msg.innerHTML = '<div class="msg error">Titre et quantité sont requis pour créer l\'OF.</div>'; return; }
+      msg.innerHTML = '<div class="msg">Création en cours…</div>';
+      try {
+        const d = await post(o);
+        toast(`OF ${d.numero} créé avec sa gamme Pléiade.`);
+        try { telecharger(await remplirFichePleiade(d, o), `fiche-${d.numero}.pdf`); } catch (e) { /* la fiche reste téléchargeable */ }
+        fermerModale(); chargerDonneesReelles();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
+    $('pl-cats').addEventListener('click', () => ouvrirModaleCategoriesPleiade(ouvrirModalePleiade));
+  }
+
+  async function ouvrirModaleCategoriesPleiade(retour) {
+    let ref;
+    try { ref = await appelerPleiade('GET'); } catch (e) { toast(e.message); return; }
+    const champs = [['libelle', 'Catégorie'], ['tete', 'Tête'], ['gardes', 'Gardes'], ['cuir', 'Cuir'], ['tranchefile', 'Tranchefile'], ['signets', 'Signets'], ['piece', 'Pièce (pavé)'], ['piece_ref', 'Réf.']];
+    const ligne = (c) => `<tr data-code="${esc(c.code)}">${champs.map(([k]) => `<td><input data-k="${k}" value="${esc(c[k] || '')}" style="width:100%;min-width:80px;"></td>`).join('')}<td style="white-space:nowrap;"><button class="btn pc-save" style="padding:2px 8px;">Enregistrer</button> <button class="btn pc-del" style="padding:2px 8px;">Retirer</button></td></tr>`;
+    afficherModale(`
+      <h3>Catégories Pléiade</h3>
+      <div class="plan-note" style="margin-bottom:8px;">Une <strong>pièce (pavé)</strong> renseignée déclenche l'étape « Pavé » dans la gamme ; sans pièce, l'étape est sautée. Les modifications valent pour les prochaines fiches.</div>
+      <div style="overflow-x:auto;"><table class="sp-table"><thead><tr>${champs.map(([, l]) => `<th>${l}</th>`).join('')}<th></th></tr></thead><tbody>${ref.categories.filter((c) => c.actif !== false).map(ligne).join('')}</tbody></table></div>
+      <div style="margin-top:10px;display:flex;gap:8px;"><input id="pc-new" placeholder="Nouvelle catégorie (ex. XXIe siècle)" style="flex:1;"><button class="btn" id="pc-add">Ajouter</button></div>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="pc-back">Retour</button></div>`, 'xlarge');
+    const msg = document.getElementById('m-msg');
+    const retourner = () => (retour ? retour() : fermerModale());
+    document.getElementById('pc-back').addEventListener('click', retourner);
+    document.querySelectorAll('.pc-save').forEach((b) => b.addEventListener('click', async () => {
+      const tr = b.closest('tr'); const corps = { code: tr.dataset.code };
+      tr.querySelectorAll('input[data-k]').forEach((i) => { corps[i.dataset.k] = i.value; });
+      try { await appelerPleiade('PUT', corps); msg.innerHTML = '<div class="msg ok">Enregistré.</div>'; } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    }));
+    document.querySelectorAll('.pc-del').forEach((b) => b.addEventListener('click', async () => {
+      const tr = b.closest('tr');
+      try { await appelerPleiade('DELETE', null, `?code=${encodeURIComponent(tr.dataset.code)}`); tr.remove(); msg.innerHTML = '<div class="msg ok">Catégorie retirée de la liste.</div>'; } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    }));
+    document.getElementById('pc-add').addEventListener('click', async () => {
+      const lib = document.getElementById('pc-new').value.trim(); if (!lib) return;
+      try { await appelerPleiade('POST', { libelle: lib }); ouvrirModaleCategoriesPleiade(retour); } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
     });
   }
 
