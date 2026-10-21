@@ -922,7 +922,7 @@
   function renderOrdres(){
     const wrap = el(`
       <div class="panel">
-        <div class="panel-head"><h2>Ordres de fabrication</h2><div style="display:flex;gap:8px;"><button class="btn" id="couts-btn">Coûts & tarifs</button><button class="btn" id="import-lot">Importer des fiches (PDF)</button><button class="btn" id="pleiade-btn">Fiche Pléiade</button><button class="btn primary" id="new-of"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvel OF</button></div></div>
+        <div class="panel-head"><h2>Ordres de fabrication</h2><div style="display:flex;gap:8px;"><button class="btn" id="couts-btn">Coûts & tarifs</button><button class="btn" id="import-lot">Importer des fiches (PDF)</button><button class="btn" id="pleiade-btn">Fiche Pléiade</button><button class="btn" id="coffret-btn">Coffrets</button><button class="btn primary" id="new-of"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvel OF</button></div></div>
         <table class="row-table">
           <thead><tr><th></th><th>Production</th><th>Client</th><th>Qté</th><th>Délai</th><th>État</th><th>Avancement</th><th></th></tr></thead>
           <tbody id="of-tbody"></tbody>
@@ -3741,6 +3741,8 @@
     if (importLotBtn) importLotBtn.addEventListener('click', ouvrirModaleImportLot);
     const pleiadeBtn = document.getElementById('pleiade-btn');
     if (pleiadeBtn) pleiadeBtn.addEventListener('click', ouvrirModalePleiade);
+    const coffretBtn = document.getElementById('coffret-btn');
+    if (coffretBtn) coffretBtn.addEventListener('click', ouvrirModaleCoffret);
     const coutsBtn = document.getElementById('couts-btn');
     if (coutsBtn) coutsBtn.addEventListener('click', ouvrirModaleCouts);
   }
@@ -4389,9 +4391,6 @@
       </div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;margin:8px 0;">
         <label><input type="checkbox" id="pl-simple"> Pléiade simple (refente)</label>
-        <label><input type="checkbox" id="pl-coffret"> Volumes en coffret (jaquettes)</label>
-        <label><input type="checkbox" id="pl-rhodo"> Rhodoïds</label>
-        <label><input type="checkbox" id="pl-etuis"> Mise en étuis</label>
         <label><input type="checkbox" id="pl-repvol"> Réparations volumes (dans la gamme)</label>
       </div>
       <div id="pl-apercu"></div>
@@ -4409,7 +4408,7 @@
       quantite: parseInt($('pl-qte').value, 10) || 0, delai: $('pl-delai').value || null, date_reception: $('pl-recep').value || null,
       date_reception_peaux: $('pl-peaux').value || null, priorite: $('pl-prio').value,
       nb_pages: parseInt($('pl-pages').value, 10) || null, nb_cahiers: parseInt($('pl-cahiers').value, 10) || null,
-      simple: $('pl-simple').checked, coffret: $('pl-coffret').checked, rhodoides: $('pl-rhodo').checked, etuis: $('pl-etuis').checked,
+      simple: $('pl-simple').checked,
       reparations_volumes: $('pl-repvol').checked,
     });
     const post = async (o) => {
@@ -4430,7 +4429,7 @@
           ${d.avertissements.map((a) => `<div class="msg" style="margin-top:6px;">⚠ ${esc(a)}</div>`).join('')}`;
       } catch (e) { zone.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; dernier = null; }
     }
-    ['pl-cat', 'pl-simple', 'pl-coffret', 'pl-rhodo', 'pl-etuis', 'pl-repvol'].forEach((id) => $(id).addEventListener('change', apercu));
+    ['pl-cat', 'pl-simple', 'pl-repvol'].forEach((id) => $(id).addEventListener('change', apercu));
     apercu();
 
     $('pl-pdf').addEventListener('click', async () => {
@@ -4484,6 +4483,67 @@
     document.getElementById('pc-add').addEventListener('click', async () => {
       const lib = document.getElementById('pc-new').value.trim(); if (!lib) return;
       try { await appelerPleiade('POST', { libelle: lib }); ouvrirModaleCategoriesPleiade(retour); } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
+  }
+
+  // ---------- OF Coffret : 2 volumes Pléiade ou plus dans un coffret ----------
+  async function ouvrirModaleCoffret() {
+    let ofs;
+    try {
+      const r = await fetch(`${API}/generer-coffret`); const d = await lireJson(r);
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`); ofs = d.ofs;
+    } catch (e) { afficherModale(`<h3>Coffret Pléiade</h3><div class="msg error">Indisponible (migration 29 exécutée ?). ${esc(e.message)}</div><div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`); document.getElementById('m-cancel').addEventListener('click', fermerModale); return; }
+    const optOf = ofs.map((o) => `<option value="${esc(o.id)}">${esc(o.numero)} — ${esc(o.titre)} (${o.quantite - o.deja_affecte} dispo.)</option>`).join('');
+    afficherModale(`
+      <h3>OF Coffret Pléiade</h3>
+      <div class="plan-note" style="margin-bottom:8px;">Un coffret contient plusieurs volumes. Opérations : découpe et rainage de jaquettes, mise en jaquettes, mise sous rhodoïds, mise en coffrets, mise en caisses et palettes. La part des volumes d'un OF Pléiade <strong>non affectée aux coffrets</strong> suit le conditionnement standard de cet OF.</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:0 14px;">
+        <div class="field"><label>Titre du coffret</label><input id="cf-titre"></div>
+        <div class="field"><label>Nombre de coffrets</label><input id="cf-nb" type="number" min="1"></div>
+        <div class="field"><label>Volumes par coffret</label><input id="cf-vpc" type="number" min="2" value="2"></div>
+        <div class="field"><label>Livraison (date max.)</label><input id="cf-delai" type="date"></div>
+      </div>
+      <div id="cf-besoin" class="plan-note" style="margin:6px 0;"></div>
+      <h4 style="margin:8px 0 4px;">Origine des volumes</h4>
+      <table class="sp-table"><thead><tr><th>Source</th><th>OF Pléiade / précision</th><th>Volumes</th><th></th></tr></thead><tbody id="cf-src"></tbody></table>
+      <button class="btn" id="cf-add" style="margin-top:6px;">+ Ajouter une source</button>
+      <div id="cf-apercu"></div><div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="cf-go">Créer l'OF Coffret</button></div>`, 'xlarge');
+    const $ = (id) => document.getElementById(id);
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    function ajouterLigne(source) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td><select class="cf-s"><option value="emboitage">Sortie emboîtage 1</option><option value="stock">Stock</option><option value="retour">Retour client</option></select></td>
+        <td><select class="cf-of">${optOf}</select><input class="cf-lib" placeholder="Titre / précision" style="display:none;width:100%;"></td>
+        <td><input class="cf-q" type="number" min="1" style="width:90px;"></td><td><button class="btn cf-x" style="padding:0 8px;">✕</button></td>`;
+      $('cf-src').appendChild(tr);
+      const maj = () => { const e = tr.querySelector('.cf-s').value === 'emboitage'; tr.querySelector('.cf-of').style.display = e ? '' : 'none'; tr.querySelector('.cf-lib').style.display = e ? 'none' : ''; };
+      tr.querySelector('.cf-s').value = source || 'emboitage'; maj();
+      tr.querySelector('.cf-s').addEventListener('change', () => { maj(); apercu(); });
+      tr.querySelector('.cf-x').addEventListener('click', () => { tr.remove(); apercu(); });
+      tr.querySelectorAll('input,select').forEach((i) => i.addEventListener('change', apercu));
+    }
+    const corps = (action) => ({
+      action, titre: $('cf-titre').value.trim(), nb_coffrets: parseInt($('cf-nb').value, 10) || 0, volumes_par_coffret: parseInt($('cf-vpc').value, 10) || 0, delai: $('cf-delai').value || null,
+      sources: Array.from($('cf-src').querySelectorAll('tr')).map((tr) => { const s = tr.querySelector('.cf-s').value; return { source: s, of_source_id: s === 'emboitage' ? tr.querySelector('.cf-of').value : null, libelle: s === 'emboitage' ? null : tr.querySelector('.cf-lib').value, quantite: parseInt(tr.querySelector('.cf-q').value, 10) || 0 }; }),
+    });
+    const post = async (o) => { const r = await fetch(`${API}/generer-coffret`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o) }); const d = await lireJson(r); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`); return d; };
+    async function apercu() {
+      const o = corps('apercu'); const besoin = o.nb_coffrets * o.volumes_par_coffret;
+      $('cf-besoin').textContent = besoin ? `Volumes nécessaires : ${o.nb_coffrets} × ${o.volumes_par_coffret} = ${besoin}` : '';
+      if (!besoin) { $('cf-apercu').innerHTML = ''; return; }
+      try {
+        const d = await post(o);
+        $('cf-apercu').innerHTML = `<div style="margin-top:8px;font-size:13px;"><strong>Affectés : ${d.total} / ${d.besoin}</strong> — gamme : ${d.gamme.map((g) => esc(g.libelle)).join(' → ')}</div>` + d.avertissements.map((a) => `<div class="msg" style="margin-top:4px;">⚠ ${esc(a)}</div>`).join('');
+      } catch (e) { $('cf-apercu').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    }
+    ['cf-nb', 'cf-vpc'].forEach((id) => $(id).addEventListener('input', apercu));
+    $('cf-add').addEventListener('click', () => ajouterLigne());
+    ajouterLigne();
+    $('cf-go').addEventListener('click', async () => {
+      const msg = $('m-msg'); msg.innerHTML = '<div class="msg">Création…</div>';
+      try { const d = await post(corps('creer')); toast(`OF ${d.numero} (coffrets) créé.`); fermerModale(); chargerDonneesReelles(); }
+      catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
     });
   }
 
