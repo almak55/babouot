@@ -26,7 +26,7 @@ function valeursFiche(ref, opts) {
   const P = ref.parametres;
   const oui = (k) => String(P[k] || 'oui').toLowerCase() !== 'non';
   const pave = !vide(cat.piece);
-  return {
+  const v = {
     categorie: cat.code,
     categorie_libelle: cat.libelle,
     client: P.client || '',
@@ -43,6 +43,10 @@ function valeursFiche(ref, opts) {
     fournisseurs: (P.fournisseurs || '').split(';').map((s) => s.trim()).filter(Boolean),
     notes: cat.notes || '',
   };
+  // Valeurs imposées par le planning annuel (prioritaires sur le tableau de référence).
+  if (!vide(opts.couleur_tete)) v.couleur_tete = String(opts.couleur_tete);
+  if (!vide(opts.couleur_peau)) v.couleur_peau = String(opts.couleur_peau);
+  return v;
 }
 
 function actif(etape, opts, pave) {
@@ -111,6 +115,7 @@ function caracteristiquesOf(valeurs, opts) {
     auteur: opts.auteur,
     reception_peaux: opts.date_reception_peaux,
   };
+  if (opts.carte_dos) c.carte_dos_mm = Number(opts.carte_dos);
   if (opts.nb_pages) c.nb_pages = Number(opts.nb_pages);
   if (opts.nb_cahiers) c.nb_cahiers = Number(opts.nb_cahiers);
   return Object.fromEntries(Object.entries(c).filter(([, v]) => !vide(v)));
