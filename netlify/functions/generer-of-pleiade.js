@@ -77,6 +77,7 @@ exports.handler = async (event) => {
         delai: opts.delai || null,
         priorite: opts.priorite || 'normale',
         date_reception: opts.date_reception || null,
+        rang_priorite: opts.rang_priorite || null,
         type_production: 'pleiade',
         caracteristiques: P.caracteristiquesOf(valeurs, opts),
         operations: codes,
