@@ -403,6 +403,7 @@
   .modal .field { margin-bottom: 13px; }
   .modal .field label { margin-bottom: 4px; }
   .modal .field input, .modal .field select { width: 100%; }
+  .modal .op-list input[type=checkbox] { width: auto; margin: 0; flex: 0 0 auto; }
   .modal .op-list { display: flex; flex-direction: column; gap: 7px; max-height: 160px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 9px; background: var(--field-bg); }
 
   .modal.large { max-width: 780px; }
@@ -2068,10 +2069,102 @@
     }
   }
 
+  // Fiche personnel : ajout d'une personne ou modification de sa fiche (identité, poste, contrat, compétences, machines).
+  async function ouvrirModalePersonne(personne) {
+    const creation = !personne;
+    let refs, f = {}, ops = [], machs = [];
+    afficherModale(`<h3>${creation ? 'Ajouter une personne' : 'Fiche — ' + esc(personne.name)}</h3><div class="empty">Chargement…</div>`);
+    try {
+      refs = await getReferentiels();
+      if (!creation) {
+        const r = await fetch(`${API}/gerer-personnel?id=${personne.id}`);
+        const d = await lireJson(r); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+        f = d; ops = d.operation_codes || []; machs = d.machine_ids || [];
+      }
+    } catch (e) {
+      afficherModale(`<h3>Personnel</h3><div class="msg error">${esc(e.message)}</div><div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`);
+      document.getElementById('m-cancel').addEventListener('click', fermerModale); return;
+    }
+    const v = (k) => esc(f[k] == null ? '' : f[k]);
+    const champ = (id, label, k, type, extra) => `<div class="field" style="margin:0;"><label>${label}</label><input id="${id}" type="${type || 'text'}" value="${v(k)}" ${extra || ''}></div>`;
+    const select = (id, label, k, options) => `<div class="field" style="margin:0;"><label>${label}</label><select id="${id}">${options.map(([val, txt]) => `<option value="${esc(val)}" ${String(f[k] || '') === val ? 'selected' : ''}>${esc(txt)}</option>`).join('')}</select></div>`;
+    const grille = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 14px;margin-bottom:10px;';
+    const titreSection = (t) => `<div class="produit-titre" style="margin:12px 0 6px;">${t}</div>`;
+    afficherModale(`
+      <h3>${creation ? 'Ajouter une personne' : 'Fiche — ' + esc(personne.name)}</h3>
+      ${titreSection('Identité')}
+      <div style="${grille}">
+        ${champ('pf-prenom', 'Prénom *', 'prenom', 'text', 'required autocomplete="off"')}
+        ${champ('pf-nomf', 'Nom de famille', 'nom_famille')}
+        ${champ('pf-nom', 'Nom affiché dans le planning', 'nom', 'text', 'placeholder="par défaut : Prénom Nom"')}
+        ${champ('pf-matricule', 'Matricule', 'matricule')}
+      </div>
+      ${titreSection('Poste et contrat')}
+      <div style="${grille}">
+        ${champ('pf-poste', 'Poste / fonction', 'poste', 'text', 'placeholder="ex. Conducteur relieuse"')}
+        ${select('pf-role', 'Rôle', 'role_type', [['opérateur', 'Opérateur'], ['encadrement', 'Encadrement']])}
+        ${champ('pf-equipe', 'Équipe / service', 'equipe', 'text', 'placeholder="ex. Équipe A, Façonnage"')}
+        ${select('pf-contrat', 'Type de contrat', 'type_contrat', [['', '—'], ['CDI', 'CDI'], ['CDD', 'CDD'], ['Intérim', 'Intérim'], ['Apprenti', 'Apprenti'], ['Stagiaire', 'Stagiaire']])}
+        ${champ('pf-heures', 'Heures par semaine', 'heures_semaine', 'number', 'min="0" max="60" step="0.5" placeholder="ex. 35"')}
+        ${champ('pf-cout', 'Coût horaire chargé (€/h)', 'cout_horaire', 'number', 'min="0" step="0.01"')}
+        ${champ('pf-entree', 'Date d\'entrée', 'date_entree', 'date')}
+      </div>
+      ${titreSection('Coordonnées')}
+      <div style="${grille}">
+        ${champ('pf-tel', 'Téléphone', 'telephone', 'tel')}
+        ${champ('pf-email', 'E-mail', 'email', 'email')}
+      </div>
+      ${titreSection('Compétences')}
+      <div class="field"><label>Opérations que cette personne sait réaliser</label><div class="op-list" id="pf-ops" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));max-height:200px;">${refs.operations.map(o => `<label><input type="checkbox" value="${esc(o.code)}" ${ops.includes(o.code) ? 'checked' : ''}> ${esc(o.nom)}</label>`).join('')}</div></div>
+      <div class="field"><label>Machines qu'elle sait conduire <span class="plan-note">— laissez vide si elle peut travailler sur toutes les machines de ses opérations</span></label><div class="op-list" id="pf-machs" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));max-height:200px;">${refs.machines.map(m => `<label><input type="checkbox" value="${esc(m.id)}" ${machs.includes(m.id) ? 'checked' : ''}> ${esc(m.nom)}</label>`).join('')}</div></div>
+      <div class="field"><label>Habilitations et formations <span class="plan-note">— CACES, SST, électrique…</span></label><input id="pf-hab" value="${v('habilitations')}" maxlength="200"></div>
+      <div class="field"><label>Notes</label><textarea id="pf-notes" rows="2" style="width:100%;">${v('notes')}</textarea></div>
+      <div id="m-msg"></div>
+      <div class="actions">${creation ? '' : '<button class="btn" id="pf-retirer" style="margin-right:auto;color:var(--danger,#c0392b);">Retirer de l\'équipe</button>'}<button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">${creation ? 'Ajouter' : 'Enregistrer'}</button></div>
+    `, 'large');
+    const $ = (id) => document.getElementById(id);
+    $('m-cancel').addEventListener('click', fermerModale);
+    // Nom affiché proposé automatiquement tant que l'utilisateur ne l'a pas modifié à la main.
+    let nomManuel = !creation;
+    $('pf-nom').addEventListener('input', () => { nomManuel = true; });
+    const proposer = () => { if (!nomManuel) $('pf-nom').value = [$('pf-prenom').value.trim(), $('pf-nomf').value.trim()].filter(Boolean).join(' '); };
+    $('pf-prenom').addEventListener('input', proposer); $('pf-nomf').addEventListener('input', proposer);
+    const apres = () => { referentielsCache = null; fermerModale(); chargerDonneesReelles(); };
+    $('m-submit').addEventListener('click', async () => {
+      const msg = $('m-msg');
+      const corps = {
+        prenom: $('pf-prenom').value, nom_famille: $('pf-nomf').value, nom: $('pf-nom').value, matricule: $('pf-matricule').value,
+        poste: $('pf-poste').value, role_type: $('pf-role').value, equipe: $('pf-equipe').value, type_contrat: $('pf-contrat').value,
+        heures_semaine: $('pf-heures').value, cout_horaire: $('pf-cout').value, date_entree: $('pf-entree').value,
+        telephone: $('pf-tel').value, email: $('pf-email').value, habilitations: $('pf-hab').value, notes: $('pf-notes').value,
+        operation_codes: Array.from(document.querySelectorAll('#pf-ops input:checked')).map(i => i.value),
+        machine_ids: Array.from(document.querySelectorAll('#pf-machs input:checked')).map(i => i.value),
+      };
+      if (!corps.prenom.trim()) { msg.innerHTML = '<div class="msg error">Le prénom est obligatoire.</div>'; return; }
+      if (!creation) corps.id = personne.id;
+      $('m-submit').disabled = true; msg.innerHTML = '<div class="msg">Enregistrement…</div>';
+      try {
+        const r = await fetch(`${API}/gerer-personnel`, { method: creation ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+        const d = await lireJson(r); if (!r.ok) throw new Error(d.error || `Erreur serveur (HTTP ${r.status})`);
+        toast(creation ? `${d.nom || corps.prenom} ajouté(e) à l'équipe.` : 'Fiche enregistrée.');
+        apres();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; $('m-submit').disabled = false; }
+    });
+    const retirer = $('pf-retirer');
+    if (retirer) retirer.addEventListener('click', async () => {
+      if (!window.confirm(`Retirer ${personne.name} de l'équipe ? Sa fiche et son historique de planning sont conservés, mais il/elle ne sera plus proposé(e) pour les nouvelles affectations.`)) return;
+      try {
+        const r = await fetch(`${API}/gerer-personnel?id=${personne.id}`, { method: 'DELETE' });
+        const d = await lireJson(r); if (!r.ok) throw new Error(d.error || `Erreur serveur (HTTP ${r.status})`);
+        toast(`${personne.name} retiré(e) de l'équipe.`); apres();
+      } catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
+  }
+
   function renderPersonnel(){
     const wrap = el(`
       <div class="panel">
-        <div class="panel-head"><h2>Équipe atelier</h2></div>
+        <div class="panel-head"><h2>Équipe atelier <span style="font-weight:400;font-size:13px;color:var(--muted);">— ${state.personnel.length} personne${state.personnel.length > 1 ? 's' : ''}</span></h2><button class="btn primary" id="pers-ajout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Ajouter une personne</button></div>
         <table>
           <thead><tr><th>Opérateur</th><th>Poste</th><th>Compétences</th><th>Statut</th><th>Charge de la semaine</th><th></th></tr></thead>
           <tbody id="pers-tbody"></tbody>
@@ -2091,10 +2184,12 @@
             <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--ink-500);"><span>${p.charge}%</span></div>
             <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${p.charge}%"></div></div>
           </td>
-          <td><button class="btn edit-pers" data-id="${p.id}">Compétences</button></td>
+          <td style="white-space:nowrap;"><button class="btn fiche-pers" data-id="${p.id}">Fiche</button> <button class="btn edit-pers" data-id="${p.id}">Compétences</button></td>
         </tr>
       `));
     });
+    wrap.querySelector('#pers-ajout').addEventListener('click', () => ouvrirModalePersonne(null));
+    tbody.querySelectorAll('.fiche-pers').forEach(btn => btn.addEventListener('click', () => ouvrirModalePersonne(state.personnel.find(x => x.id === btn.dataset.id))));
     tbody.querySelectorAll('.edit-pers').forEach(btn => {
       btn.addEventListener('click', () => {
         const p = state.personnel.find(x => x.id === btn.dataset.id);
