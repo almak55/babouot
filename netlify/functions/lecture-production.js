@@ -13,7 +13,7 @@ try { ({ etapesBloquees } = require('./lib/dependances')); } catch (e) { console
 const hhmm = (t) => (t ? String(t).slice(0, 5) : null);
 const nombre = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     const p = event.queryStringParameters || {};
     const supabase = getSupabase();
@@ -117,3 +117,6 @@ exports.handler = async (event) => {
     return { statusCode: 500, body: JSON.stringify({ error: e.message || String(e) }) };
   }
 };
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

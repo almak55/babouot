@@ -154,7 +154,7 @@ async function replanifier(supabase, c, option, appliquer) {
   };
 }
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     const supabase = getSupabase();
     await purgerObsoletes(supabase);
@@ -215,3 +215,6 @@ exports.handler = async (event) => {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
 };
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

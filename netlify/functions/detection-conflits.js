@@ -23,7 +23,7 @@ const plage = (c) => (c.heure_debut && c.heure_fin
   : { d: 0, f: 1440 });
 const seChevauchent = (a, b) => a.d < b.f && b.d < a.f;
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     const params = event.queryStringParameters || {};
     const dateDebut = params.date || new Date().toISOString().slice(0, 10);
@@ -94,3 +94,6 @@ function addDays(dateStr, n) {
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

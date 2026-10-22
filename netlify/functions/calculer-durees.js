@@ -22,7 +22,7 @@
 const { getSupabase } = require('./lib/supabaseclient');
 const { calculerEtapes, arrondi, nombreOuNull } = require('./lib/durees');
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     const supabase = getSupabase();
     let ofId;
@@ -209,3 +209,6 @@ exports.handler = async (event) => {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
 };
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

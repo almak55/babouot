@@ -54,7 +54,7 @@ function intervalleJournee(dateStr, hd, hf) {
   return { d: j + (hd ? hhmm(hd) : 0), f: hd || hf ? j + (hf ? hhmm(hf) : MIN_JOUR) : j + MIN_JOUR };
 }
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     if (event.httpMethod !== 'POST') {
       return { statusCode: 405, body: JSON.stringify({ error: 'Méthode non autorisée, utiliser POST.' }) };
@@ -436,3 +436,6 @@ exports.handler = async (event) => {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
 };
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

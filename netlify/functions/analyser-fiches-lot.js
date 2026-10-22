@@ -15,7 +15,7 @@ const { getSupabase } = require('./lib/supabaseclient');
 
 const iso = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d || '') && !Number.isNaN(Date.parse(d)) ? d : null);
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: JSON.stringify({ error: 'Méthode non autorisée, utiliser POST.' }) };
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -124,3 +124,6 @@ ${operations.map((o) => `${o.code} = ${o.nom}`).join('\n')}`;
     return { statusCode: 500, body: JSON.stringify({ error: e.message || String(e) }) };
   }
 };
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

@@ -32,7 +32,7 @@ const { getSupabase } = require('./lib/supabaseclient');
 
 const PRIORITE_ORDRE = { urgente: 0, haute: 1, normale: 2 };
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     const body = event.body ? JSON.parse(event.body) : {};
     const dateDebut = body.date_debut || new Date().toISOString().slice(0, 10);
@@ -246,3 +246,6 @@ function buildHorizon(dateDebut, nJours) {
   }
   return jours;
 }
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

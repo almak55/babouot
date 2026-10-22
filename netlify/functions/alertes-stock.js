@@ -11,7 +11,7 @@
 
 const { getSupabase } = require('./lib/supabaseclient');
 
-exports.handler = async () => {
+const handlerProtege = async () => {
   try {
     const supabase = getSupabase();
 
@@ -33,3 +33,6 @@ exports.handler = async () => {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
 };
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

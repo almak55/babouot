@@ -14,7 +14,7 @@
 const { getSupabase } = require('./lib/supabaseclient');
 const { analyser, evaluer } = require('./lib/formules');
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: JSON.stringify({ error: 'Méthode non autorisée, utiliser POST.' }) };
     const { formule, valeurs = {} } = JSON.parse(event.body || '{}');
@@ -46,3 +46,6 @@ exports.handler = async (event) => {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
 };
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

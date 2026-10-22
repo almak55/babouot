@@ -29,7 +29,7 @@ const nombre = (v) => {
 };
 const typeOuNull = (v) => (v === undefined || v === null || v === '' || v === 'tous' ? null : String(v));
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     const supabase = getSupabase();
     const q = event.queryStringParameters || {};
@@ -126,3 +126,6 @@ async function effacer(supabase, machineId, operationId, type) {
   const { error } = await req;
   if (error) throw error;
 }
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

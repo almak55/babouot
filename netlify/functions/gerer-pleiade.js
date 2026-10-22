@@ -23,7 +23,7 @@ const propre = (b) => {
 const slug = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 30);
 const rep = (code, obj) => ({ statusCode: code, body: JSON.stringify(obj) });
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     const supabase = getSupabase();
     const m = event.httpMethod;
@@ -75,3 +75,6 @@ exports.handler = async (event) => {
     return rep(500, { error: err.message });
   }
 };
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

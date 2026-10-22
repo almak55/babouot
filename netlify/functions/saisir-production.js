@@ -26,7 +26,7 @@ const planifier = require('./planifier-of');
 
 const nombre = (v) => { if (v === null || v === undefined || v === '') return null; const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : null; };
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   const t0 = Date.now();
   try {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: JSON.stringify({ error: 'Méthode non autorisée, utiliser POST.' }) };
@@ -139,3 +139,6 @@ exports.handler = async (event) => {
     return { statusCode: 500, body: JSON.stringify({ error: e.message || String(e) }) };
   }
 };
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

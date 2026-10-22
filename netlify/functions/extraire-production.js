@@ -18,7 +18,7 @@ const FORMATS_IMAGE = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 const nombre = (v) => { if (v === null || v === undefined || v === '') return null; const n = Number(String(v).replace(/\s/g, '').replace(',', '.')); return Number.isFinite(n) ? n : null; };
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: JSON.stringify({ error: 'Méthode non autorisée, utiliser POST.' }) };
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -147,3 +147,6 @@ ${liste}`;
     return { statusCode: 500, body: JSON.stringify({ error: e.message || String(e) }) };
   }
 };
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

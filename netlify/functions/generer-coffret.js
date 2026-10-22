@@ -30,7 +30,7 @@ function gamme(aRetours) {
   return e.map((x) => ({ ...x, sequence: seq[x.code], predecesseurs: x.preds.map((p) => seq[p]), predecesseurs_libelles: x.preds.map((p) => e.find((y) => y.code === p).libelle), dependances: {} }));
 }
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     const supabase = getSupabase();
     if (event.httpMethod === 'GET') {
@@ -94,3 +94,6 @@ exports.handler = async (event) => {
     return rep(500, { error: err.message });
   }
 };
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

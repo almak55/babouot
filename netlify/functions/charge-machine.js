@@ -14,7 +14,7 @@
 
 const { getSupabase } = require('./lib/supabaseclient');
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     const params = event.queryStringParameters || {};
     const dateDebut = params.date_debut;
@@ -82,3 +82,6 @@ function countJoursOuvres(dateDebut, dateFin) {
   }
   return count;
 }
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

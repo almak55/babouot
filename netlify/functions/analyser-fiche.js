@@ -21,7 +21,7 @@ const XLSX = require('xlsx');
 
 const FORMATS_IMAGE = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     if (event.httpMethod !== 'POST') {
       return { statusCode: 405, body: JSON.stringify({ error: 'Méthode non autorisée, utiliser POST.' }) };
@@ -180,3 +180,6 @@ ${listeOperations}`;
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
 };
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

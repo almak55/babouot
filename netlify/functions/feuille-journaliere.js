@@ -11,7 +11,7 @@ const { purgerObsoletes } = require('./lib/obsoletes');
 
 const hhmm = (t) => (t ? String(t).slice(0, 5) : null);
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     const date = (event.queryStringParameters || {}).date;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
@@ -97,3 +97,6 @@ exports.handler = async (event) => {
     return { statusCode: 500, body: JSON.stringify({ error: e.message || String(e) }) };
   }
 };
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

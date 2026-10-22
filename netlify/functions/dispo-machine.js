@@ -11,7 +11,7 @@ const { getSupabase } = require('./lib/supabaseclient');
 const PL = require('./lib/planification');
 const { libelleJour, aujourdhuiParis } = require('./lib/debut-etape');
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     const q = event.queryStringParameters || {};
     if (!q.machine_id) return { statusCode: 400, body: JSON.stringify({ error: 'machine_id requis.' }) };
@@ -52,3 +52,6 @@ exports.handler = async (event) => {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
 };
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);

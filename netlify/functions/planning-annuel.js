@@ -78,7 +78,7 @@ function sequencer(lignes, ecart, parJour) {
   return { sequence, jours_bdm: Math.ceil(sequence.length / parJour), reglages, nettoyages, series: series.length };
 }
 
-exports.handler = async (event) => {
+const handlerProtege = async (event) => {
   try {
     const supabase = getSupabase();
     const lireParams = async () => {
@@ -159,3 +159,6 @@ exports.handler = async (event) => {
     return rep(500, { error: err.message });
   }
 };
+
+// Accès réservé aux utilisateurs connectés (voir lib/auth.js).
+exports.handler = require('./lib/auth').avecAuth(handlerProtege);
