@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Atelier — Planification de production</title>
+<title>Ateliers Babouot — Planification de production</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -572,7 +572,7 @@
   <nav class="side" id="side">
     <div class="brand">
       <div class="mark">A</div>
-      <div class="txt"><span class="name">Atelier</span><small>RELIURE INDUSTRIELLE</small></div>
+      <div class="txt"><span class="name">Ateliers Babouot</span><small>RELIURE INDUSTRIELLE</small></div>
     </div>
     <button class="navbtn active" data-tab="planning">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2.5"/><path d="M3 9h18"/><path d="M8 2.5v3M16 2.5v3"/></svg>
@@ -616,7 +616,7 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
         </button>
         <div>
-          <div class="greeting">Bonjour, Alain <span class="wave">👋</span></div>
+          <div class="greeting" id="greeting">Bonjour <span class="wave">👋</span></div>
           <h1 id="page-title">Planification</h1>
           <div class="sub" id="page-sub">Chargement de la semaine…</div>
         </div>
@@ -629,7 +629,7 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
           <span class="icon-btn-dot"></span>
         </button>
-        <div class="avatar">A</div>
+        <div class="avatar" id="avatar" style="cursor:pointer;" title="Mon profil">A</div>
       </div>
     </div>
     <div class="content" id="content"></div>
@@ -692,10 +692,6 @@
     b.style.cssText = 'position:fixed;left:12px;bottom:10px;z-index:50;font-size:12px;padding:3px 10px;border-radius:8px;border:1px solid #8886;background:transparent;color:inherit;opacity:.65;cursor:pointer;';
     b.addEventListener('click', () => { ecrireSession(null); location.reload(); });
     document.body.appendChild(b);
-    const m = document.createElement('button'); m.id = 'mdp-btn'; m.textContent = 'Changer mon mot de passe';
-    m.style.cssText = 'position:fixed;left:100px;bottom:10px;z-index:50;font-size:12px;padding:3px 10px;border-radius:8px;border:1px solid #8886;background:transparent;color:inherit;opacity:.65;cursor:pointer;';
-    m.addEventListener('click', ouvrirChangementMdp);
-    document.body.appendChild(m);
   }
   function ouvrirChangementMdp() {
     if (document.getElementById('mdp-overlay')) return;
@@ -727,15 +723,83 @@
         const r = await original('/.netlify/functions/connexion', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (sess ? sess.access_token : '') }, body: JSON.stringify({ action: 'changer_mot_de_passe', mot_de_passe_actuel: actuel, nouveau_mot_de_passe: nouveau }) });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || 'Changement impossible.');
-        if (d.access_token) ecrireSession({ access_token: d.access_token, refresh_token: d.refresh_token, expires_at: d.expires_at, email: d.email });
+        if (d.access_token) ecrireSession({ access_token: d.access_token, refresh_token: d.refresh_token, expires_at: d.expires_at, email: d.email, profil: d.profil });
         else ecrireSession(null);
         msg.style.color = '#0f766e'; msg.textContent = 'Mot de passe modifié.';
         setTimeout(() => { if (d.access_token) fermer(); else location.reload(); }, 1200);
       } catch (err) { msg.textContent = err.message; bt.disabled = false; }
     });
   }
-  document.addEventListener('DOMContentLoaded', () => { if (lireSession()) boutonDeconnexion(); else afficherConnexion(); });
-  if (document.readyState !== 'loading') { if (lireSession()) boutonDeconnexion(); else afficherConnexion(); }
+  const esc2 = (t) => String(t == null ? '' : t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function appliquerProfil() {
+    const sess = lireSession() || {}, p = sess.profil || {};
+    const g = document.getElementById('greeting');
+    if (g) g.innerHTML = 'Bonjour' + (p.prenom ? ', ' + esc2(p.prenom) : '') + ' <span class="wave">👋</span>';
+    const a = document.getElementById('avatar');
+    if (a) {
+      const ini = ((p.prenom || '').charAt(0) + (p.nom || '').charAt(0)) || (sess.email || '?').charAt(0);
+      a.textContent = ini.toUpperCase();
+      a.title = ([p.prenom, p.nom].filter(Boolean).join(' ') || sess.email || 'Mon profil') + (p.fonction ? ' · ' + p.fonction : '') + ' (cliquer pour modifier mon profil)';
+    }
+  }
+  function ouvrirProfil(premiere) {
+    if (document.getElementById('profil-overlay')) return;
+    const sess = lireSession() || {}, p = sess.profil || {};
+    const o = document.createElement('div'); o.id = 'profil-overlay';
+    o.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+    const champ = 'width:100%;padding:9px;margin-top:4px;border-radius:8px;border:1px solid #8884;';
+    const lab = 'font-size:13px;';
+    o.innerHTML = `<form id="profil-form" style="background:var(--card,#fff);color:var(--text,#111);width:min(420px,100%);max-height:92vh;overflow:auto;padding:26px;border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:11px;">
+      <h2 style="margin:0;font-size:19px;">${premiere ? 'Bienvenue — complétez votre profil' : 'Mon profil'}</h2>
+      <div style="font-size:13px;opacity:.7;">Compte : ${esc2(sess.email || '')}</div>
+      <div style="display:flex;gap:10px;">
+        <label style="${lab}flex:1;">Prénom *<input id="pf-prenom" value="${esc2(p.prenom)}" required maxlength="80" autocomplete="given-name" style="${champ}"></label>
+        <label style="${lab}flex:1;">Nom<input id="pf-nom" value="${esc2(p.nom)}" maxlength="80" autocomplete="family-name" style="${champ}"></label></div>
+      <label style="${lab}">Fonction<input id="pf-fonction" value="${esc2(p.fonction)}" maxlength="80" placeholder="ex. Contremaître, Chef d'atelier" style="${champ}"></label>
+      <label style="${lab}">Service / équipe<input id="pf-service" value="${esc2(p.service)}" maxlength="80" placeholder="ex. Façonnage, Emboîtage" style="${champ}"></label>
+      <label style="${lab}">Téléphone<input id="pf-tel" value="${esc2(p.telephone)}" maxlength="80" type="tel" autocomplete="tel" style="${champ}"></label>
+      <div id="pf-msg" style="font-size:13px;color:#c0392b;min-height:18px;"></div>
+      <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap;">
+        <button type="button" id="pf-mdp" style="padding:8px 10px;border-radius:8px;border:1px solid #8886;background:transparent;color:inherit;cursor:pointer;font-size:12px;">Changer mon mot de passe</button>
+        <div style="display:flex;gap:8px;"><button type="button" id="pf-annuler" style="padding:9px 14px;border-radius:8px;border:1px solid #8886;background:transparent;color:inherit;cursor:pointer;">${premiere ? 'Plus tard' : 'Annuler'}</button>
+        <button type="submit" id="pf-go" style="padding:9px 14px;border:0;border-radius:8px;background:#0f766e;color:#fff;font-weight:600;cursor:pointer;">Enregistrer</button></div></div></form>`;
+    document.body.appendChild(o);
+    const fermer = () => o.remove();
+    document.getElementById('pf-annuler').addEventListener('click', fermer);
+    o.addEventListener('mousedown', (e) => { if (e.target === o) fermer(); });
+    document.getElementById('pf-mdp').addEventListener('click', () => { fermer(); ouvrirChangementMdp(); });
+    document.getElementById('profil-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('pf-msg'), bt = document.getElementById('pf-go'); bt.disabled = true; msg.style.color = '#c0392b';
+      try {
+        const s = lireSession();
+        const r = await original('/.netlify/functions/connexion', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (s ? s.access_token : '') }, body: JSON.stringify({ action: 'maj_profil', profil: { prenom: document.getElementById('pf-prenom').value, nom: document.getElementById('pf-nom').value, fonction: document.getElementById('pf-fonction').value, service: document.getElementById('pf-service').value, telephone: document.getElementById('pf-tel').value } }) });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Enregistrement impossible.');
+        const cur = lireSession(); if (cur) { cur.profil = d.profil; ecrireSession(cur); }
+        appliquerProfil(); msg.style.color = '#0f766e'; msg.textContent = 'Profil enregistré.'; setTimeout(fermer, 700);
+      } catch (err) { msg.textContent = err.message; bt.disabled = false; }
+    });
+  }
+  async function chargerProfil() {
+    const s = lireSession(); if (!s) return;
+    try {
+      const r = await original('/.netlify/functions/connexion', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + s.access_token }, body: JSON.stringify({ action: 'lire_profil' }) });
+      if (!r.ok) return;
+      const d = await r.json(); const cur = lireSession(); if (!cur) return;
+      cur.profil = d.profil || {}; ecrireSession(cur); appliquerProfil();
+      if (!cur.profil.prenom) ouvrirProfil(true);
+    } catch (e) { /* hors ligne : on garde le profil connu */ }
+  }
+  function demarrer() {
+    if (!lireSession()) { afficherConnexion(); return; }
+    boutonDeconnexion(); appliquerProfil();
+    const a = document.getElementById('avatar'); if (a) a.addEventListener('click', () => ouvrirProfil(false));
+    chargerProfil();
+  }
+  let lance = false; const unefois = () => { if (!lance) { lance = true; demarrer(); } };
+  document.addEventListener('DOMContentLoaded', unefois);
+  if (document.readyState !== 'loading') unefois();
 
   window.fetch = async function (url, options) {
     options = options || {};
