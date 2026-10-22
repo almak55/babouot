@@ -1092,10 +1092,56 @@
     return wrap;
   }
 
+  // Fenêtres de lecture des OF : un bouton pour les OF Pléiade (et coffrets), un autre pour les OF cartonnés (tous les autres).
+  const estOfPleiade = (o) => o.type === 'pleiade' || o.type === 'coffret';
+  function ouvrirListeOf(genre) {
+    const pleiade = genre === 'pleiade';
+    const liste = state.ordres.filter((o) => estOfPleiade(o) === pleiade);
+    const ETAT = { 'en cours': ['En cours', 'amber'], 'validé': ['Validé', 'teal'], 'planifié': ['Planifié', 'teal'], 'en attente de validation': ['En attente de validation', 'muted'], 'en pause': ['En pause', 'danger'], 'terminé': ['Terminé', 'green'] };
+    const PRIO = { urgente: 0, haute: 1, normale: 2 };
+    const PRIO_ICON = { urgente: '<path d="M12 2L2 20h20L12 2z"/><path d="M12 9v5M12 17h.01"/>', haute: '<path d="M12 19V5M5 12l7-7 7 7"/>', normale: '<circle cx="12" cy="12" r="8"/>' };
+    const trier = (a, b) => (PRIO[a.priorite] ?? 2) - (PRIO[b.priorite] ?? 2) || String(a.delai || '9999').localeCompare(String(b.delai || '9999')) || String(a.id).localeCompare(String(b.id));
+    const titre = pleiade ? 'OF Pléiade' : 'OF Cartonnés';
+    const sousTitre = pleiade ? 'Pléiade et coffrets : toujours prioritaires, dates de livraison Gallimard strictes.' : 'Tous les autres ordres de fabrication.';
+    afficherModale(`
+      <h3>${titre} <span style="font-size:13px;font-weight:400;color:var(--muted);">— ${liste.length} ordre${liste.length > 1 ? 's' : ''}</span></h3>
+      <div class="plan-note" style="margin-bottom:8px;">${sousTitre} Classement : priorité, puis date de livraison.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;align-items:center;">
+        <input id="lof-q" placeholder="Rechercher (n° d'OF, titre, client)…" style="flex:1;min-width:200px;padding:7px 10px;border-radius:8px;border:1px solid var(--line);">
+        <select id="lof-etat" style="padding:7px 10px;border-radius:8px;border:1px solid var(--line);"><option value="">Tous les états</option>${Object.entries(ETAT).filter(([k]) => liste.some((o) => o.statut === k)).map(([k, v]) => `<option value="${k}">${v[0]}</option>`).join('')}</select>
+      </div>
+      <div style="overflow-x:auto;"><table class="row-table"><thead><tr><th></th><th>Production</th><th>Client</th><th>Qté</th><th>Délai</th><th>État</th><th>Avancement</th><th></th></tr></thead><tbody id="lof-tbody"></tbody></table></div>
+      <div class="actions"><button class="btn" id="lof-fermer">Fermer</button></div>`, 'xlarge');
+    document.getElementById('lof-fermer').addEventListener('click', fermerModale);
+    const tbody = document.getElementById('lof-tbody');
+    function afficher() {
+      const q = document.getElementById('lof-q').value.trim().toLowerCase(), et = document.getElementById('lof-etat').value;
+      const lignes = liste.filter((o) => (!et || o.statut === et) && (!q || `${o.id} ${o.produit} ${o.client}`.toLowerCase().includes(q))).sort(trier);
+      tbody.innerHTML = lignes.map((o) => {
+        const accent = (ETAT[o.statut] || [0, 'teal'])[1];
+        const fill = o.avancement >= 70 ? '' : (o.avancement >= 30 ? 'warn' : 'danger');
+        const typeTag = o.type === 'coffret' ? ' <span class="tag warn" style="margin-left:4px;">Coffret</span>' : '';
+        return `<tr class="row-accent-${accent}">
+          <td class="row-icon-cell"><span class="row-icon ${accent}">${svgIcon(PRIO_ICON[o.priorite] || PRIO_ICON.normale)}</span></td>
+          <td><div class="row-title">${esc(o.id)}${typeTag}</div><div class="row-sub">${esc(o.produit)}</div></td>
+          <td><span class="chip">${esc(o.client || '—')}</span></td>
+          <td>${Number(o.qte || 0).toLocaleString('fr-FR')}</td>
+          <td class="mono">${o.delai || '—'}</td>
+          <td><span class="etat etat-${accent}">${esc((ETAT[o.statut] || [o.statut])[0])}</span></td>
+          <td style="min-width:110px;"><div style="font-size:11px;color:var(--ink-500);">${o.avancement}%</div><div class="bar-track"><div class="bar-fill ${fill}" style="width:${o.avancement}%"></div></div></td>
+          <td class="row-menu-cell"><button class="row-menu-btn" data-ofid="${o.uuid}" data-ofnum="${esc(o.id)}" data-ofstatut="${o.statut}" aria-label="Actions">${svgIcon('<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>')}</button></td></tr>`;
+      }).join('') || `<tr><td colspan="8"><div class="empty">Aucun ordre ${liste.length ? 'ne correspond à la recherche' : 'dans cette catégorie'}.</div></td></tr>`;
+      tbody.querySelectorAll('.row-menu-btn').forEach((btn) => btn.addEventListener('click', (e) => { e.stopPropagation(); ouvrirMenuOf(btn, btn.dataset.ofid, btn.dataset.ofnum, btn.dataset.ofstatut); }));
+    }
+    document.getElementById('lof-q').addEventListener('input', afficher);
+    document.getElementById('lof-etat').addEventListener('change', afficher);
+    afficher();
+  }
+
   function renderOrdres(){
     const wrap = el(`
       <div class="panel">
-        <div class="panel-head"><h2>Ordres de fabrication</h2><div style="display:flex;gap:8px;"><button class="btn" id="couts-btn">Coûts & tarifs</button><button class="btn" id="import-lot">Importer des fiches (PDF)</button><button class="btn" id="pleiade-btn">Fiche Pléiade</button><button class="btn" id="coffret-btn">Coffrets</button><button class="btn" id="annuel-btn">Planning annuel Pléiade</button><button class="btn" id="reorg-btn">Réorganiser par priorité</button><button class="btn primary" id="new-of"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvel OF</button></div></div>
+        <div class="panel-head"><h2>Ordres de fabrication</h2><div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;"><button class="btn" id="of-pleiade-btn" style="font-weight:600;white-space:nowrap;"></button><button class="btn" id="of-cartonnes-btn" style="font-weight:600;white-space:nowrap;"></button><button class="btn" id="couts-btn">Coûts & tarifs</button><button class="btn" id="import-lot">Importer des fiches (PDF)</button><button class="btn" id="pleiade-btn">Fiche Pléiade</button><button class="btn" id="coffret-btn">Coffrets</button><button class="btn" id="annuel-btn">Planning annuel Pléiade</button><button class="btn" id="reorg-btn">Réorganiser par priorité</button><button class="btn primary" id="new-of"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvel OF</button></div></div>
         <table class="row-table">
           <thead><tr><th></th><th>Production</th><th>Client</th><th>Qté</th><th>Délai</th><th>État</th><th>Avancement</th><th></th></tr></thead>
           <tbody id="of-tbody"></tbody>
@@ -3957,6 +4003,10 @@
     const newOfBtn = document.getElementById('new-of');
     if (addOfBtn) addOfBtn.addEventListener('click', () => ouvrirModaleAffectation({}));
     if (newOfBtn) newOfBtn.addEventListener('click', ouvrirModaleNouvelOf);
+    const nbP = state.ordres.filter(estOfPleiade).length, nbC = state.ordres.length - nbP;
+    const ofPBtn = document.getElementById('of-pleiade-btn'), ofCBtn = document.getElementById('of-cartonnes-btn');
+    if (ofPBtn) { ofPBtn.textContent = `OF Pléiade (${nbP})`; ofPBtn.addEventListener('click', () => ouvrirListeOf('pleiade')); }
+    if (ofCBtn) { ofCBtn.textContent = `OF Cartonnés (${nbC})`; ofCBtn.addEventListener('click', () => ouvrirListeOf('cartonnes')); }
     const importLotBtn = document.getElementById('import-lot');
     if (importLotBtn) importLotBtn.addEventListener('click', ouvrirModaleImportLot);
     const pleiadeBtn = document.getElementById('pleiade-btn');
@@ -4070,7 +4120,7 @@
         produit: o.titres ? o.titres.nom : '(titre non renseigné)',
         client: o.titres ? o.titres.client : '',
         qte: o.quantite, delai: o.delai, priorite: o.priorite,
-        statut: o.statut, avancement: o.avancement,
+        statut: o.statut, avancement: o.avancement, type: o.type_production || '',
       }));
 
       state.stocks = data.stocks.map(s => ({
