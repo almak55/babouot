@@ -1946,30 +1946,77 @@
       menu.remove();
       ouvrirModaleChiffrage(ofUuid, ofNumero);
     });
-    menu.querySelector('[data-action="gamme"]').addEventListener('click', async () => {
+    menu.querySelector('[data-action="gamme"]').addEventListener('click', () => {
       menu.remove();
-      afficherModale(`<h3>Gamme opératoire — ${ofNumero}</h3><div id="gamme-list" class="empty">Chargement…</div>`);
-      try {
-        const res = await fetch(`${API}/gammes-ordre?of_id=${ofUuid}`);
-        const gammes = await lireJson(res);
-        if (!res.ok || !Array.isArray(gammes)) throw new Error((gammes && gammes.error) || `réponse inattendue du serveur (HTTP ${res.status})`);
-        const list = document.getElementById('gamme-list');
-        const ETAT_LABEL2 = { 'à planifier': 'À planifier', 'planifié': 'Planifié', 'en cours': 'En cours', 'terminé': 'Terminé' };
-        list.className = '';
-        list.innerHTML = gammes.map(g => `
-          <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px;">
-            <span>${g.operation ? g.operation.nom : '(opération supprimée)'}</span>
-            <span class="tag ${g.statut==='terminé'?'ok':g.statut==='à planifier'?'warn':'ok'}">${ETAT_LABEL2[g.statut] || g.statut}</span>
-          </div>
-        `).join('') || '<div class="empty">Aucune étape.</div>';
-      } catch (e) {
-        document.getElementById('gamme-list').innerHTML = `Erreur : ${e.message}`;
-      }
+      ouvrirModaleGamme(ofUuid, ofNumero);
     });
 
     setTimeout(() => {
       document.addEventListener('click', function fermer(){ menu.remove(); document.removeEventListener('click', fermer); }, { once: true });
     }, 0);
+  }
+
+  // Gamme opératoire d'un OF : voir l'état de chaque étape, la planifier, la déplanifier ou la supprimer.
+  async function ouvrirModaleGamme(ofUuid, ofNumero) {
+    afficherModale(`<h3>Gamme opératoire — ${esc(ofNumero)}</h3><div id="gamme-list" class="empty">Chargement…</div><div id="gamme-msg"></div><div class="actions"><button class="btn" id="gamme-fermer">Fermer</button></div>`);
+    document.getElementById('gamme-fermer').addEventListener('click', fermerModale);
+    const zoneMsg = () => document.getElementById('gamme-msg');
+    try {
+      const res = await fetch(`${API}/gammes-ordre?of_id=${ofUuid}`);
+      const gammes = await lireJson(res);
+      if (!res.ok || !Array.isArray(gammes)) throw new Error((gammes && gammes.error) || `réponse inattendue du serveur (HTTP ${res.status})`);
+      const list = document.getElementById('gamme-list');
+      const ETAT = { 'à planifier': 'À planifier', 'planifié': 'Planifié', 'en cours': 'En cours', 'terminé': 'Terminé' };
+      const btn = 'padding:3px 9px;font-size:12px;';
+      list.className = '';
+      list.innerHTML = gammes.map(g => {
+        const nom = g.operation ? g.operation.nom : '(opération supprimée)';
+        const classe = g.statut === 'à planifier' ? 'warn' : 'ok';
+        let actions = '';
+        if (g.statut === 'à planifier') {
+          actions = `<button class="btn primary" style="${btn}" data-gact="planifier" data-id="${g.id}">Planifier</button>
+                     <button class="btn" style="${btn}color:var(--danger,#c0392b);" data-gact="supprimer" data-id="${g.id}" data-nom="${esc(nom)}">Supprimer</button>`;
+        } else if (g.statut === 'planifié') {
+          actions = `<button class="btn" style="${btn}" data-gact="replanifier" data-id="${g.id}">Modifier</button>
+                     <button class="btn" style="${btn}" data-gact="deplanifier" data-id="${g.id}">Déplanifier</button>`;
+        }
+        return `<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px;">
+            <span style="flex:1;min-width:130px;">${esc(nom)}</span>
+            <span class="tag ${classe}">${ETAT[g.statut] || esc(g.statut)}</span>
+            <span style="display:flex;gap:6px;min-width:150px;justify-content:flex-end;">${actions}</span>
+          </div>`;
+      }).join('') || '<div class="empty">Aucune étape.</div>';
+      list.querySelectorAll('[data-gact]').forEach(b => b.addEventListener('click', async () => {
+        const id = b.dataset.id, act = b.dataset.gact;
+        if (act === 'planifier' || act === 'replanifier') {
+          if (act === 'replanifier') {
+            // déjà planifiée : on la déplanifie d'abord, puis on rouvre l'affectation sur cette étape
+            try {
+              const r = await fetch(`${API}/deplanifier-etape`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gamme_ids: [id] }) });
+              const d = await lireJson(r); if (!r.ok) throw new Error(d.error || 'Erreur serveur (HTTP ' + r.status + ')');
+              chargerDonneesReelles();
+            } catch (e) { zoneMsg().innerHTML = `<div class="msg error">${esc(e.message)}</div>`; return; }
+          }
+          fermerModale(); ouvrirModaleAffectation({ ofUuid, gammeId: id }); return;
+        }
+        if (act === 'deplanifier' || act === 'supprimer') {
+          if (act === 'supprimer' && !confirm(`Supprimer l'opération « ${b.dataset.nom} » de l'OF ${ofNumero} ?`)) return;
+          if (act === 'deplanifier' && !confirm('Retirer cette étape du planning ? Elle repassera « à planifier ».')) return;
+          b.disabled = true; zoneMsg().innerHTML = '<div class="msg">En cours…</div>';
+          try {
+            const r = act === 'supprimer'
+              ? await fetch(`${API}/modifier-gamme`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: ofUuid, supprimer: [id] }) })
+              : await fetch(`${API}/deplanifier-etape`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gamme_ids: [id] }) });
+            const d = await lireJson(r); if (!r.ok) throw new Error(d.error || 'Erreur serveur (HTTP ' + r.status + ')');
+            toast(act === 'supprimer' ? 'Opération supprimée.' : 'Étape déplanifiée.');
+            chargerDonneesReelles();
+            ouvrirModaleGamme(ofUuid, ofNumero);
+          } catch (e) { zoneMsg().innerHTML = `<div class="msg error">${esc(e.message)}</div>`; b.disabled = false; }
+        }
+      }));
+    } catch (e) {
+      document.getElementById('gamme-list').innerHTML = `Erreur : ${esc(e.message)}`;
+    }
   }
 
   function renderPersonnel(){
@@ -4988,7 +5035,7 @@
     });
   }
 
-  async function ouvrirModaleAffectation({ machineUuid, machineName, dayIdx, ofUuid }) {
+  async function ouvrirModaleAffectation({ machineUuid, machineName, dayIdx, ofUuid, gammeId }) {
     let refs;
     try { refs = await getReferentiels(); }
     catch (e) {
@@ -5063,7 +5110,7 @@
         }
         const SUFFIXE = { 'planifié': ' — déjà planifiée', 'en cours': ' — en cours', 'terminé': ' — terminée' };
         etapeSelect.innerHTML = gammes.map(g => `<option value="${g.id}" data-statut="${g.statut}" data-manuel="${g.sans_machine ? 1 : 0}" ${g.statut === 'en cours' || g.statut === 'terminé' ? 'disabled' : ''}>${esc(g.operation.nom)}${SUFFIXE[g.statut] || ''}</option>`).join('');
-        const defaut = gammes.find(g => g.statut === 'à planifier') || gammes.find(g => g.statut === 'planifié');
+        const defaut = (gammeId && gammes.find(g => g.id === gammeId && g.statut !== 'en cours' && g.statut !== 'terminé')) || gammes.find(g => g.statut === 'à planifier') || gammes.find(g => g.statut === 'planifié');
         if (defaut) etapeSelect.value = defaut.id;
         majNoteEtape(gammes);
         ajusterMachine();
