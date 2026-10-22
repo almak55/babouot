@@ -4889,7 +4889,7 @@
           <span><strong>${m.series}</strong> série(s) de cartes — <strong>${m.reglages}</strong> changement(s) de réglage</span>
           <span><strong>${m.nettoyages}</strong> changement(s) de tête (nettoyage jaspage)</span></div>
         ${m.sans_carte.length ? `<div class="msg" style="margin-bottom:6px;">⚠ Carte de dos manquante (hors classement) : ${m.sans_carte.map((x) => esc(x.titre)).join(' ; ')}</div>` : ''}
-        <div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Jour BDM</th><th>#</th><th>Titre</th><th>Qté</th><th>Carte de dos</th><th>Tête</th><th>Peau</th><th>Livraison</th><th></th></tr></thead><tbody>
+        <div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Jour BDM</th><th>#</th><th>Titre</th><th>Qté</th><th>Carte de dos</th><th>Tête</th><th>Peau</th><th>Livraison</th><th>OF</th></tr></thead><tbody>
         ${m.sequence.map((s, i) => { const l = lignesMois.find((x) => x.id === s.id) || {};
           return `<tr style="${s.change_reglage ? 'border-top:2px solid var(--accent,#0f766e);' : ''}">
           <td>${i === 0 || m.sequence[i - 1].jour_bdm !== s.jour_bdm ? 'J' + s.jour_bdm : ''}</td><td>${i + 1}</td>
@@ -4897,9 +4897,21 @@
           <td>${champ(s.id, 'quantite', s.quantite, 70)}</td><td>${champ(s.id, 'carte_dos', s.carte_dos, 46)}${s.change_reglage ? ' <span title="Nouveau réglage BDM">⚙</span>' : ''}</td>
           <td>${champ(s.id, 'tete', s.tete, 90)}${s.change_tete ? ' <span title="Nettoyage jaspage">🧽</span>' : ''}</td><td>${champ(s.id, 'peau', s.peau, 90)}</td>
           <td style="white-space:nowrap;${l.date_livraison && l.date_livraison < auj ? 'color:#c0392b;' : ''}">${l.date_livraison ? dateCourte(l.date_livraison) : nomMois(m.mois)}</td>
-          <td>${l.of_id ? '✓ OF créé' : ''}</td></tr>`; }).join('')}
-        ${m.sans_carte.map((x) => { const l = lignesMois.find((y) => y.id === x.id) || {}; return `<tr style="background:var(--field-bg);"><td></td><td>—</td><td>${esc(x.titre)}</td><td>${champ(x.id, 'quantite', l.quantite, 70)}</td><td>${champ(x.id, 'carte_dos', '', 46)}</td><td>${champ(x.id, 'tete', l.tete, 90)}</td><td>${champ(x.id, 'peau', l.peau, 90)}</td><td>${l.date_livraison ? dateCourte(l.date_livraison) : nomMois(m.mois)}</td><td></td></tr>`; }).join('')}
+          <td style="white-space:nowrap;text-align:right;">${l.of_id ? '<span style="color:#0f766e;">✓ OF créé</span>' : `<button class="btn pa-of" type="button" data-id="${s.id}" data-rang="${i + 1}" data-titre="${esc(s.titre)}" title="Créer l'OF Pléiade de ce titre uniquement" style="padding:3px 10px;font-size:12px;">Créer l'OF</button>`}</td></tr>`; }).join('')}
+        ${m.sans_carte.map((x) => { const l = lignesMois.find((y) => y.id === x.id) || {}; return `<tr style="background:var(--field-bg);"><td></td><td>—</td><td>${esc(x.titre)}</td><td>${champ(x.id, 'quantite', l.quantite, 70)}</td><td>${champ(x.id, 'carte_dos', '', 46)}</td><td>${champ(x.id, 'tete', l.tete, 90)}</td><td>${champ(x.id, 'peau', l.peau, 90)}</td><td>${l.date_livraison ? dateCourte(l.date_livraison) : nomMois(m.mois)}</td><td style="white-space:nowrap;text-align:right;">${l.of_id ? '<span style="color:#0f766e;">✓ OF créé</span>' : `<button class="btn pa-of" type="button" data-id="${x.id}" data-rang="${m.sequence.length + 1}" data-titre="${esc(x.titre)}" title="Créer l'OF Pléiade de ce titre uniquement" style="padding:3px 10px;font-size:12px;">Créer l'OF</button>`}</td></tr>`; }).join('')}
         </tbody></table></div>`;
+      $('pa-corps').querySelectorAll('.pa-of').forEach((bt) => bt.addEventListener('click', async () => {
+        if (!window.confirm(`Créer l'OF Pléiade « ${bt.dataset.titre} » (ce titre uniquement) ?`)) return;
+        bt.disabled = true; $('m-msg').innerHTML = `<div class="msg">Création de l'OF « ${esc(bt.dataset.titre)} »…</div>`;
+        try {
+          const r = await api('POST', { action: 'generer', ids: [bt.dataset.id], rang_depart: Number(bt.dataset.rang) || 1 });
+          const x = (r.resultats || [])[0] || {};
+          if (x.erreur || !x.numero) throw new Error(x.erreur || 'Création impossible.');
+          toast(`OF ${x.numero} créé : ${x.titre}.`);
+          data = await api('GET'); prop = await api('POST', { action: 'proposer' }); rendre(); chargerDonneesReelles();
+          $('m-msg').innerHTML = `<div class="msg ok">OF ${esc(x.numero)} créé pour « ${esc(x.titre)} ».${(x.avertissements || []).length ? '<br>⚠ ' + x.avertissements.map(esc).join('<br>⚠ ') : ''}</div>`;
+        } catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; bt.disabled = false; }
+      }));
       $('pa-corps').querySelectorAll('input[data-id]').forEach((inp) => inp.addEventListener('change', async () => {
         const v = inp.value.trim(); const num = ['quantite', 'carte_dos'].includes(inp.dataset.k);
         try {
