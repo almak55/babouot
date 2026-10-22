@@ -51,7 +51,7 @@ async function remplacerCompetences(supabase, id, b) {
 const messageErreur = (e) => {
   const m = String(e.message || e);
   if (/duplicate key|unique/i.test(m)) return 'Une personne porte déjà ce nom affiché : modifiez le « nom affiché » (ex. ajoutez l\'initiale du nom).';
-  if (/column .* does not exist|schema cache/i.test(m)) return 'Colonnes manquantes : exécutez la migration 33 (migration_33_personnel.sql) dans Supabase.';
+  if (/column .* does not exist|schema cache/i.test(m)) return `Colonne introuvable (${m}). Exécutez la migration 33 (migration_33_personnel.sql) dans Supabase, puis lancez : notify pgrst, 'reload schema';`;
   return m;
 };
 
