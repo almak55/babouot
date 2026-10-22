@@ -647,8 +647,69 @@
 (function () {
   const original = window.fetch ? window.fetch.bind(window) : null;
   if (!original) return;
+  // ---- Connexion (Supabase Auth via la fonction « connexion ») ----
+  const CLE_SESSION = 'babouot_session';
+  const lireSession = () => { try { return JSON.parse(localStorage.getItem(CLE_SESSION) || 'null'); } catch (e) { return null; } };
+  const ecrireSession = (x) => { try { if (x) localStorage.setItem(CLE_SESSION, JSON.stringify(x)); else localStorage.removeItem(CLE_SESSION); } catch (e) { /* stockage indisponible */ } };
+  let renouvellement = null;
+  async function renouveler(sess) {
+    if (!renouvellement) {
+      renouvellement = (async () => {
+        try {
+          const r = await original('/.netlify/functions/connexion', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: sess.refresh_token }) });
+          if (!r.ok) return null;
+          const d = await r.json(); ecrireSession(d); return d;
+        } catch (e) { return null; } finally { setTimeout(() => { renouvellement = null; }, 0); }
+      })();
+    }
+    return renouvellement;
+  }
+  function afficherConnexion(message) {
+    if (document.getElementById('login-overlay')) { if (message) document.getElementById('login-msg').textContent = message; return; }
+    const o = document.createElement('div'); o.id = 'login-overlay';
+    o.style.cssText = 'position:fixed;inset:0;z-index:99999;background:var(--bg,#0f1720);display:flex;align-items:center;justify-content:center;padding:16px;';
+    o.innerHTML = `<form id="login-form" style="background:var(--card,#fff);color:var(--text,#111);width:min(380px,100%);padding:28px;border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:12px;">
+      <h2 style="margin:0 0 2px;font-size:20px;">Ateliers Babouot</h2><div style="font-size:13px;opacity:.7;margin-bottom:4px;">Connectez-vous pour accéder au planning de production.</div>
+      <label style="font-size:13px;">E-mail<input id="login-email" type="email" autocomplete="username" required style="width:100%;padding:9px;margin-top:4px;border-radius:8px;border:1px solid #8884;"></label>
+      <label style="font-size:13px;">Mot de passe<input id="login-mdp" type="password" autocomplete="current-password" required style="width:100%;padding:9px;margin-top:4px;border-radius:8px;border:1px solid #8884;"></label>
+      <div id="login-msg" style="font-size:13px;color:#c0392b;min-height:18px;"></div>
+      <button id="login-go" type="submit" style="padding:10px;border:0;border-radius:8px;background:#0f766e;color:#fff;font-weight:600;cursor:pointer;">Se connecter</button></form>`;
+    document.body.appendChild(o);
+    if (message) document.getElementById('login-msg').textContent = message;
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault(); const bt = document.getElementById('login-go'); bt.disabled = true;
+      try {
+        const r = await original('/.netlify/functions/connexion', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: document.getElementById('login-email').value, mot_de_passe: document.getElementById('login-mdp').value }) });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Connexion impossible.');
+        ecrireSession(d); location.reload();
+      } catch (err) { document.getElementById('login-msg').textContent = err.message; bt.disabled = false; }
+    });
+  }
+  function boutonDeconnexion() {
+    if (document.getElementById('logout-btn')) return;
+    const b = document.createElement('button'); b.id = 'logout-btn'; b.textContent = 'Déconnexion';
+    b.style.cssText = 'position:fixed;left:12px;bottom:10px;z-index:50;font-size:12px;padding:3px 10px;border-radius:8px;border:1px solid #8886;background:transparent;color:inherit;opacity:.65;cursor:pointer;';
+    b.addEventListener('click', () => { ecrireSession(null); location.reload(); });
+    document.body.appendChild(b);
+  }
+  document.addEventListener('DOMContentLoaded', () => { if (lireSession()) boutonDeconnexion(); else afficherConnexion(); });
+  if (document.readyState !== 'loading') { if (lireSession()) boutonDeconnexion(); else afficherConnexion(); }
+
   window.fetch = async function (url, options) {
+    options = options || {};
+    if (String(url).includes('/.netlify/functions/') && !String(url).includes('/functions/connexion')) {
+      let sess = lireSession();
+      if (!sess) { afficherConnexion(); return new Response(JSON.stringify({ error: 'Connexion requise.' }), { status: 401, headers: { 'Content-Type': 'application/json' } }); }
+      if (sess.expires_at && sess.expires_at - Date.now() / 1000 < 60 && sess.refresh_token) sess = (await renouveler(sess)) || sess;
+      options = { ...options, headers: { ...(options.headers instanceof Headers ? Object.fromEntries(options.headers.entries()) : (options.headers || {})), Authorization: `Bearer ${sess.access_token}` } };
+    }
     const res = await original(url, options);
+    if (res.status === 401 && String(url).includes('/.netlify/functions/') && !String(url).includes('/functions/connexion')) {
+      const sess = lireSession(); const neuf = sess && sess.refresh_token ? await renouveler(sess) : null;
+      if (neuf) return window.fetch(url, options);
+      ecrireSession(null); afficherConnexion('Session expirée : reconnectez-vous.');
+    }
     try {
       const type = (res && res.headers && res.headers.get && res.headers.get('content-type')) || '';
       if (String(url).includes('/.netlify/functions/') && type.toLowerCase().includes('text/html')) {
