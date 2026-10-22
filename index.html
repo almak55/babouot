@@ -686,12 +686,17 @@
       } catch (err) { document.getElementById('login-msg').textContent = err.message; bt.disabled = false; }
     });
   }
+  function deconnecter() { ecrireSession(null); location.reload(); }
   function boutonDeconnexion() {
     if (document.getElementById('logout-btn')) return;
-    const b = document.createElement('button'); b.id = 'logout-btn'; b.textContent = 'Déconnexion';
-    b.style.cssText = 'position:fixed;left:12px;bottom:10px;z-index:50;font-size:12px;padding:3px 10px;border-radius:8px;border:1px solid #8886;background:transparent;color:inherit;opacity:.65;cursor:pointer;';
-    b.addEventListener('click', () => { ecrireSession(null); location.reload(); });
-    document.body.appendChild(b);
+    const av = document.getElementById('avatar');
+    const b = document.createElement('button'); b.id = 'logout-btn'; b.type = 'button'; b.title = 'Se déconnecter'; b.setAttribute('aria-label', 'Se déconnecter');
+    b.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg><span class="logout-txt">Déconnexion</span>';
+    b.style.cssText = 'display:flex;align-items:center;gap:7px;height:36px;padding:0 13px;border-radius:18px;border:1px solid var(--line,#8886);background:var(--paper-raised,transparent);color:var(--ink-700,inherit);font-size:13px;font-weight:600;cursor:pointer;';
+    const st = document.createElement('style'); st.textContent = '@media(max-width:640px){#logout-btn .logout-txt{display:none}#logout-btn{padding:0 10px}}'; document.head.appendChild(st);
+    b.addEventListener('click', deconnecter);
+    if (av && av.parentNode) av.parentNode.insertBefore(b, av);
+    else { b.style.cssText += 'position:fixed;right:12px;top:10px;z-index:50;'; document.body.appendChild(b); }
   }
   function ouvrirChangementMdp() {
     if (document.getElementById('mdp-overlay')) return;
@@ -760,7 +765,8 @@
       <label style="${lab}">Téléphone<input id="pf-tel" value="${esc2(p.telephone)}" maxlength="80" type="tel" autocomplete="tel" style="${champ}"></label>
       <div id="pf-msg" style="font-size:13px;color:#c0392b;min-height:18px;"></div>
       <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap;">
-        <button type="button" id="pf-mdp" style="padding:8px 10px;border-radius:8px;border:1px solid #8886;background:transparent;color:inherit;cursor:pointer;font-size:12px;">Changer mon mot de passe</button>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;"><button type="button" id="pf-mdp" style="padding:8px 10px;border-radius:8px;border:1px solid #8886;background:transparent;color:inherit;cursor:pointer;font-size:12px;">Changer mon mot de passe</button>
+        <button type="button" id="pf-deco" style="padding:8px 10px;border-radius:8px;border:1px solid #c0392b88;background:transparent;color:#c0392b;cursor:pointer;font-size:12px;">Se déconnecter</button></div>
         <div style="display:flex;gap:8px;"><button type="button" id="pf-annuler" style="padding:9px 14px;border-radius:8px;border:1px solid #8886;background:transparent;color:inherit;cursor:pointer;">${premiere ? 'Plus tard' : 'Annuler'}</button>
         <button type="submit" id="pf-go" style="padding:9px 14px;border:0;border-radius:8px;background:#0f766e;color:#fff;font-weight:600;cursor:pointer;">Enregistrer</button></div></div></form>`;
     document.body.appendChild(o);
@@ -768,6 +774,7 @@
     document.getElementById('pf-annuler').addEventListener('click', fermer);
     o.addEventListener('mousedown', (e) => { if (e.target === o) fermer(); });
     document.getElementById('pf-mdp').addEventListener('click', () => { fermer(); ouvrirChangementMdp(); });
+    document.getElementById('pf-deco').addEventListener('click', deconnecter);
     document.getElementById('profil-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const msg = document.getElementById('pf-msg'), bt = document.getElementById('pf-go'); bt.disabled = true; msg.style.color = '#c0392b';
