@@ -692,6 +692,47 @@
     b.style.cssText = 'position:fixed;left:12px;bottom:10px;z-index:50;font-size:12px;padding:3px 10px;border-radius:8px;border:1px solid #8886;background:transparent;color:inherit;opacity:.65;cursor:pointer;';
     b.addEventListener('click', () => { ecrireSession(null); location.reload(); });
     document.body.appendChild(b);
+    const m = document.createElement('button'); m.id = 'mdp-btn'; m.textContent = 'Changer mon mot de passe';
+    m.style.cssText = 'position:fixed;left:100px;bottom:10px;z-index:50;font-size:12px;padding:3px 10px;border-radius:8px;border:1px solid #8886;background:transparent;color:inherit;opacity:.65;cursor:pointer;';
+    m.addEventListener('click', ouvrirChangementMdp);
+    document.body.appendChild(m);
+  }
+  function ouvrirChangementMdp() {
+    if (document.getElementById('mdp-overlay')) return;
+    const o = document.createElement('div'); o.id = 'mdp-overlay';
+    o.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+    const champ = 'width:100%;padding:9px;margin-top:4px;border-radius:8px;border:1px solid #8884;';
+    o.innerHTML = `<form id="mdp-form" style="background:var(--card,#fff);color:var(--text,#111);width:min(380px,100%);padding:26px;border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:12px;">
+      <h2 style="margin:0;font-size:19px;">Changer mon mot de passe</h2>
+      <label style="font-size:13px;">Mot de passe actuel<input id="mdp-actuel" type="password" autocomplete="current-password" required style="${champ}"></label>
+      <label style="font-size:13px;">Nouveau mot de passe (8 caractères minimum)<input id="mdp-nouveau" type="password" autocomplete="new-password" minlength="8" required style="${champ}"></label>
+      <label style="font-size:13px;">Confirmer le nouveau mot de passe<input id="mdp-confirm" type="password" autocomplete="new-password" minlength="8" required style="${champ}"></label>
+      <div id="mdp-msg" style="font-size:13px;color:#c0392b;min-height:18px;"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button type="button" id="mdp-annuler" style="padding:9px 14px;border-radius:8px;border:1px solid #8886;background:transparent;color:inherit;cursor:pointer;">Annuler</button>
+        <button type="submit" id="mdp-go" style="padding:9px 14px;border:0;border-radius:8px;background:#0f766e;color:#fff;font-weight:600;cursor:pointer;">Enregistrer</button></div></form>`;
+    document.body.appendChild(o);
+    const fermer = () => o.remove();
+    document.getElementById('mdp-annuler').addEventListener('click', fermer);
+    o.addEventListener('mousedown', (e) => { if (e.target === o) fermer(); });
+    document.getElementById('mdp-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById('mdp-msg'), bt = document.getElementById('mdp-go');
+      const actuel = document.getElementById('mdp-actuel').value, nouveau = document.getElementById('mdp-nouveau').value;
+      msg.style.color = '#c0392b';
+      if (nouveau !== document.getElementById('mdp-confirm').value) { msg.textContent = 'La confirmation ne correspond pas.'; return; }
+      bt.disabled = true;
+      try {
+        const sess = lireSession();
+        const r = await original('/.netlify/functions/connexion', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (sess ? sess.access_token : '') }, body: JSON.stringify({ action: 'changer_mot_de_passe', mot_de_passe_actuel: actuel, nouveau_mot_de_passe: nouveau }) });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'Changement impossible.');
+        if (d.access_token) ecrireSession({ access_token: d.access_token, refresh_token: d.refresh_token, expires_at: d.expires_at, email: d.email });
+        else ecrireSession(null);
+        msg.style.color = '#0f766e'; msg.textContent = 'Mot de passe modifié.';
+        setTimeout(() => { if (d.access_token) fermer(); else location.reload(); }, 1200);
+      } catch (err) { msg.textContent = err.message; bt.disabled = false; }
+    });
   }
   document.addEventListener('DOMContentLoaded', () => { if (lireSession()) boutonDeconnexion(); else afficherConnexion(); });
   if (document.readyState !== 'loading') { if (lireSession()) boutonDeconnexion(); else afficherConnexion(); }
