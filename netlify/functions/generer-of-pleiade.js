@@ -16,6 +16,7 @@
 //   coffret?: bool,       // volumes en coffret -> pose des jaquettes
 //   rhodoides?: bool, etuis?: bool,
 //   priorite?: 'normale'|'haute'|'urgente'
+//   etapes?: [codes d'étapes du modèle à retenir]  (choix explicite ; sinon étapes déduites des variantes)
 // }
 //
 // Réponse : { valeurs (fiche préremplie), gamme (étapes ordonnées avec dépendances),
@@ -58,7 +59,7 @@ const handlerProtege = async (event) => {
     if (!valeurs.couleur_tete && valeurs.categorie !== 'ALBUM') avertissements.push('Couleur de tête non définie pour cette catégorie.');
     if (valeurs.categorie === 'ALBUM') avertissements.push('Album : tranchefile et signets « à définir » dans le tableau de référence.');
 
-    const reponse = { valeurs, gamme, avertissements };
+    const reponse = { valeurs, gamme, avertissements, etapes_possibles: P.etapesPossibles(ref, opts, valeurs.pave) };
     if (action === 'apercu') return { statusCode: 200, body: JSON.stringify(reponse) };
 
     if (!opts.titre || !opts.quantite) {
