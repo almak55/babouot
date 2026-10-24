@@ -87,6 +87,11 @@ const handlerProtege = async (event) => {
       return { ecart: Number(p.ecart_carte_mm) || 2, parJour: Number(p.titres_par_jour_bdm) || 4 };
     };
     const m = event.httpMethod;
+    // OF supprimé depuis la liste des OF : la ligne du planning annuel (of_id remis à vide) redevient « à produire ».
+    if (m === 'GET' || m === 'POST') {
+      const { error: eSync } = await supabase.from('pleiade_annuel').update({ statut: 'a_produire' }).eq('statut', 'of_cree').is('of_id', null);
+      if (eSync) console.warn('planning-annuel : resynchronisation impossible', eSync.message);
+    }
     if (m === 'GET') {
       const { data, error } = await supabase.from('pleiade_annuel').select('*').order('ordre');
       if (error) throw error;
