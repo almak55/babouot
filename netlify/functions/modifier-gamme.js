@@ -1,7 +1,7 @@
 // functions/modifier-gamme.js
 //
 // POST /.netlify/functions/modifier-gamme
-// body : { of_id, ajouter?: ["EMBOITAGE_1", ...], supprimer?: ["gamme_id", ...],
+// body : { of_id, ajouter?: ["EMBOITAGE_1", ...], apres_sequence?: n° d'étape après laquelle elles démarrent, supprimer?: ["gamme_id", ...],
 //         mode_ligne?: { mode: 'en_ligne' | 'hors_ligne' | 'auto', gamme_id?: "uuid" (sinon toutes les étapes de l'OF) } }
 //
 // mode_ligne : pour les opérations qui peuvent tourner en ligne avec leur précédente (voir lib/en-ligne.js),
@@ -21,7 +21,7 @@ const EL = require('./lib/en-ligne');
 const handlerProtege = async (event) => {
   try {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: JSON.stringify({ error: 'Méthode non autorisée, utiliser POST.' }) };
-    const { of_id: ofId, ajouter, supprimer, mode_ligne: modeLigne } = JSON.parse(event.body || '{}');
+    const { of_id: ofId, ajouter, supprimer, mode_ligne: modeLigne, apres_sequence: apresSeq } = JSON.parse(event.body || '{}');
     if (!ofId) return { statusCode: 400, body: JSON.stringify({ error: 'of_id requis.' }) };
     const supabase = getSupabase();
     const avertissements = [];
@@ -108,7 +108,7 @@ const handlerProtege = async (event) => {
       const inconnus = codes.filter((c) => !parCode[c]);
       if (inconnus.length) return { statusCode: 400, body: JSON.stringify({ error: `Opération(s) inconnue(s) : ${inconnus.join(', ')}` }) };
       let suivante = Math.max(0, ...gammes.map((g) => g.sequence)) + 1;
-      const lignes = codes.map((c) => ({ of_id: ofId, operation_id: parCode[c], sequence: suivante++, statut: 'à planifier', predecesseurs: [] }));
+      const lignes = codes.map((c) => ({ of_id: ofId, operation_id: parCode[c], sequence: suivante++, statut: 'à planifier', predecesseurs: Number.isInteger(apresSeq) && gammes.some((g) => g.sequence === apresSeq) ? [apresSeq] : [] }));
       const { error: eIns } = await supabase.from('gammes_operatoires').insert(lignes);
       if (eIns) throw eIns;
     }
