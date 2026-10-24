@@ -22,7 +22,7 @@ const EL = require('./lib/en-ligne');
 const handlerProtege = async (event) => {
   try {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: JSON.stringify({ error: 'Méthode non autorisée, utiliser POST.' }) };
-    const { of_id: ofId, ajouter, supprimer, mode_ligne: modeLigne, apres_sequence: apresSeq, recalculer_liens: recalculer } = JSON.parse(event.body || '{}');
+    const { of_id: ofId, ajouter, supprimer, mode_ligne: modeLigne, apres_sequence: apresSeq, recalculer_liens: recalculer, avec_planning: avecPlanning } = JSON.parse(event.body || '{}');
     if (!ofId) return { statusCode: 400, body: JSON.stringify({ error: 'of_id requis.' }) };
     const supabase = getSupabase();
     const avertissements = [];
@@ -41,13 +41,26 @@ const handlerProtege = async (event) => {
       for (const id of aSupprimer) {
         const g = gammes.find((x) => x.id === id);
         if (!g) continue;
-        if (g.statut !== 'à planifier') {
+        if (g.statut !== 'à planifier' && !(avecPlanning && g.statut === 'planifié')) {
           avertissements.push(`Étape ${g.sequence} conservée : elle est « ${g.statut} » (déplanifiez-la d'abord).`);
           continue;
         }
         retirees.push(g);
       }
       if (retirees.length) {
+        // avec_planning : les créneaux d'une étape « planifié » sont supprimés avec elle (libère personnes et machines).
+        const aLiberer = retirees.filter((g) => g.statut === 'planifié').map((g) => g.id);
+        if (aLiberer.length) {
+          const { data: cren, error: eC } = await supabase.from('planning_jour').select('id').in('gamme_operatoire_id', aLiberer);
+          if (eC) throw eC;
+          const idsC = (cren || []).map((c) => c.id);
+          if (idsC.length) {
+            const { error: eP } = await supabase.from('planning_jour_personnel').delete().in('planning_jour_id', idsC);
+            if (eP) throw eP;
+            const { error: eD } = await supabase.from('planning_jour').delete().in('id', idsC);
+            if (eD) throw eD;
+          }
+        }
         const { error } = await supabase.from('gammes_operatoires').delete().in('id', retirees.map((g) => g.id));
         if (error) throw error;
         const seqRetirees = new Set(retirees.map((g) => g.sequence));
