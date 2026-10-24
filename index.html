@@ -4625,7 +4625,7 @@
         <div class="step-card" data-gamme="${e.gamme_id}" data-verrou="${verrou ? 1 : 0}">
           <div class="step-head">
             <strong>${e.operation}</strong>
-            <span><span class="tag ${e.chiffre ? 'ok' : 'warn'}">${e.chiffre ? fmtH(e.total_h) : 'Non chiffré'}</span>${verrou ? '' : ` <button class="btn s-retirer" type="button" data-gamme="${e.gamme_id}" title="Retirer cette opération de l'OF">Retirer</button>`}</span>
+            <span><span class="tag ${e.chiffre ? 'ok' : 'warn'}">${e.chiffre ? fmtH(e.total_h) : 'Non chiffré'}</span>${e.statut === 'à planifier' || e.statut === 'planifié' ? ` <button class="btn s-retirer" type="button" data-gamme="${e.gamme_id}" data-planifie="${e.statut === 'planifié' ? 1 : 0}" title="Retirer cette opération de l'OF">Retirer</button>` : ''}</span>
           </div>
           <div class="step-source">${SOURCES[e.source]}${e.duree_manuelle_h !== null ? ' — <strong>durée manuelle appliquée</strong>' : ''}</div>
           <div class="step-grid">
@@ -4721,7 +4721,8 @@
       if (code) modifierGamme({ ajouter: [code] });
     });
     document.querySelectorAll('.s-retirer').forEach(b => b.addEventListener('click', () => {
-      if (confirm('Retirer cette opération de l\'OF ?')) modifierGamme({ supprimer: [b.dataset.gamme] });
+      const pl = b.dataset.planifie === '1';
+      if (confirm(pl ? 'Cette opération est déjà planifiée.\nLa retirer supprimera aussi ses créneaux du planning (les personnes et machines seront libérées). Continuer ?' : 'Retirer cette opération de l\'OF ?')) modifierGamme({ supprimer: [b.dataset.gamme], avec_planning: pl });
     }));
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
     document.getElementById('m-submit').addEventListener('click', async () => {
