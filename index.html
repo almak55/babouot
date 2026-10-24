@@ -2277,13 +2277,18 @@
     const nomOp = Object.fromEntries(refs.operations.map(o => [o.id, o.nom]));
     const nomMach = Object.fromEntries(b.machines.map(m => [m.id, m.nom]));
     const ordre = Object.fromEntries(b.ordres.map(o => [o.id, o]));
+    const persObj = state.personnel.find(x => x.id === persId) || { comp: [] };
+    const compSet = new Set((persObj.comp || []).map(x => String(x).toLowerCase()));
     const jours = b.jours.map(iso => {
       const dispo = b.dispo.find(d => d.personnel_id === persId && d.date === iso) || null;
       const affs = b.planning.filter(c => c.date === iso && (c.personnel_ids || []).includes(persId))
         .sort((x, y) => String(x.heure_debut || '').localeCompare(String(y.heure_debut || '')))
         .map(c => {
           const o = ordre[c.of_id] || {};
+          const opN = nomOp[c.operation_id] || '';
+          const competent = !opN ? true : compSet.has(opN.toLowerCase());
           return {
+            id: c.id, competent, tache: c.gamme_operatoire_id || null,
             debut: c.heure_debut ? String(c.heure_debut).slice(0, 5) : null, fin: c.heure_fin ? String(c.heure_fin).slice(0, 5) : null,
             of: o.numero || '—', titre: o.titres ? o.titres.nom : '', client: o.titres ? (o.titres.client || '') : '', delai: o.delai || '',
             operation: nomOp[c.operation_id] || c.phase || '—', phase: nomOp[c.operation_id] ? (c.phase || '') : '', machine: c.machine_id ? (nomMach[c.machine_id] || '?') : 'Travail manuel',
@@ -2291,9 +2296,77 @@
           };
         });
       const indispo = dispo && dispo.statut !== 'disponible';
+      affs.forEach((a, i) => { a.chevauche = affs.some((o, k) => k !== i && a.debut && o.debut && a.debut < o.fin && o.debut < a.fin); });
       return { iso, dispo, indispo, affs, min: affs.reduce((t, a) => t + a.min, 0) };
     });
     return { jours, refs };
+  }
+
+  // Réaffecter un créneau à une autre personne (compétente et libre en tête de liste)
+  async function ouvrirReaffectation(p, a, rouvrir, retour) {
+    if (!a) return;
+    afficherModale(`<h3>Réaffecter — ${esc(a.operation)}</h3><div class="empty">Recherche des personnes disponibles…</div>`, 'large');
+    let liste;
+    try {
+      const r = await fetch(`${API}/gerer-affectation?planning_jour_id=${a.id}&ancien_id=${p.id}`);
+      const d = await lireJson(r); if (!r.ok) throw new Error(d.error || 'Erreur serveur (HTTP ' + r.status + ')');
+      liste = d.candidats;
+    } catch (e) { afficherModale(`<h3>Réaffecter</h3><div class="msg error">${esc(e.message)}</div><div class="actions"><button class="btn" id="m-cancel">Retour</button></div>`); document.getElementById('m-cancel').addEventListener('click', retour); return; }
+    const badge = (c) => `${c.competent ? '<span class="tag ok">Compétent(e)</span>' : '<span class="tag warn">Hors compétence</span>'} ${c.libre ? '<span class="tag ok">Libre</span>' : `<span class="tag danger">${esc(c.motif)}</span>`}${c.deja_travaille ? ' <span class="tag">a déjà travaillé sur cette tâche</span>' : ''}`;
+    afficherModale(`
+      <h3>Réaffecter — ${esc(a.operation)}</h3>
+      <div style="font-size:12.5px; color:var(--ink-700); margin:-4px 0 10px;">${esc(a.of)} · ${esc(a.titre)} · ${a.debut ? a.debut + '–' + a.fin : 'journée'} · actuellement : <strong>${esc(p.name)}</strong></div>
+      <div style="max-height:300px; overflow:auto; border:1px solid var(--line); border-radius:10px;">
+        ${liste.map((c, i) => `<label style="display:flex; align-items:center; gap:10px; padding:8px 12px; border-bottom:1px solid var(--line); cursor:${c.libre ? 'pointer' : 'not-allowed'}; opacity:${c.libre ? 1 : 0.55};">
+          <input type="radio" name="reaff" value="${c.id}" ${c.libre ? '' : 'disabled'} ${i === 0 && c.libre ? 'checked' : ''} style="width:auto;margin:0;">
+          <span style="flex:1;"><strong>${esc(c.nom)}</strong> <span style="font-size:11.5px; color:var(--ink-500);">${esc(c.poste)} · ${fmtDuree(c.charge_jour_min)} déjà ce jour</span><div style="margin-top:3px;">${badge(c)}</div></span></label>`).join('')}
+        <label style="display:flex; align-items:center; gap:10px; padding:8px 12px; cursor:pointer;"><input type="radio" name="reaff" value="" style="width:auto;margin:0;"> <span><strong>Laisser à affecter</strong> <span style="font-size:11.5px; color:var(--ink-500);">(retirer ${esc(p.name)}, choisir plus tard)</span></span></label>
+      </div>
+      <div class="field" style="margin-top:10px;"><label>Portée</label>
+        <select id="reaff-portee"><option value="creneau">Ce créneau seulement</option>${a.tache ? '<option value="tache">Toute la tâche (créneaux à venir où ' + esc(p.name) + ' est affecté(e))</option>' : ''}</select></div>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Retour</button><button class="btn primary" id="reaff-ok">Réaffecter</button></div>`, 'large');
+    document.getElementById('m-cancel').addEventListener('click', retour);
+    document.getElementById('reaff-ok').addEventListener('click', async (ev) => {
+      const choix = document.querySelector('input[name="reaff"]:checked');
+      const msg = document.getElementById('m-msg');
+      if (!choix) { msg.innerHTML = '<div class="msg error">Choisissez une personne.</div>'; return; }
+      ev.target.disabled = true; msg.innerHTML = '<div class="msg">Enregistrement…</div>';
+      try {
+        const r = await fetch(`${API}/gerer-affectation`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'reaffecter', planning_jour_id: a.id, ancien_id: p.id, nouveau_id: choix.value || null, portee: document.getElementById('reaff-portee').value }) });
+        const d = await lireJson(r); if (!r.ok) throw new Error(d.error || 'Erreur serveur (HTTP ' + r.status + ')');
+        toast(`${d.remplaces.length} créneau(x) réaffecté(s).${d.ignores && d.ignores.length ? ' ' + d.ignores.length + ' ignoré(s) (indisponibilité).' : ''}`);
+        rouvrir();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; ev.target.disabled = false; }
+    });
+  }
+
+  // Modifier le jour et l'horaire d'un créneau
+  function ouvrirDeplacement(p, a, jours, rouvrir, retour) {
+    if (!a) return;
+    const jourA = jours.find(j => j.affs.includes(a));
+    afficherModale(`
+      <h3>Modifier le créneau — ${esc(a.operation)}</h3>
+      <div style="font-size:12.5px; color:var(--ink-700); margin:-4px 0 10px;">${esc(a.of)} · ${esc(a.titre)} · ${esc(a.machine)} · ${esc(p.name)}</div>
+      <div style="display:flex; gap:10px;">
+        <div class="field" style="flex:1.3;"><label>Jour</label><input id="dp-date" type="date" value="${jourA ? jourA.iso : ''}"></div>
+        <div class="field" style="flex:1;"><label>De</label><input id="dp-d" type="time" value="${a.debut || '08:00'}"></div>
+        <div class="field" style="flex:1;"><label>À</label><input id="dp-f" type="time" value="${a.fin || '16:30'}"></div>
+      </div>
+      <small style="color:var(--ink-500); font-size:11.5px;">Horaires de l'atelier 08:00–16:30, pause déjeuner 12:00–12:30 (un créneau ne la chevauche pas : scindez-le). Le logiciel vérifie la machine, les personnes affectées et les absences.</small>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Retour</button><button class="btn primary" id="dp-ok">Enregistrer</button></div>`);
+    document.getElementById('m-cancel').addEventListener('click', retour);
+    document.getElementById('dp-ok').addEventListener('click', async (ev) => {
+      const msg = document.getElementById('m-msg');
+      ev.target.disabled = true; msg.innerHTML = '<div class="msg">Vérification…</div>';
+      try {
+        const r = await fetch(`${API}/gerer-affectation`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'deplacer', planning_jour_id: a.id, date: document.getElementById('dp-date').value, heure_debut: document.getElementById('dp-d').value, heure_fin: document.getElementById('dp-f').value }) });
+        const d = await lireJson(r); if (!r.ok) throw new Error(d.error || 'Erreur serveur (HTTP ' + r.status + ')');
+        toast(d.avertissements && d.avertissements.length ? 'Créneau modifié. ⚠ ' + d.avertissements.join(' ') : 'Créneau modifié.');
+        rouvrir();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; ev.target.disabled = false; }
+    });
   }
 
   async function ouvrirOccupationPersonne(persId) {
@@ -2314,24 +2387,40 @@
     const machines = Array.from(new Set(toutes.map(a => a.machine)));
     const couleur = taux >= 85 ? '#C0392B' : (taux >= 65 ? '#B45309' : '#0F766E');
     const kpi = (v, l) => `<div style="flex:1; min-width:120px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:#fff;"><div style="font-size:20px; font-weight:700; color:#161C2C;">${v}</div><div style="font-size:11.5px; color:var(--ink-500);">${l}</div></div>`;
+    const horsComp = toutes.filter(a => !a.competent);
+    const chevauch = toutes.filter(a => a.chevauche);
+    const surch = occ.jours.filter(j => j.min > 480);
+    const points = [];
+    if (horsComp.length) points.push(`<strong>${horsComp.length} affectation(s) hors compétence</strong> : ${Array.from(new Set(horsComp.map(a => a.operation))).map(esc).join(', ')}.`);
+    if (surch.length) points.push(`<strong>Surcharge</strong> (plus de 8 h) : ${surch.map(j => lib(j.iso) + ' (' + fmtDuree(j.min) + ')').join(', ')}.`);
+    if (chevauch.length) points.push(`<strong>${chevauch.length} créneau(x) qui se chevauchent</strong> dans la journée.`);
+    if (joursIndispo && toutes.some(a => a.id && occ.jours.some(j => j.indispo && j.affs.includes(a)))) points.push('<strong>Affectation(s) pendant une absence</strong> : à réaffecter.');
+    const attention = `<div style="margin-bottom:12px; padding:10px 12px; border-radius:10px; background:${points.length ? '#FFF7EB' : '#E6F6F3'}; border:1px solid ${points.length ? '#F5A623' : '#BFE8E1'}; font-size:13px;">
+      ${points.length ? `<div style="font-weight:700; margin-bottom:4px;">Points d'attention</div><ul style="margin:0; padding-left:18px;">${points.map(x => `<li>${x}</li>`).join('')}</ul>` : '✓ Aucun point d\'attention : compétences, horaires et charge sont cohérents.'}
+      <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+        ${horsComp.length ? '<button class="btn primary" id="occ-auto-hc" style="padding:5px 12px;font-size:12.5px;">Réaffecter automatiquement les affectations hors compétence</button>' : ''}
+        ${toutes.length ? '<button class="btn" id="occ-auto-tout" style="padding:5px 12px;font-size:12.5px;">Libérer cette personne : tout réaffecter automatiquement</button>' : ''}
+        <button class="btn" id="occ-fiche" style="padding:5px 12px;font-size:12.5px;" title="Modifier les compétences (opérations et machines) de cette personne">Modifier ses compétences</button>
+      </div></div>`;
     const bloc = (j) => {
       const etat = j.dispo && j.dispo.statut !== 'disponible'
         ? `<span class="tag danger">${j.dispo.statut === 'en arrêt' ? 'En arrêt' : 'Absent(e)'}</span>`
         : (j.dispo && j.dispo.heure_debut ? `<span class="tag warn">Disponible ${j.dispo.heure_debut.slice(0, 5)}–${j.dispo.heure_fin.slice(0, 5)}</span>` : '<span class="tag ok">Disponible</span>');
       const pct = Math.min(100, Math.round(j.min / 480 * 100));
-      const lignes = j.affs.length ? j.affs.map(a => `<tr>
-          <td style="white-space:nowrap;">${a.debut ? a.debut + '–' + a.fin : 'Journée'}</td>
+      const lignes = j.affs.length ? j.affs.map(a => `<tr${!a.competent || a.chevauche ? ' style="background:#FFF7EB;"' : ''}>
+          <td style="white-space:nowrap;">${a.debut ? a.debut + '–' + a.fin : 'Journée'}${a.chevauche ? '<div style="font-size:11px; color:#B45309; font-weight:600;">⚠ chevauchement</div>' : ''}</td>
           <td><strong>${esc(a.of)}</strong><div style="font-size:11px; color:var(--ink-500);">${esc(a.titre)}${a.client ? ' · ' + esc(a.client) : ''}</div></td>
           <td>${esc(a.operation)}${a.phase ? `<div style="font-size:11px; color:var(--ink-500);">${esc(a.phase)}</div>` : ''}</td>
-          <td>${esc(a.machine)}</td><td style="white-space:nowrap;">${esc(fmtDuree(a.min))}</td></tr>`).join('')
-        : `<tr><td colspan="5" style="color:var(--ink-500); font-style:italic;">${j.indispo ? 'Indisponible ce jour' : 'Aucune affectation'}</td></tr>`;
+          <td>${esc(a.machine)}${!a.competent ? '<div style="font-size:11px; color:#B45309; font-weight:600;">⚠ hors compétence</div>' : ''}</td><td style="white-space:nowrap;">${esc(fmtDuree(a.min))}</td>
+          <td style="white-space:nowrap; text-align:right;"><button class="btn occ-reaff" data-id="${a.id}" style="padding:3px 9px;font-size:12px;">Réaffecter</button> <button class="btn occ-dep" data-id="${a.id}" style="padding:3px 9px;font-size:12px;">Horaire</button></td></tr>`).join('')
+        : `<tr><td colspan="6" style="color:var(--ink-500); font-style:italic;">${j.indispo ? 'Indisponible ce jour' : 'Aucune affectation'}</td></tr>`;
       return `<div style="border:1px solid var(--line); border-left:5px solid ${j.indispo ? '#C0392B' : (j.min ? '#16B8A6' : '#D5D9E3')}; border-radius:10px; margin-bottom:10px; background:#fff;">
         <div style="display:flex; align-items:center; gap:10px; padding:9px 12px; flex-wrap:wrap;">
           <strong style="font-size:14px; text-transform:capitalize;">${lib(j.iso)}</strong>${etat}
-          <span style="margin-left:auto; font-size:12.5px; color:var(--ink-700);">${j.min ? fmtDuree(j.min) + ' affectées' : ''}</span>
+          ${j.min > 480 ? '<span class="tag danger">Surcharge</span>' : ''}<span style="margin-left:auto; font-size:12.5px; color:var(--ink-700);">${j.min ? fmtDuree(j.min) + ' affectées' : ''}</span>
           <div style="width:90px;" class="bar-track"><div class="bar-fill ${pct >= 100 ? 'danger' : (pct >= 65 ? 'warn' : '')}" style="width:${pct}%"></div></div>
         </div>
-        <table style="width:100%; font-size:12.5px;"><thead><tr><th style="width:90px;">Horaire</th><th>OF / Titre</th><th>Opération</th><th>Machine</th><th style="width:70px;">Durée</th></tr></thead><tbody>${lignes}</tbody></table></div>`;
+        <table style="width:100%; font-size:12.5px;"><thead><tr><th style="width:90px;">Horaire</th><th>OF / Titre</th><th>Opération</th><th>Machine</th><th style="width:70px;">Durée</th><th></th></tr></thead><tbody>${lignes}</tbody></table></div>`;
     };
     afficherModale(`
       <h3>Occupation hebdomadaire — ${esc(p.name)}</h3>
@@ -2343,10 +2432,32 @@
         ${kpi(machines.length, 'machine(s) / postes')}
         ${kpi(joursIndispo, 'jour(s) d’absence ou d’arrêt')}
       </div>
+      ${attention}
       ${ouvres.map(bloc).join('')}
       <div class="plan-note" style="margin-top:4px;">Durées en travail effectif (pause déjeuner de 12h00 à 12h30 déduite). Une affectation sans horaire précis compte pour une journée de 8 h. Capacité : 8 h par jour ouvré, moins les jours d'absence ou d'arrêt.</div>
       <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="occ-pdf">Télécharger en PDF</button></div>`, 'xlarge');
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    const rouvrir = async () => { try { await chargerDonneesReelles(); } catch (_) { /* affichage de démo */ } ouvrirOccupationPersonne(persId); };
+    const trouver = (id) => toutes.find(a => String(a.id) === String(id));
+    document.querySelectorAll('.occ-reaff').forEach(b => b.addEventListener('click', () => ouvrirReaffectation(p, trouver(b.dataset.id), rouvrir, () => ouvrirOccupationPersonne(persId))));
+    document.querySelectorAll('.occ-dep').forEach(b => b.addEventListener('click', () => ouvrirDeplacement(p, trouver(b.dataset.id), occ.jours, rouvrir, () => ouvrirOccupationPersonne(persId))));
+    const lotAuto = async (liste, intitule) => {
+      if (!confirm(`${intitule}\n\n${liste.length} affectation(s) seront confiées automatiquement à une personne compétente et libre. Continuer ?`)) return;
+      let ok = 0; const ko = [];
+      for (const a of liste) {
+        try {
+          const r = await fetch(`${API}/gerer-affectation`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'auto', planning_jour_id: a.id, ancien_id: persId, portee: 'creneau' }) });
+          const d = await lireJson(r); if (!r.ok) throw new Error(d.error || 'Erreur');
+          ok++;
+        } catch (e) { ko.push(`${a.operation} ${a.debut || ''} : ${e.message}`); }
+      }
+      toast(`${ok} affectation(s) réaffectée(s)${ko.length ? ', ' + ko.length + ' impossible(s)' : ''}.`, ko.length ? 'error' : undefined);
+      if (ko.length) alert('Non réaffectées :\n' + ko.join('\n'));
+      rouvrir();
+    };
+    const bHc = document.getElementById('occ-auto-hc'); if (bHc) bHc.addEventListener('click', () => lotAuto(horsComp, `Réaffecter les affectations de ${p.name} hors compétence ?`));
+    const bTout = document.getElementById('occ-auto-tout'); if (bTout) bTout.addEventListener('click', () => lotAuto(toutes, `Libérer ${p.name} sur la semaine ?`));
+    document.getElementById('occ-fiche').addEventListener('click', () => ouvrirModalePersonne(p));
     document.getElementById('occ-pdf').addEventListener('click', async (ev) => {
       ev.target.disabled = true;
       try {
