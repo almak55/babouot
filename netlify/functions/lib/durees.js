@@ -21,6 +21,7 @@
 // Une durée manuelle sur l'étape remplace le total calculé.
 
 const { analyser, evaluer } = require('./formules');
+const EL = require('./en-ligne');
 
 const arrondi = (x) => Math.round(x * 100) / 100;
 const heures = (t) => { const [h, m] = String(t).split(':'); return Number(h) + Number(m) / 60; };
@@ -221,6 +222,9 @@ async function calculerEtapes(supabase, ofId) {
       heures_personnes: arrondi(heuresPersonnes),
     };
   });
+
+  // Opérations en ligne : la production de l'étape suit celle de son prédécesseur.
+  EL.appliquerEnLigne(etapes, await EL.chargerRegles(supabase));
 
   const calendrier = calRes.data.map((c) => {
     const utiles = heures(c.heure_fin) - heures(c.heure_debut) - c.pause_minutes / 60;

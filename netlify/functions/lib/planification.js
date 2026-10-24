@@ -226,7 +226,7 @@ function dureeAvecEffectif(dureeMin, effectifStandard, n) {
   return quart > 0 ? quart : Math.max(1, Math.round(brut));
 }
 
-function simulerEtape(etape, machineId, curseur, ctx, charge) {
+function simulerEtape(etape, machineId, curseur, ctx, charge, sync) {
   const cal = ctx.calendrier;
   const occMachine = machineId ? (ctx.occupation.machines[machineId] || []) : [];
   const occPers = (id) => ctx.occupation.personnes[id] || [];
@@ -238,6 +238,8 @@ function simulerEtape(etape, machineId, curseur, ctx, charge) {
 
   for (const phase of etape.phases) {
     if (phase.duree_min <= 0) continue;
+    // En ligne : la production ne démarre pas avant celle du prédécesseur (le réglage, lui, se fait en parallèle).
+    if (sync && phase.type_phase === 'production' && c < sync.debut) c = sync.debut;
     const occMach = phase.besoin_machine ? occMachine : [];
     // Durée écoulée : pour un travail manuel, elle dépend du nombre de personnes réellement présentes.
     const effectifPrevu = imposees ? imposees.length : Math.min(Math.max(1, phase.nb_personnes || 1), pool.length || Infinity);
@@ -297,7 +299,7 @@ function simulerEtape(etape, machineId, curseur, ctx, charge) {
       });
     }
     phasesRes.push({
-      nom: ph.nom, duree_min: ph.duree_min, besoin_machine: !!ph.besoin_machine,
+      nom: ph.nom, type_phase: ph.type_phase || null, duree_min: ph.duree_min, besoin_machine: !!ph.besoin_machine,
       repartissable: !!ph.repartissable, effectif: choisis.length || null, effectif_standard: Math.max(1, ph.nb_personnes || 1),
       duree_une_personne_min: ph.repartissable ? Math.round(ph.duree_standard_min * Math.max(1, ph.nb_personnes || 1)) : null,
       personnes: presences ? Object.keys(presences) : choisis,
@@ -318,7 +320,7 @@ function simulerEtape(etape, machineId, curseur, ctx, charge) {
   };
 }
 
-function planifierEtape(etape, curseur, ctx, charge) {
+function planifierEtape(etape, curseur, ctx, charge, sync) {
   const vide = (problemes) => ({ index: etape.index, machine_id: null, phases: [], debut_min: null, fin_min: null, problemes });
   if (etape.non_chiffre) {
     // Si on connaît la vraie cause (ex: formule invalide), on l'affiche plutôt que le message générique.
@@ -342,7 +344,7 @@ function planifierEtape(etape, curseur, ctx, charge) {
 
   let meilleur = null;
   for (const m of candidats) {
-    const essai = simulerEtape(etape, m, curseur, ctx, charge);
+    const essai = simulerEtape(etape, m, curseur, ctx, charge, sync);
     if (essai && (!meilleur || essai.fin_min < meilleur.fin_min)) meilleur = essai;
   }
   if (!meilleur) {
@@ -400,6 +402,7 @@ function instantAtteint(pr, pct) {
 //   progressif : démarre dès seuil_pct % du prédécesseur fait, sans pouvoir finir avant lui.
 // Ancien format (sans indicateurs) : absent = « fin » ; { mode: 'progressif', seuil_pct } = progressif.
 function contraintesLien(lien) {
+  if (lien && lien.en_ligne) return { fin: false, debut: true, progressif: false, en_ligne: true, seuil_pct: 10 };
   if (!lien) return { fin: true, debut: false, progressif: false, seuil_pct: 10 };
   const explicite = 'fin' in lien || 'debut' in lien || 'progressif' in lien;
   const pct = Number.isFinite(Number(lien.seuil_pct)) ? Math.max(0, Math.min(100, Number(lien.seuil_pct))) : 10;
@@ -464,6 +467,7 @@ function planifierAvant(entree, debutMin) {
     const preds = etape.predecesseurs ?? (pos > 0 ? [entree.etapes[pos - 1].index] : []);
     const liens = etape.liens || {};
     let depart = debutMin;
+    let sync = null;   // fenêtre de production du prédécesseur (étape en ligne)
     let finMinRequise = 0;       // lien progressif : on ne peut pas finir avant la fin du prédécesseur
     preds.forEach((p) => {
       const pr = resultats.get(p);
@@ -473,6 +477,10 @@ function planifierAvant(entree, debutMin) {
       // Sans tranches mesurables (étape déjà faite, impossible à placer) : « progressif » se ramène à « fin ».
       if (c.fin || (c.progressif && !mesurable)) depart = Math.max(depart, pr.fin);
       if (c.debut) depart = Math.max(depart, pr.debut);
+      if (c.en_ligne) {
+        if (pr.prod) sync = { debut: Math.max(sync ? sync.debut : 0, pr.prod.d), fin: Math.max(sync ? sync.fin : 0, pr.prod.f) };
+        else depart = Math.max(depart, pr.fin);   // prédécesseur sans production mesurable : on attend sa fin
+      }
       if (c.progressif && mesurable) {
         depart = Math.max(depart, instantAtteint(pr, c.seuil_pct));
         finMinRequise = Math.max(finMinRequise, pr.fin);
@@ -486,24 +494,26 @@ function planifierAvant(entree, debutMin) {
       return;
     }
 
-    let res = planifierEtape(etape, depart, ctx, charge);
+    let res = planifierEtape(etape, depart, ctx, charge, sync);
     if (res.fin_min !== null && res.phases.length && finMinRequise > 0 && res.fin_min < finMinRequise) {
       // Démarrage progressif : l'étape irait plus vite que son prédécesseur ne produit.
       // On cherche le plus petit départ pour lequel elle ne finit pas avant lui.
       let lo = depart; let hi = finMinRequise; let atteint = null;
       while (hi - lo > 1) {
         const mid = Math.floor((lo + hi) / 2);
-        const r = planifierEtape(etape, mid, ctx, charge);
+        const r = planifierEtape(etape, mid, ctx, charge, sync);
         if (r.fin_min !== null && r.fin_min >= finMinRequise) { hi = mid; atteint = r; } else { lo = mid; }
       }
-      res = atteint || planifierEtape(etape, hi, ctx, charge);
+      res = atteint || planifierEtape(etape, hi, ctx, charge, sync);
     }
     inscrire(res, ctx, charge);
     etapes.push(res);
 
     if (res.fin_min !== null) {
       const brutes = res.phases.flatMap((ph) => ph.brutes);
-      resultats.set(etape.index, { debut: res.debut_min, fin: res.fin_min, duree: brutes.reduce((t, x) => t + (x.f - x.d), 0), brutes });
+      const prods = res.phases.filter((ph) => ph.type_phase === 'production').flatMap((ph) => ph.brutes);
+      const prod = prods.length ? { d: Math.min(...prods.map((x) => x.d)), f: Math.max(...prods.map((x) => x.f)) } : null;
+      resultats.set(etape.index, { debut: res.debut_min, fin: res.fin_min, duree: brutes.reduce((t, x) => t + (x.f - x.d), 0), brutes, prod });
     } else {
       // Étape impossible à placer : elle ne retarde pas ses successeurs (qui repartent de leur propre départ).
       resultats.set(etape.index, { debut: depart, fin: depart, duree: 0, brutes: null });
@@ -566,8 +576,10 @@ function analyserReseau(noeuds) {
   // Contraintes du lien i ← pIdx : « fin », décalage de démarrage (début / progressif), fin minimale (progressif).
   const lienDe = (i, pIdx) => {
     const c = contraintesLien((noeuds[i].liens || {})[noeuds[pIdx].index]);
-    const decalage = c.progressif ? Math.round(d[pIdx] * c.seuil_pct / 100) : 0;
-    return { fin: c.fin, depart: c.debut || c.progressif, decalage, finMin: c.progressif };
+    // En ligne : démarre avec le prédécesseur (réglages en parallèle) ; la production attend la sienne et ne finit pas avant elle.
+    const decalage = c.en_ligne ? Math.max(0, (noeuds[pIdx].reglage_min || 0) - (noeuds[i].reglage_min || 0))
+      : (c.progressif ? Math.round(d[pIdx] * c.seuil_pct / 100) : 0);
+    return { fin: c.fin, depart: c.debut || c.progressif, decalage, finMin: c.progressif || !!c.en_ligne };
   };
 
   const topo = ordreTopologique(preds.map((ps) => ps.map((p) => pos.get(p))));
