@@ -48,6 +48,7 @@ const handlerProtege = async (event) => {
       .is('heure_debut', null).eq('statut', 'planifié').not('gamme_operatoire_id', 'is', null)
       .gte('date', aujourdhuiParis());
     if (body.of_id) q = q.eq('of_id', body.of_id);
+    if (body.gamme_id) q = q.eq('gamme_operatoire_id', body.gamme_id);
     const { data: lignes, error } = await q;
     if (error) throw error;
 
