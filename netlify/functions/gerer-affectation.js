@@ -14,6 +14,10 @@
 //         créneaux de ce jour auxquels la personne peut être ajoutée (sans personne / sans compétence signalés)
 // POST { action: 'ajouter', planning_jour_id, nouveau_id }
 //         ajoute une personne (en renfort ou en titulaire) sur un créneau, après contrôle de ses disponibilités
+// POST { action: 'modifier', planning_jour_id, of_id|null, operation_id|null, machine_id|null }
+//         corrige l'OF, l'opération ou la machine d'un créneau (erreur de saisie) ; contrôle la machine
+// POST { action: 'supprimer', planning_jour_id }
+//         supprime un créneau (et ses affectations) saisi par erreur
 // POST { action: 'deplacer', planning_jour_id, date, heure_debut, heure_fin }
 //         change le jour et/ou l'horaire du créneau (contrôle machine, personnes, absences, horaires, pause)
 
@@ -202,6 +206,29 @@ const handlerProtege = async (event) => {
       return rep(200, { ok: true, nouveau_id: nouveau, remplaces: faits, ignores });
     }
 
+    if (b.action === 'supprimer') {
+      const d1 = await supabase.from('planning_jour_personnel').delete().eq('planning_jour_id', l.id);
+      if (d1.error) throw d1.error;
+      const d2 = await supabase.from('planning_jour').delete().eq('id', l.id);
+      if (d2.error) throw d2.error;
+      return rep(200, { ok: true });
+    }
+
+    if (b.action === 'modifier') {
+      const maj = {};
+      for (const k of ['of_id', 'operation_id', 'machine_id']) if (k in b) maj[k] = b[k] || null;
+      if (!Object.keys(maj).length) return rep(400, { error: 'Rien à modifier.' });
+      if (maj.machine_id && maj.machine_id !== l.machine_id) {
+        const jour = await etatJour(supabase, l);
+        const [s, e] = bornes(l);
+        const m = jour.lignes.find((x) => x.id !== l.id && x.machine_id === maj.machine_id && chevauche([s, e], bornes(x)));
+        if (m) return rep(409, { error: 'Cette machine est déjà occupée sur ce créneau horaire.' });
+      }
+      const { error } = await supabase.from('planning_jour').update(maj).eq('id', l.id);
+      if (error) throw error;
+      return rep(200, { ok: true });
+    }
+
     if (b.action === 'ajouter') {
       if (!b.nouveau_id) return rep(400, { error: 'nouveau_id requis.' });
       const jour = await etatJour(supabase, l);
@@ -276,7 +303,7 @@ const handlerProtege = async (event) => {
       return rep(200, { ok: true, date, heure_debut: b.heure_debut, heure_fin: b.heure_fin, avertissements });
     }
 
-    return rep(400, { error: 'action inconnue (reaffecter | auto | ajouter | deplacer).' });
+    return rep(400, { error: 'action inconnue (reaffecter | auto | ajouter | modifier | supprimer | deplacer).' });
   } catch (err) {
     return rep(500, { error: err.message });
   }
