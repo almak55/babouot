@@ -12,6 +12,7 @@
 // retire. Une même opération peut être ajoutée plusieurs fois. Les opérations
 // ajoutées sont « à planifier » et sans lien imposé (elles peuvent démarrer dès
 // le début tant qu'on n'a pas indiqué « Démarre après »).
+// recalculer_liens: true  refait toutes les dépendances de l'OF d'après le modèle de gamme (Pléiade) et les couples « en ligne ».
 // Seules les étapes « à planifier » peuvent être retirées ; les liens qui
 // pointaient vers elles sont nettoyés.
 
@@ -21,7 +22,7 @@ const EL = require('./lib/en-ligne');
 const handlerProtege = async (event) => {
   try {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: JSON.stringify({ error: 'Méthode non autorisée, utiliser POST.' }) };
-    const { of_id: ofId, ajouter, supprimer, mode_ligne: modeLigne, apres_sequence: apresSeq } = JSON.parse(event.body || '{}');
+    const { of_id: ofId, ajouter, supprimer, mode_ligne: modeLigne, apres_sequence: apresSeq, recalculer_liens: recalculer } = JSON.parse(event.body || '{}');
     if (!ofId) return { statusCode: 400, body: JSON.stringify({ error: 'of_id requis.' }) };
     const supabase = getSupabase();
     const avertissements = [];
@@ -112,6 +113,12 @@ const handlerProtege = async (event) => {
       const { error: eIns } = await supabase.from('gammes_operatoires').insert(lignes);
       if (eIns) throw eIns;
     }
+
+    // Dépendances automatiques : relie les étapes sans lien (y compris celles qui dépendent d'une étape ajoutée)
+    // d'après le modèle de gamme et les couples « en ligne » ; « recalculer » refait tous les liens.
+    const { normaliserGamme } = require('./lib/ordre-gamme');
+    const relie = await normaliserGamme(supabase, ofId, { tout: !!recalculer });
+    if (recalculer) avertissements.push(relie ? 'Dépendances recalculées d\'après le modèle de gamme.' : 'Dépendances déjà à jour.');
 
     return { statusCode: 200, body: JSON.stringify({ ok: true, avertissements }) };
   } catch (err) {
