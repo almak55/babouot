@@ -2039,7 +2039,7 @@
         const couleur = g.statut === 'à planifier' ? '#F5A623' : (g.statut === 'terminé' ? '#8A94AB' : '#16B8A6');
         const enLigneActif = !!(el && el.actif);
         return `<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 14px; margin:0 0 8px ${enLigneActif ? '22px' : '0'}; border:1px solid var(--line); border-left:5px solid ${couleur}; border-radius:10px; background:#fff; position:relative;">
-            <span style="flex:0 0 28px; height:28px; border-radius:50%; background:${couleur}; color:#0A0F1D; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center;">${g.sequence}</span>
+            <span style="flex:0 0 28px; height:28px; border-radius:50%; background:${couleur}; color:#0A0F1D; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center;">${g.rang || g.sequence}</span>
             <div style="flex:1; min-width:170px;">
               <div style="font-size:15px; font-weight:700; color:#161C2C; line-height:1.25;">${esc(nom)}</div>
               ${el ? `<div style="margin-top:3px; font-size:12px; color:${enLigneActif ? '#0F766E' : '#5B6478'}; font-weight:600;">${enLigneActif ? '↳ en ligne avec ' : 'hors ligne, après '}${esc(el.avec)}</div>` : ''}
@@ -2053,7 +2053,7 @@
       try {
         const refs = await getReferentiels();
         const optOps = refs.operations.slice().sort((a, b) => a.nom.localeCompare(b.nom, 'fr')).map(o => `<option value="${esc(o.code)}">${esc(o.nom)}</option>`).join('');
-        const optApres = gammes.map(g => `<option value="${g.sequence}">${g.sequence}. ${esc(g.operation ? g.operation.nom : '(supprimée)')}</option>`).join('');
+        const optApres = gammes.map(g => `<option value="${g.sequence}">${g.rang || g.sequence}. ${esc(g.operation ? g.operation.nom : '(supprimée)')}</option>`).join('');
         list.insertAdjacentHTML('beforeend', `<div style="margin-top:14px; padding:14px; border:2px dashed var(--teal-2,#16B8A6); border-radius:12px; background:#F7FCFB;">
           <div style="font-size:14px; font-weight:700; color:#161C2C; margin-bottom:8px;">＋ Ajouter une opération manquante</div>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
