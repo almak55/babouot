@@ -9,6 +9,11 @@
 //         remplace une personne par une autre (nouveau_id null : la personne est retirée, « personnel à affecter »)
 // POST { action: 'auto', planning_jour_id, ancien_id, portee }
 //         choisit automatiquement le meilleur remplaçant (compétent, libre, déjà passé sur la tâche, peu chargé)
+// GET  ?taches_pour=personnel_id&date=YYYY-MM-DD
+//      -> { taches: [{ id, debut, fin, of, titre, operation, machine, equipe:[noms], libre, motif, competent, sans_personne }] }
+//         créneaux de ce jour auxquels la personne peut être ajoutée (sans personne / sans compétence signalés)
+// POST { action: 'ajouter', planning_jour_id, nouveau_id }
+//         ajoute une personne (en renfort ou en titulaire) sur un créneau, après contrôle de ses disponibilités
 // POST { action: 'deplacer', planning_jour_id, date, heure_debut, heure_fin }
 //         change le jour et/ou l'horaire du créneau (contrôle machine, personnes, absences, horaires, pause)
 
@@ -131,12 +136,47 @@ async function calendrierNormal(supabase) {
     : { debut: 480, fin: 990, pause: 720, pauseFin: 750 };
 }
 
+async function tachesPour(supabase, pid, date) {
+  const { data: lignes, error } = await supabase.from('planning_jour')
+    .select('id, date, heure_debut, heure_fin, phase, statut, machine_id, personnel_id, of_id, operation_id, gamme_operatoire_id').eq('date', date).neq('statut', 'annulé').neq('statut', 'terminé');
+  if (error) throw error;
+  if (!lignes.length) return [];
+  const uniq = (k) => Array.from(new Set(lignes.map((x) => x[k]).filter(Boolean)));
+  const [opR, maR, ofR, pR, cR, pmR, liR, jour] = await Promise.all([
+    supabase.from('operations').select('id, nom').in('id', uniq('operation_id').length ? uniq('operation_id') : ['00000000-0000-0000-0000-000000000000']),
+    supabase.from('machines').select('id, nom').in('id', uniq('machine_id').length ? uniq('machine_id') : ['00000000-0000-0000-0000-000000000000']),
+    supabase.from('ordres_fabrication').select('id, numero, titres(nom)').in('id', uniq('of_id').length ? uniq('of_id') : ['00000000-0000-0000-0000-000000000000']),
+    supabase.from('personnel').select('id, nom'),
+    supabase.from('personnel_competences').select('operation_id').eq('personnel_id', pid),
+    supabase.from('personnel_machines').select('machine_id').eq('personnel_id', pid),
+    supabase.from('planning_jour_personnel').select('planning_jour_id, personnel_id').in('planning_jour_id', lignes.map((x) => x.id)),
+    etatJour(supabase, { date }),
+  ]);
+  for (const r of [opR, maR, ofR, pR, cR, pmR, liR]) if (r.error) throw r.error;
+  const nom = (list, id) => (list.find((x) => x.id === id) || {}).nom || '';
+  const ops = new Set(cR.data.map((x) => x.operation_id)), macs = new Set(pmR.data.map((x) => x.machine_id));
+  return lignes.map((l) => {
+    const [s, e] = bornes(l);
+    const equipe = equipeDe(l, liR.data);
+    const of = ofR.data.find((x) => x.id === l.of_id) || {};
+    const motif = equipe.includes(pid) ? 'déjà affecté(e) à ce créneau' : motifIndispo(pid, s, e, jour, null);
+    return { id: l.id, debut: l.heure_debut ? String(l.heure_debut).slice(0, 5) : null, fin: l.heure_fin ? String(l.heure_fin).slice(0, 5) : null,
+      of: of.numero || '', titre: (of.titres || {}).nom || '', operation: nom(opR.data, l.operation_id) || l.phase || '', machine: nom(maR.data, l.machine_id),
+      equipe: equipe.map((id) => nom(pR.data, id)).filter(Boolean), libre: !motif, motif: motif || '',
+      competent: ops.has(l.operation_id) || (!!l.machine_id && macs.has(l.machine_id)), sans_personne: !equipe.length };
+  }).sort((a, b) => (Number(b.libre) - Number(a.libre)) || (Number(b.sans_personne) - Number(a.sans_personne)) || (Number(b.competent) - Number(a.competent)) || String(a.debut).localeCompare(String(b.debut)));
+}
+
 const handlerProtege = async (event) => {
   try {
     const supabase = getSupabase();
 
     if (event.httpMethod === 'GET') {
       const q = event.queryStringParameters || {};
+      if (q.taches_pour) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(q.date || '')) return rep(400, { error: 'date requise (AAAA-MM-JJ).' });
+        return rep(200, { taches: await tachesPour(supabase, q.taches_pour, q.date) });
+      }
       if (!q.planning_jour_id) return rep(400, { error: 'planning_jour_id requis.' });
       const l = await lireCreneau(supabase, q.planning_jour_id);
       if (!l) return rep(404, { error: 'Créneau introuvable.' });
@@ -160,6 +200,25 @@ const handlerProtege = async (event) => {
       const { faits, ignores } = await remplacer(supabase, l, b.ancien_id, nouveau, b.portee === 'tache' ? 'tache' : 'creneau');
       if (!faits.length) return rep(409, { error: 'Réaffectation impossible : ' + (ignores[0] ? ignores[0].raison : 'créneau inchangé') + '.', ignores });
       return rep(200, { ok: true, nouveau_id: nouveau, remplaces: faits, ignores });
+    }
+
+    if (b.action === 'ajouter') {
+      if (!b.nouveau_id) return rep(400, { error: 'nouveau_id requis.' });
+      const jour = await etatJour(supabase, l);
+      const [s, e] = bornes(l);
+      const motif = motifIndispo(b.nouveau_id, s, e, jour, l.id);
+      if (motif) return rep(409, { error: 'Affectation impossible : ' + motif + '.' });
+      const ex = await supabase.from('planning_jour_personnel').select('personnel_id').eq('planning_jour_id', l.id).eq('personnel_id', b.nouveau_id);
+      if (ex.error) throw ex.error;
+      if (!(ex.data || []).length) {
+        const i1 = await supabase.from('planning_jour_personnel').insert({ planning_jour_id: l.id, personnel_id: b.nouveau_id });
+        if (i1.error) throw i1.error;
+      }
+      if (!l.personnel_id) {
+        const u1 = await supabase.from('planning_jour').update({ personnel_id: b.nouveau_id }).eq('id', l.id);
+        if (u1.error) throw u1.error;
+      }
+      return rep(200, { ok: true });
     }
 
     if (b.action === 'deplacer') {
@@ -217,7 +276,7 @@ const handlerProtege = async (event) => {
       return rep(200, { ok: true, date, heure_debut: b.heure_debut, heure_fin: b.heure_fin, avertissements });
     }
 
-    return rep(400, { error: 'action inconnue (reaffecter | auto | deplacer).' });
+    return rep(400, { error: 'action inconnue (reaffecter | auto | ajouter | deplacer).' });
   } catch (err) {
     return rep(500, { error: err.message });
   }
