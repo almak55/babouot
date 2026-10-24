@@ -2498,109 +2498,112 @@
   async function ouvrirModaleDisponibilite(personne) {
     afficherModale(`
       <h3>Disponibilité — ${personne.name}</h3>
-      <div class="field"><label>Statut</label>
+      <div class="field"><label>Situation à enregistrer</label>
         <select id="d-statut">
-          <option value="disponible">Disponible</option>
-          <option value="en arrêt">En arrêt</option>
-          <option value="absent">Absent(e)</option>
+          <option value="absent">Absent(e) — congés, absence…</option>
+          <option value="en arrêt">En arrêt (arrêt de travail)</option>
+          <option value="partiel">Disponible sur une plage horaire réduite</option>
+          <option value="disponible">Disponible normalement (annuler une absence)</option>
         </select>
       </div>
       <div style="display:flex; gap:10px;">
-        <div class="field" style="flex:1;"><label>Du</label><input id="d-date" type="date" value="${AUJOURDHUI_ISO}"></div>
-        <div class="field" style="flex:1;"><label>Au (inclus)</label><input id="d-date-fin" type="date" value="${AUJOURDHUI_ISO}"></div>
+        <div class="field" style="flex:1;"><label>À partir du</label><input id="d-date" type="date" value="${AUJOURDHUI_ISO}"></div>
+        <div class="field" style="flex:1;"><label>Jusqu'au (inclus)</label><input id="d-date-fin" type="date" value="${AUJOURDHUI_ISO}"></div>
       </div>
-      <div class="field"><label><input type="checkbox" id="d-fin-inconnue"> Date de fin inconnue</label>
-        <small style="color:var(--ink-500); font-size:11px; display:block; margin-top:3px;">La personne est considérée indisponible à partir de la date de début, sans date de retour connue (couvre les 6 mois suivants). À la reprise, utilisez « Réinitialiser » avec la date de reprise.</small></div>
-      <div class="field"><label>Motif (facultatif)</label><input id="d-motif" placeholder="ex : congés, arrêt maladie, formation"></div>
+      <div class="field" id="d-inconnue-wrap"><label><input type="checkbox" id="d-fin-inconnue"> Date de fin inconnue (période indéterminée)</label></div>
       <div class="field hidden" id="d-horaires-wrap">
-        <label><input type="checkbox" id="d-partiel"> Disponible seulement sur une plage horaire</label>
-        <div style="display:flex; gap:10px; margin-top:8px;">
-          <div class="field"><label>De</label><input id="d-heure-debut" type="time" value="08:00"></div>
-          <div class="field"><label>À</label><input id="d-heure-fin" type="time" value="16:30"></div>
+        <label>Disponible seulement de… à…</label>
+        <div style="display:flex; gap:10px;">
+          <div class="field" style="flex:1;"><input id="d-heure-debut" type="time" value="08:00"></div>
+          <div class="field" style="flex:1;"><input id="d-heure-fin" type="time" value="16:30"></div>
         </div>
       </div>
+      <div class="field" id="d-motif-wrap"><label>Motif (facultatif)</label><input id="d-motif" placeholder="ex : congés, arrêt maladie, formation"></div>
+      <div id="d-resume" style="padding:10px 12px; border-radius:10px; background:var(--teal-50, #E6F6F3); color:#161C2C; font-size:13px; margin-bottom:8px;"></div>
       <div id="m-msg"></div>
       <div class="actions">
-        <button class="btn" id="d-reset">Réinitialiser (disponible)</button>
         <button class="btn" id="m-cancel">Annuler</button>
         <button class="btn primary" id="m-submit">Enregistrer</button>
       </div>
     `);
 
     const statutSelect = document.getElementById('d-statut');
-    const horairesWrap = document.getElementById('d-horaires-wrap');
-    const partielCheckbox = document.getElementById('d-partiel');
-    function majAffichageHoraires() {
-      horairesWrap.classList.toggle('hidden', statutSelect.value !== 'disponible');
-    }
-    statutSelect.addEventListener('change', majAffichageHoraires);
-    majAffichageHoraires();
+    const dDebut = document.getElementById('d-date'), dFin = document.getElementById('d-date-fin'), dInconnue = document.getElementById('d-fin-inconnue');
     const heureD = document.getElementById('d-heure-debut'), heureF = document.getElementById('d-heure-fin');
-    const majHeures = () => { heureD.disabled = heureF.disabled = !partielCheckbox.checked; };
-    partielCheckbox.addEventListener('change', majHeures);
-    // modifier une heure coche automatiquement « plage horaire »
-    [heureD, heureF].forEach(i => i.addEventListener('input', () => { partielCheckbox.checked = true; majHeures(); }));
-    majHeures();
-    // pré-remplit avec l'état déjà enregistré pour le jour choisi
+    const fr = (iso) => iso ? iso.split('-').reverse().join('/') : '…';
+    const prenom = personne.name;
+    const fin400 = (d) => new Date(new Date(d + 'T12:00:00Z').getTime() + 400 * 86400000).toISOString().slice(0, 10);
+    const nbJours = (d, f) => Math.round((new Date(f + 'T12:00:00Z') - new Date(d + 'T12:00:00Z')) / 86400000) + 1;
+
+    function majFormulaire() {
+      const st = statutSelect.value;
+      document.getElementById('d-horaires-wrap').classList.toggle('hidden', st !== 'partiel');
+      document.getElementById('d-motif-wrap').classList.toggle('hidden', st === 'disponible');
+      dFin.disabled = dInconnue.checked;
+      const d = dDebut.value, f = dFin.value;
+      const periode = dInconnue.checked ? `à partir du ${fr(d)}, sans date de retour connue`
+        : (!d || !f ? '…' : (d === f ? `le ${fr(d)} uniquement` : `du ${fr(d)} au ${fr(f)} inclus (${nbJours(d, f)} jours)`));
+      let t;
+      if (st === 'absent') t = `<b>${esc(prenom)}</b> sera <b>absent(e)</b> ${periode}.`;
+      else if (st === 'en arrêt') t = `<b>${esc(prenom)}</b> sera <b>en arrêt</b> ${periode}.`;
+      else if (st === 'partiel') t = `<b>${esc(prenom)}</b> sera disponible <b>seulement de ${esc(heureD.value || '…')} à ${esc(heureF.value || '…')}</b> ${periode}.`;
+      else t = `<b>${esc(prenom)}</b> sera de nouveau <b>disponible normalement</b> ${periode} (toute absence enregistrée sur cette période est supprimée).`;
+      document.getElementById('d-resume').innerHTML = t;
+    }
+    [statutSelect, dDebut, dFin, dInconnue, heureD, heureF].forEach(i => { i.addEventListener('input', majFormulaire); i.addEventListener('change', majFormulaire); });
+    dDebut.addEventListener('change', () => { if (!dFin.value || dFin.value < dDebut.value) { dFin.value = dDebut.value; majFormulaire(); } });
+
+    // pré-remplit avec l'état déjà enregistré pour le jour de début (si une situation existe)
     async function chargerJour() {
-      const j = document.getElementById('d-date').value; if (!j) return;
+      const j = dDebut.value; if (!j) return;
       try {
         const res = await fetch(`${API}/gerer-disponibilite?personnel_id=${personne.id}&date_debut=${j}&date_fin=${j}`);
-        const lignes = res.ok ? await res.json() : [];
-        const l = lignes[0];
-        statutSelect.value = l ? l.statut : 'disponible'; majAffichageHoraires();
-        const partiel = !!(l && l.statut === 'disponible' && l.heure_debut && l.heure_fin);
-        partielCheckbox.checked = partiel;
-        heureD.value = partiel ? l.heure_debut.slice(0, 5) : '08:00'; heureF.value = partiel ? l.heure_fin.slice(0, 5) : '16:30';
-        majHeures();
+        const l = res.ok ? (await res.json())[0] : null;
+        if (l) {
+          const partiel = l.statut === 'disponible' && l.heure_debut && l.heure_fin;
+          statutSelect.value = partiel ? 'partiel' : l.statut;
+          if (partiel) { heureD.value = l.heure_debut.slice(0, 5); heureF.value = l.heure_fin.slice(0, 5); }
+        }
       } catch (_) { /* pré-remplissage facultatif */ }
+      majFormulaire();
     }
-    document.getElementById('d-date').addEventListener('change', chargerJour);
+    dDebut.addEventListener('change', chargerJour);
+    majFormulaire();
     chargerJour();
-    const dDebut = document.getElementById('d-date'), dFin = document.getElementById('d-date-fin'), dInconnue = document.getElementById('d-fin-inconnue');
-    dDebut.addEventListener('change', () => { if (!dFin.value || dFin.value < dDebut.value) dFin.value = dDebut.value; });
-    dInconnue.addEventListener('change', () => { dFin.disabled = dInconnue.checked; });
 
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
 
-    document.getElementById('d-reset').addEventListener('click', async () => {
-      const date = document.getElementById('d-date').value;
-      const finR = dInconnue.checked ? null : dFin.value;
-      const msg = document.getElementById('m-msg');
-      msg.innerHTML = `<div class="msg">Réinitialisation…</div>`;
-      try {
-        // fin inconnue : on libère toute la période à partir de la date indiquée (reprise)
-        const finSupp = dInconnue.checked ? new Date(new Date(date + 'T12:00:00Z').getTime() + 400 * 86400000).toISOString().slice(0, 10) : finR;
-        const res = await fetch(`${API}/gerer-disponibilite?personnel_id=${personne.id}&date=${date}${finSupp && finSupp !== date ? '&date_fin=' + finSupp : ''}`, { method: 'DELETE' });
-        if (!res.ok) throw new Error((await res.json()).error || 'Erreur inconnue');
-        toast(`${personne.name} remis·e disponible à partir du ${date}${finR && finR !== date ? ' jusqu\'au ' + finR : ''}.`);
-        fermerModale(); chargerDonneesReelles();
-      } catch (e) {
-        msg.innerHTML = `<div class="msg error">${e.message}</div>`;
-      }
-    });
-
     document.getElementById('m-submit').addEventListener('click', async () => {
-      const date = document.getElementById('d-date').value;
-      const statut = statutSelect.value;
-      const partiel = statut === 'disponible' && partielCheckbox.checked;
-      const heure_debut = partiel ? document.getElementById('d-heure-debut').value : null;
-      const heure_fin = partiel ? document.getElementById('d-heure-fin').value : null;
+      const st = statutSelect.value;
+      const date = dDebut.value;
       const msg = document.getElementById('m-msg');
-      const finInconnue = dInconnue.checked && statut !== 'disponible';
+      const finInconnue = dInconnue.checked;
       const dateFin = finInconnue ? null : dFin.value;
       if (!date) { msg.innerHTML = '<div class="msg error">Choisissez la date de début.</div>'; return; }
       if (!finInconnue && (!dateFin || dateFin < date)) { msg.innerHTML = '<div class="msg error">La date de fin doit être postérieure ou égale à la date de début.</div>'; return; }
+      if (st === 'partiel' && (!heureD.value || !heureF.value || heureF.value <= heureD.value)) { msg.innerHTML = '<div class="msg error">Indiquez une plage horaire valide (début avant fin).</div>'; return; }
       msg.innerHTML = `<div class="msg">Enregistrement…</div>`;
       try {
-        const res = await fetch(`${API}/gerer-disponibilite`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ personnel_id: personne.id, date, date_fin: dateFin, fin_inconnue: finInconnue, motif: document.getElementById('d-motif').value, statut, heure_debut, heure_fin }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
-        toast(finInconnue ? `${personne.name} : ${statut} à partir du ${date} (fin inconnue).` : (dateFin !== date ? `Disponibilité de ${personne.name} mise à jour du ${date} au ${dateFin}.` : `Disponibilité de ${personne.name} mise à jour pour le ${date}.`));
+        if (st === 'disponible') {
+          // retour à la disponibilité normale : on supprime les entrées de la période
+          const res = await fetch(`${API}/gerer-disponibilite?personnel_id=${personne.id}&date=${date}&date_fin=${dateFin || fin400(date)}`, { method: 'DELETE' });
+          if (!res.ok) throw new Error((await res.json()).error || 'Erreur inconnue');
+          toast(`${personne.name} : disponible normalement ${dateFin ? 'du ' + fr(date) + ' au ' + fr(dateFin) : 'à partir du ' + fr(date)}.`);
+        } else {
+          const res = await fetch(`${API}/gerer-disponibilite`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              personnel_id: personne.id, date, date_fin: dateFin, fin_inconnue: finInconnue,
+              motif: document.getElementById('d-motif').value,
+              statut: st === 'partiel' ? 'disponible' : st,
+              heure_debut: st === 'partiel' ? heureD.value : null, heure_fin: st === 'partiel' ? heureF.value : null,
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+          toast(`Disponibilité de ${personne.name} enregistrée.`);
+        }
         fermerModale(); chargerDonneesReelles();
       } catch (e) {
         msg.innerHTML = `<div class="msg error">${e.message}</div>`;
