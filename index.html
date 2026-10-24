@@ -5857,6 +5857,28 @@
     const $ = (id) => document.getElementById(id);
     $('m-cancel').addEventListener('click', fermerModale);
     $('pa-corps').addEventListener('click', (ev) => { const b = ev.target.closest('.pa-voir-of'); if (!b) return; const o = (state.ordres || []).find((x) => x.uuid === b.dataset.uuid); if (!o) { toast('OF introuvable dans la liste chargée : actualisez la page.', 'error'); return; } ouvrirModaleGamme(o.uuid, o.id); });
+    // Liste à cocher des opérations de la gamme avant création (modèle Pléiade) ; résout avec la liste de codes, ou null si annulé.
+    const demanderEtapes = async (idRef, nbOf) => {
+      let etapes;
+      try { etapes = (await api('POST', { action: 'etapes', id: idRef })).etapes; }
+      catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; return null; }
+      return new Promise((resolve) => {
+        const zone = $('m-msg');
+        zone.innerHTML = `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;background:#fff;">
+          <strong>Opérations de la gamme${nbOf > 1 ? ` (appliquées aux ${nbOf} OF)` : ''}</strong>
+          <div style="font-size:12px;color:var(--muted);margin:2px 0 6px;">Cochez les opérations nécessaires. Les dépendances sont recalculées en sautant celles que vous décochez.</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:2px 14px;max-height:240px;overflow:auto;">
+          ${etapes.map((e) => `<label style="display:flex;gap:6px;align-items:center;font-size:13px;"><input type="checkbox" class="pa-et" value="${esc(e.code)}" ${e.par_defaut ? 'checked' : ''}>${esc(e.libelle)}${e.condition && e.condition !== 'toujours' ? ` <em style="color:var(--muted);font-size:11px;">(${esc(e.condition)})</em>` : ''}</label>`).join('')}</div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;"><button class="btn" id="pa-et-non">Annuler</button><button class="btn primary" id="pa-et-ok">Créer ${nbOf > 1 ? `les ${nbOf} OF` : 'l\'OF'}</button></div></div>`;
+        zone.scrollIntoView({ block: 'nearest' });
+        $('pa-et-non').onclick = () => { zone.innerHTML = ''; resolve(null); };
+        $('pa-et-ok').onclick = () => {
+          const codes = Array.from(zone.querySelectorAll('.pa-et:checked')).map((c) => c.value);
+          if (!codes.length) { toast('Cochez au moins une opération.', 'error'); return; }
+          zone.innerHTML = ''; resolve(codes);
+        };
+      });
+    };
     const couleurTete = { 'orange': '#f6c177', 'vert': '#b7d77a', 'gris clair': '#d4d8dc', 'gris foncé': '#9aa1a8', 'bleu': '#8ec5ee', 'sable': '#e8d3a8' };
     const pastille = (t) => t ? `<span style="display:inline-block;padding:1px 8px;border-radius:10px;background:${couleurTete[String(t).toLowerCase()] || '#eee'};color:#222;font-size:12px;">${esc(t)}</span>` : '—';
     const lienOf = (ofId) => { const o = (state.ordres || []).find((x) => x.uuid === ofId); return `<button class="btn pa-voir-of" type="button" data-uuid="${ofId}" data-num="${o ? esc(o.id) : ''}" title="Ouvrir la gamme de cet OF" style="padding:3px 10px;font-size:12px;">${o ? esc(o.id) : 'Voir l\'OF'} ›</button>`; };
@@ -5874,10 +5896,10 @@
         const liste = (t, l) => `<h4 style="margin:8px 0 4px;">${t} (${l.length})</h4><table class="sp-table"><thead><tr><th>Titre</th><th>Qté</th><th>Cahiers</th><th>Carte</th><th>Tête</th><th>Peau</th><th></th></tr></thead><tbody>${l.map((x) => `<tr><td>${esc(x.titre)}</td><td>${x.quantite || '—'}</td><td>${x.mp || '—'}</td><td>${x.carte_dos || '—'}</td><td>${pastille(x.tete)}</td><td>${esc(x.peau || '—')}</td><td style="text-align:right;">${x.of_id ? lienOf(x.of_id) : `<button class="btn pa-of" type="button" data-id="${x.id}" data-rang="1" data-titre="${esc(x.titre)}" style="padding:3px 10px;font-size:12px;">Créer l'OF</button>`}</td></tr>`).join('')}</tbody></table>`;
         $('pa-corps').innerHTML = liste('Blocs à coudre', prop.a_coudre) + liste('Blocs à emboîter', prop.a_emboiter);
         $('pa-corps').querySelectorAll('.pa-of').forEach((bt) => bt.addEventListener('click', async () => {
-          if (!window.confirm(`Créer l'OF Pléiade « ${bt.dataset.titre} » (ce titre uniquement) ?`)) return;
+          const etapes = await demanderEtapes(bt.dataset.id, 1); if (!etapes) return;
           bt.disabled = true;
           try {
-            const r = await api('POST', { action: 'generer', ids: [bt.dataset.id], rang_depart: 1 }); const x = (r.resultats || [])[0] || {};
+            const r = await api('POST', { action: 'generer', ids: [bt.dataset.id], rang_depart: 1, etapes }); const x = (r.resultats || [])[0] || {};
             if (x.erreur || !x.numero) throw new Error(x.erreur || 'Création impossible.');
             toast(`OF ${x.numero} créé : ${x.titre}.`); data = await api('GET'); prop = await api('POST', { action: 'proposer' }); rendre(); chargerDonneesReelles();
           } catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; bt.disabled = false; }
@@ -5927,10 +5949,10 @@
         catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; bt.disabled = false; }
       }));
       $('pa-corps').querySelectorAll('.pa-of').forEach((bt) => bt.addEventListener('click', async () => {
-        if (!window.confirm(`Créer l'OF Pléiade « ${bt.dataset.titre} » (ce titre uniquement) ?`)) return;
+        const etapes = await demanderEtapes(bt.dataset.id, 1); if (!etapes) return;
         bt.disabled = true; $('m-msg').innerHTML = `<div class="msg">Création de l'OF « ${esc(bt.dataset.titre)} »…</div>`;
         try {
-          const r = await api('POST', { action: 'generer', ids: [bt.dataset.id], rang_depart: Number(bt.dataset.rang) || 1 });
+          const r = await api('POST', { action: 'generer', ids: [bt.dataset.id], rang_depart: Number(bt.dataset.rang) || 1, etapes });
           const x = (r.resultats || [])[0] || {};
           if (x.erreur || !x.numero) throw new Error(x.erreur || 'Création impossible.');
           toast(`OF ${x.numero} créé : ${x.titre}.`);
@@ -5950,12 +5972,12 @@
       const m = prop.mois.find((x) => x.mois === courant); if (!m) return;
       const lignes = data.lignes.filter((l) => m.sequence.some((s) => s.id === l.id) && !l.of_id);
       if (!lignes.length) { $('m-msg').innerHTML = '<div class="msg">Tous les OF de ce mois sont déjà créés.</div>'; return; }
-      if (!window.confirm(`Créer ${lignes.length} OF Pléiade pour ${nomMois(courant)}, dans l'ordre affiché ?`)) return;
+      const etapes = await demanderEtapes(lignes[0].id, lignes.length); if (!etapes) return;
       $('pa-creer').disabled = true; const sortie = [];
       const ordre = m.sequence.filter((s) => lignes.some((l) => l.id === s.id));
       for (let i = 0; i < ordre.length; i++) {
         $('m-msg').innerHTML = `<div class="msg">Création ${i + 1} / ${ordre.length} : ${esc(ordre[i].titre)}…</div>`;
-        try { const r = await api('POST', { action: 'generer', ids: [ordre[i].id], rang_depart: i + 1 }); sortie.push(r.resultats[0]); }
+        try { const r = await api('POST', { action: 'generer', ids: [ordre[i].id], rang_depart: i + 1, etapes }); sortie.push(r.resultats[0]); }
         catch (e) { sortie.push({ titre: ordre[i].titre, erreur: e.message }); }
       }
       const ok = sortie.filter((x) => x.numero).length;
@@ -5965,12 +5987,12 @@
     $('pa-coches').addEventListener('click', async () => {
       const cases = Array.from($('pa-corps').querySelectorAll('.pa-chk:checked'));
       if (!cases.length) return;
-      if (!window.confirm(`Créer ${cases.length} OF Pléiade (ceux qui sont cochés, dans l'ordre affiché) ?`)) return;
+      const etapes = await demanderEtapes(cases[0].dataset.id, cases.length); if (!etapes) return;
       $('pa-coches').disabled = true; $('pa-creer').disabled = true; const sortie = [];
       for (let i = 0; i < cases.length; i++) {
         const ligne = data.lignes.find((l) => l.id === cases[i].dataset.id) || {};
         $('m-msg').innerHTML = `<div class="msg">Création ${i + 1} / ${cases.length} : ${esc(ligne.titre || '')}…</div>`;
-        try { const r = await api('POST', { action: 'generer', ids: [cases[i].dataset.id], rang_depart: i + 1 }); sortie.push(r.resultats[0]); }
+        try { const r = await api('POST', { action: 'generer', ids: [cases[i].dataset.id], rang_depart: i + 1, etapes }); sortie.push(r.resultats[0]); }
         catch (e) { sortie.push({ titre: ligne.titre, erreur: e.message }); }
       }
       const ok = sortie.filter((x) => x.numero).length;
