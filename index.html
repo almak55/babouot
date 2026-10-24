@@ -4416,10 +4416,17 @@
   async function appelerAbsence(corps) {
     const res = await fetch(`${API}/conflits-absence`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
     const d = await lireJson(res);
-    if (!res.ok) throw new Error(d.error || `Erreur serveur (HTTP ${res.status})`);
+    if (!res.ok) { const er = new Error(d.error || `Erreur serveur (HTTP ${res.status})`); er.bloquants = d.bloquants || []; throw er; }
     return d;
   }
 
+  // Message d'erreur + détail des points bloquants renvoyés par le serveur (opération, cause).
+  function erreurAbsenceHtml(er) {
+    const liste = (er && er.bloquants) || [];
+    const detail = liste.length
+      ? `<ul style="margin:6px 0 0; padding-left:18px;">${liste.map(b => `<li><strong>${esc(b.operation || 'Étape')}</strong>${b.detail ? ' : ' + esc(b.detail) : ''}</li>`).join('')}</ul>` : '';
+    return `<div class="msg error">${esc(er.message)}${detail}</div>`;
+  }
   // Proposition automatique : un remplaçant (le mieux classé) s'il en existe, sinon la meilleure replanification
   // (délai tenu d'abord, puis fin d'OF la plus proche).
   async function proposerAbsence(c) {
@@ -4433,10 +4440,11 @@
       try { essais.push({ option, d: await appelerAbsence({ ...base, action: 'apercu', option }) }); } catch (e) { /* option impossible */ }
     }
     if (!essais.length) return null;
-    essais.sort((x, y) => (Number(y.d.of.respecte_delai === true) - Number(x.d.of.respecte_delai === true)) || String(x.d.of.fin).localeCompare(String(y.d.of.fin)));
+    const bloque = (x) => (x.d.bloquants && x.d.bloquants.length) || x.d.complet === false;
+    essais.sort((x, y) => (Number(bloque(x)) - Number(bloque(y))) || (Number(y.d.of.respecte_delai === true) - Number(x.d.of.respecte_delai === true)) || String(x.d.of.fin).localeCompare(String(y.d.of.fin)));
     const m = essais[0];
     const libelle = m.option === 'reduit' ? `Continuer sans ${esc(c.absent.nom)}` : `Attendre le retour de ${esc(c.absent.nom)}`;
-    return { type: 'replanifier', option: m.option, apercu: m.d, texte: `<strong>${libelle}</strong> — tâche terminée le ${fmtDateHeure(m.d.tache.fin)}, OF le ${fmtDateHeure(m.d.of.fin)} (${m.d.of.respecte_delai === false ? '<span class="tag danger">délai dépassé</span>' : '<span class="tag ok">délai respecté</span>'}).` };
+    return { type: 'replanifier', option: m.option, apercu: m.d, bloquants: m.d.bloquants || [], incomplet: m.d.complet === false, texte: `<strong>${libelle}</strong> — tâche terminée le ${fmtDateHeure(m.d.tache.fin)}, OF le ${fmtDateHeure(m.d.of.fin)} (${m.d.of.respecte_delai === false ? '<span class="tag danger">délai dépassé</span>' : '<span class="tag ok">délai respecté</span>'}).` };
   }
   async function appliquerProposition(c, prop) {
     const base = { planning_jour_id: c.planning_jour_id, absent_id: c.absent.id };
@@ -4499,7 +4507,7 @@
         try {
           const d = await appelerAbsence({ ...base, action: 'remplacer', remplacant_id: bloc.querySelector('.ab-remp').value, portee: bloc.querySelector('.ab-tache').checked ? 'tache' : 'creneau' });
           toast(`${d.remplaces.length} créneau(x) remplacé(s).`); termine();
-        } catch (e) { msg(`<div class="msg error">${esc(e.message)}</div>`); rem.disabled = false; }
+        } catch (e) { msg(erreurAbsenceHtml(e)); rem.disabled = false; }
       });
       bloc.querySelectorAll('.ab-apercu').forEach(btn => btn.addEventListener('click', async () => {
         const zone = bloc.querySelector('.ab-res');
@@ -4513,13 +4521,14 @@
               <div><span class="plan-k">Fin de l'OF</span><strong>${fmtDateHeure(d.of.fin)}</strong></div>
               <div>${tag} ${d.of.respecte_delai === false ? `<span class="plan-note">(≈ ${jours >= 1 ? jours + ' jour(s)' : 'moins d\'une journée'} de retard)</span>` : ''}</div></div>
               <div class="plan-note">${d.tache.personnes.length ? 'Équipe : ' + esc(d.tache.personnes.join(', ')) : 'Personnel choisi automatiquement'}</div>
-              <button class="btn primary ab-go" style="margin-top:6px;">Appliquer cette solution</button>`;
+              ${(d.bloquants && d.bloquants.length) ? `<div class="plan-bloquants" style="margin-top:8px;"><strong>Points bloquants — cette solution ne peut pas être appliquée :</strong><ul>${d.bloquants.map(b => `<li><strong>${esc(b.operation || 'Étape')}</strong>${b.detail ? ' : ' + esc(b.detail) : ''}</li>`).join('')}</ul></div>` : (d.complet === false ? '<div class="plan-bloquants" style="margin-top:8px;">Le plan est incomplet : certaines étapes ne tiennent pas dans l\'horizon de planification.</div>' : '')}
+              <button class="btn primary ab-go" style="margin-top:6px;" ${((d.bloquants && d.bloquants.length) || d.complet === false) ? 'disabled' : ''}>Appliquer cette solution</button>`;
           zone.querySelector('.ab-go').addEventListener('click', async (e2) => {
             e2.target.disabled = true;
             try { await appelerAbsence({ ...base, action: 'appliquer', option: btn.dataset.option }); toast('Planning replanifié.'); termine(); }
-            catch (er) { zone.insertAdjacentHTML('beforeend', `<div class="msg error">${esc(er.message)}</div>`); e2.target.disabled = false; }
+            catch (er) { zone.insertAdjacentHTML('beforeend', erreurAbsenceHtml(er)); e2.target.disabled = false; }
           });
-        } catch (e) { zone.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+        } catch (e) { zone.innerHTML = erreurAbsenceHtml(e); }
       }));
     });
 
@@ -4534,11 +4543,13 @@
         try { prop = await proposerAbsence(c); } catch (e) { prop = null; }
         if (!prop) { zone.innerHTML = '<div class="plan-note">Aucune solution automatique : choisissez ci-dessous.</div>'; bloc.querySelector('details').open = true; continue; }
         propositions.set(bloc, { c, prop });
-        zone.innerHTML = `<div class="plan-note">Proposition du logiciel</div><div>${prop.texte}</div><button class="btn primary ab-accepter" style="margin-top:6px;">Accepter</button>`;
+        const bloqueP = (prop.bloquants && prop.bloquants.length) || prop.incomplet;
+        const blocP = bloqueP ? `<div class="plan-bloquants" style="margin-top:8px;"><strong>Points bloquants — proposition non applicable :</strong>${(prop.bloquants && prop.bloquants.length) ? `<ul>${prop.bloquants.map(b => `<li><strong>${esc(b.operation || 'Étape')}</strong>${b.detail ? ' : ' + esc(b.detail) : ''}</li>`).join('')}</ul>` : ' le plan est incomplet (étapes hors horizon de planification).'}</div>` : '';
+        zone.innerHTML = `<div class="plan-note">Proposition du logiciel</div><div>${prop.texte}</div>${blocP}<button class="btn primary ab-accepter" style="margin-top:6px;" ${bloqueP ? 'disabled' : ''}>Accepter</button>`;
         zone.querySelector('.ab-accepter').addEventListener('click', async (ev) => {
           ev.target.disabled = true;
           try { await appliquerProposition(c, prop); toast('Proposition appliquée.'); termine(); }
-          catch (er) { msg(`<div class="msg error">${esc(er.message)}</div>`); ev.target.disabled = false; }
+          catch (er) { msg(erreurAbsenceHtml(er)); ev.target.disabled = false; }
         });
       }
       const tout = document.getElementById('ab-tout');
@@ -4563,7 +4574,7 @@
               await appliquerProposition(c, prop); faits++;
             }
             toast(`${faits} proposition(s) appliquée(s).`); termine();
-          } catch (er) { msg(`<div class="msg error">${esc(er.message)}</div>`); tout.disabled = false; }
+          } catch (er) { msg(erreurAbsenceHtml(er)); tout.disabled = false; }
         });
       }
     })();
