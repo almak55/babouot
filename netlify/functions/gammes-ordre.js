@@ -14,6 +14,7 @@ const handlerProtege = async (event) => {
       return { statusCode: 400, body: JSON.stringify({ error: 'Paramètre of_id requis.' }) };
     }
     const supabase = getSupabase();
+    await require('./lib/ordre-gamme').normaliserGamme(supabase, ofId);
     const { data, error } = await supabase
       .from('gammes_operatoires')
       .select('id, sequence, statut, predecesseurs, dependances, operations(id, code, nom, ordre_defaut)')

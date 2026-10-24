@@ -66,6 +66,8 @@ const handlerProtege = async (event) => {
     //   };
     // }
 
+    await require('./lib/ordre-gamme').normaliserGamme(supabase, gamme.of_id);
+
     // Respect de l'enchaînement : les opérations dont celle-ci dépend (colonne
     // predecesseurs ; à défaut, l'étape saisie juste avant) doivent déjà être planifiées.
     const { data: toutes, error: precError } = await supabase
