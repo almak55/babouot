@@ -44,6 +44,7 @@ async function calculerEtapes(supabase, ofId) {
   if (ofError) throw ofError;
   if (!of) return null;
 
+  await require('./ordre-gamme').normaliserGamme(supabase, ofId);   // dépendances implicites rendues explicites (ordre logique)
   const { data: gammes, error: gammesError } = await supabase
     .from('gammes_operatoires')
     .select('id, sequence, statut, operation_id, machine_id, parametres, duree_manuelle_h, predecesseurs, dependances, operations(code, nom)')

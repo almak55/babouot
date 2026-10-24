@@ -13,6 +13,8 @@
 // démarrer le jour même. Week-ends et jours fériés sont sautés.
 
 const PL = require('./planification');
+const EL = require('./en-ligne');
+const { normaliserGamme } = require('./ordre-gamme');
 
 const DEBUT = '08:00';
 const FIN = '16:30';
@@ -51,12 +53,16 @@ function instantProgressif(iv, pct) {
 }
 
 async function jourDebutSuggere(supabase, gammeId, aujourdhui) {
+  const { data: g0, error: e0 } = await supabase.from('gammes_operatoires').select('of_id').eq('id', gammeId).single();
+  if (e0) throw e0;
+  await normaliserGamme(supabase, g0.of_id);      // dépendances implicites rendues explicites (ordre logique)
   const { data: g, error } = await supabase
-    .from('gammes_operatoires').select('id, of_id, sequence, predecesseurs, dependances').eq('id', gammeId).single();
+    .from('gammes_operatoires').select('id, of_id, sequence, predecesseurs, dependances, operations(code)').eq('id', gammeId).single();
   if (error) throw error;
+  const regles = await EL.chargerRegles(supabase);
   const { data: toutes, error: e2 } = await supabase
     .from('gammes_operatoires')
-    .select('sequence, statut, operations(nom), planning_jour(date, heure_debut, heure_fin)')
+    .select('sequence, statut, operations(code, nom), planning_jour(date, heure_debut, heure_fin)')
     .eq('of_id', g.of_id);
   if (e2) throw e2;
   const triees = toutes.slice().sort((a, b) => a.sequence - b.sequence);
@@ -73,12 +79,15 @@ async function jourDebutSuggere(supabase, gammeId, aujourdhui) {
       if (p.statut === 'à planifier') bloques.push(nom(p));
       continue;                       // déjà faite sans créneau : aucune contrainte
     }
-    const c = PL.contraintesLien((g.dependances || {})[seq]);
+    const lien = (g.dependances || {})[seq];
+    // Lien « en ligne » (contrôle couvertures avec montage…) : l'étape démarre avec son prédécesseur.
+    const enLigne = EL.estEnLigne(regles, g.operations && g.operations.code, p.operations && p.operations.code, lien);
+    const c = PL.contraintesLien(enLigne ? { ...(lien || {}), en_ligne: true } : lien);
     const debut = iv[0][0]; const fin = iv[iv.length - 1][1];
     const pct = c.seuil_pct;
     const cands = [];
     if (c.fin) cands.push([fin, `après la fin de « ${nom(p)} »`]);
-    if (c.debut) cands.push([debut, `dès le démarrage de « ${nom(p)} »`]);
+    if (c.debut) cands.push([debut, c.en_ligne ? `en ligne avec « ${nom(p)} » (démarre en même temps)` : `dès le démarrage de « ${nom(p)} »`]);
     if (c.progressif) cands.push([instantProgressif(iv, pct), `dès ${pct} % de « ${nom(p)} »`]);
     cands.forEach(([t, r]) => { raisons.push([t, r]); if (instant === null || t > instant) instant = t; });
   }
