@@ -2369,6 +2369,40 @@
     });
   }
 
+  // Affecter une personne à une tâche existante du jour (jours vides ou renfort)
+  async function ouvrirAjoutTache(p, iso, libelle, rouvrir, retour) {
+    afficherModale(`<h3>Affecter ${esc(p.name)} — ${esc(libelle)}</h3><div class="empty">Recherche des tâches du jour…</div>`, 'large');
+    let taches;
+    try {
+      const r = await fetch(`${API}/gerer-affectation?taches_pour=${encodeURIComponent(p.id)}&date=${iso}`);
+      const d = await lireJson(r); if (!r.ok) throw new Error(d.error || 'Erreur serveur (HTTP ' + r.status + ')');
+      taches = d.taches;
+    } catch (e) { afficherModale(`<h3>Affecter</h3><div class="msg error">${esc(e.message)}</div><div class="actions"><button class="btn" id="m-cancel">Retour</button></div>`); document.getElementById('m-cancel').addEventListener('click', retour); return; }
+    const ligne = (t, i) => `<label style="display:flex; align-items:flex-start; gap:10px; padding:8px 12px; border-bottom:1px solid var(--line); cursor:${t.libre ? 'pointer' : 'not-allowed'}; opacity:${t.libre ? 1 : 0.55};">
+      <input type="radio" name="ajt" value="${t.id}" ${t.libre ? '' : 'disabled'} ${i === 0 && t.libre ? 'checked' : ''} style="width:auto;margin:3px 0 0;">
+      <span style="flex:1;"><strong>${esc(t.operation || '—')}</strong> <span style="font-size:12px; color:var(--ink-700);">${t.debut ? t.debut + '–' + t.fin : 'journée'}${t.machine ? ' · ' + esc(t.machine) : ''}</span>
+      <div style="font-size:11.5px; color:var(--ink-500);">${esc(t.of)} · ${esc(t.titre)} · ${t.equipe.length ? 'avec ' + esc(t.equipe.join(', ')) : 'aucune personne affectée'}</div>
+      <div style="margin-top:3px;">${t.sans_personne ? '<span class="tag warn">À pourvoir</span> ' : ''}${t.competent ? '<span class="tag ok">Compétent(e)</span>' : '<span class="tag warn">Hors compétence</span>'} ${t.libre ? '' : `<span class="tag danger">${esc(t.motif)}</span>`}</div></span></label>`;
+    afficherModale(`
+      <h3>Affecter ${esc(p.name)} à une tâche — ${esc(libelle)}</h3>
+      <div style="font-size:12.5px; color:var(--ink-700); margin:-4px 0 10px;">Tâches planifiées ce jour. Les tâches « à pourvoir » (sans personne) et celles où la personne est compétente sont en tête. La personne est ajoutée, sans retirer les autres.</div>
+      ${taches.length ? `<div style="max-height:340px; overflow:auto; border:1px solid var(--line); border-radius:10px;">${taches.map(ligne).join('')}</div>` : '<div class="empty">Aucune tâche planifiée ce jour. Lancez ou déplacez une planification pour en créer.</div>'}
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Retour</button>${taches.length ? '<button class="btn primary" id="ajt-ok">Affecter</button>' : ''}</div>`, 'large');
+    document.getElementById('m-cancel').addEventListener('click', retour);
+    const ok = document.getElementById('ajt-ok');
+    if (ok) ok.addEventListener('click', async (ev) => {
+      const choix = document.querySelector('input[name="ajt"]:checked'); const msg = document.getElementById('m-msg');
+      if (!choix) { msg.innerHTML = '<div class="msg error">Choisissez une tâche.</div>'; return; }
+      ev.target.disabled = true; msg.innerHTML = '<div class="msg">Enregistrement…</div>';
+      try {
+        const r = await fetch(`${API}/gerer-affectation`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'ajouter', planning_jour_id: choix.value, nouveau_id: p.id }) });
+        const d = await lireJson(r); if (!r.ok) throw new Error(d.error || 'Erreur serveur (HTTP ' + r.status + ')');
+        toast(`${p.name} est affecté(e) à la tâche.`); rouvrir();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; ev.target.disabled = false; }
+    });
+  }
+
   async function ouvrirOccupationPersonne(persId) {
     const p = state.personnel.find(x => x.id === persId); if (!p) return;
     afficherModale(`<h3>Occupation hebdomadaire — ${esc(p.name)}</h3><div class="empty">Chargement…</div>`, 'xlarge');
@@ -2420,7 +2454,8 @@
           ${j.min > 480 ? '<span class="tag danger">Surcharge</span>' : ''}<span style="margin-left:auto; font-size:12.5px; color:var(--ink-700);">${j.min ? fmtDuree(j.min) + ' affectées' : ''}</span>
           <div style="width:90px;" class="bar-track"><div class="bar-fill ${pct >= 100 ? 'danger' : (pct >= 65 ? 'warn' : '')}" style="width:${pct}%"></div></div>
         </div>
-        <table style="width:100%; font-size:12.5px;"><thead><tr><th style="width:90px;">Horaire</th><th>OF / Titre</th><th>Opération</th><th>Machine</th><th style="width:70px;">Durée</th><th></th></tr></thead><tbody>${lignes}</tbody></table></div>`;
+        <table style="width:100%; font-size:12.5px;"><thead><tr><th style="width:90px;">Horaire</th><th>OF / Titre</th><th>Opération</th><th>Machine</th><th style="width:70px;">Durée</th><th></th></tr></thead><tbody>${lignes}</tbody></table>
+        ${j.indispo ? '' : `<div style="padding:8px 12px; border-top:1px solid var(--line); ${j.affs.length ? '' : 'background:#F3FBF9;'}"><button class="btn ${j.affs.length ? '' : 'primary'} occ-add" data-iso="${j.iso}" style="padding:4px 12px;font-size:12.5px;">＋ Affecter à une tâche ce jour</button>${j.affs.length ? '' : ' <span style="font-size:12px; color:var(--ink-500);">Aucune affectation : disponible pour une tâche.</span>'}</div>`}</div>`;
     };
     afficherModale(`
       <h3>Occupation hebdomadaire — ${esc(p.name)}</h3>
@@ -2455,6 +2490,7 @@
       if (ko.length) alert('Non réaffectées :\n' + ko.join('\n'));
       rouvrir();
     };
+    document.querySelectorAll('.occ-add').forEach(b => b.addEventListener('click', () => ouvrirAjoutTache(p, b.dataset.iso, lib(b.dataset.iso), rouvrir, () => ouvrirOccupationPersonne(persId))));
     const bHc = document.getElementById('occ-auto-hc'); if (bHc) bHc.addEventListener('click', () => lotAuto(horsComp, `Réaffecter les affectations de ${p.name} hors compétence ?`));
     const bTout = document.getElementById('occ-auto-tout'); if (bTout) bTout.addEventListener('click', () => lotAuto(toutes, `Libérer ${p.name} sur la semaine ?`));
     document.getElementById('occ-fiche').addEventListener('click', () => ouvrirModalePersonne(p));
