@@ -3312,7 +3312,7 @@
       </div>
       <div style="max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:10px;">
         <table><thead><tr><th>Opération</th><th>Famille</th><th></th></tr></thead><tbody>
-        ${ops.map(o => `<tr><td>${esc(o.nom)}</td><td>${esc(o.famille || '—')}</td><td style="text-align:right; white-space:nowrap;"><button class="btn op-ren" data-code="${esc(o.code)}" data-nom="${esc(o.nom)}">Renommer</button> <button class="btn op-del" data-code="${esc(o.code)}" data-nom="${esc(o.nom)}" ${o.utilisee ? 'disabled title="Déjà utilisée"' : ''}>Supprimer</button></td></tr>`).join('')}
+        ${ops.map(o => `<tr><td>${esc(o.nom)}</td><td>${esc(o.famille || '—')}</td><td style="text-align:right; white-space:nowrap;"><button class="btn op-ren" data-code="${esc(o.code)}">Modifier</button> <button class="btn op-del" data-code="${esc(o.code)}" data-nom="${esc(o.nom)}" ${o.utilisee ? 'disabled title="Déjà utilisée"' : ''}>Supprimer</button></td></tr>`).join('')}
         </tbody></table>
       </div>
       <div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`, 'xlarge');
@@ -3334,11 +3334,30 @@
         toast(`Opération « ${nom} » ajoutée.`); rafraichir();
       } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
     });
-    document.querySelectorAll('.op-ren').forEach(b => b.addEventListener('click', async () => {
-      const nom = prompt('Nouveau nom de l\'opération :', b.dataset.nom);
-      if (!nom || !nom.trim() || nom.trim() === b.dataset.nom) return;
-      try { await appeler('PUT', `${API}/gerer-operations`, { code: b.dataset.code, nom }); toast('Opération renommée.'); rafraichir(); }
-      catch (e) { toast(e.message, 'error'); }
+    document.querySelectorAll('.op-ren').forEach(b => b.addEventListener('click', () => {
+      const op = ops.find(o => o.code === b.dataset.code); if (!op) return;
+      const idx = ops.indexOf(op);
+      const precedent = idx > 0 ? ops[idx - 1].code : '__debut';
+      afficherModale(`
+        <h3>Modifier l'opération</h3>
+        <div class="field"><label>Nom</label><input id="oe-nom" value="${esc(op.nom)}"></div>
+        <div class="field"><label>Famille (facultatif)</label><input id="oe-fam" list="oe-fam-list" value="${esc(op.famille || '')}"><datalist id="oe-fam-list">${familles.map(f => `<option value="${esc(f)}">`).join('')}</datalist></div>
+        <div class="field"><label>Position dans l'ordre par défaut des gammes</label><select id="oe-apres"><option value="__debut" ${precedent === '__debut' ? 'selected' : ''}>— En première position —</option>${ops.filter(o => o.code !== op.code).map(o => `<option value="${esc(o.code)}" ${o.code === precedent ? 'selected' : ''}>Après : ${esc(o.nom)}</option>`).join('')}</select></div>
+        <small style="color:var(--ink-500); font-size:11px;">Code technique : <span class="mono">${esc(op.code)}</span> (non modifiable). Les durées se règlent dans « Temps standards ».</small>
+        <div id="m-msg"></div>
+        <div class="actions"><button class="btn" id="oe-cancel">Annuler</button><button class="btn primary" id="oe-save">Enregistrer</button></div>`);
+      document.getElementById('oe-cancel').addEventListener('click', () => ouvrirModaleOperations());
+      document.getElementById('oe-save').addEventListener('click', async () => {
+        const msg = document.getElementById('m-msg');
+        const nom = document.getElementById('oe-nom').value.trim();
+        if (!nom) { msg.innerHTML = '<div class="msg error">Le nom est requis.</div>'; return; }
+        const apres = document.getElementById('oe-apres').value;
+        msg.innerHTML = '<div class="msg">Enregistrement…</div>';
+        try {
+          await appeler('PUT', `${API}/gerer-operations`, { code: op.code, nom, famille: document.getElementById('oe-fam').value, apres_code: apres === precedent ? '__garder' : apres });
+          toast('Opération mise à jour.'); rafraichir();
+        } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+      });
     }));
     document.querySelectorAll('.op-del').forEach(b => b.addEventListener('click', async () => {
       if (!confirm(`Supprimer l'opération « ${b.dataset.nom} » ?`)) return;
