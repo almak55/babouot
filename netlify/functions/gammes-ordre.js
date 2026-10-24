@@ -32,6 +32,11 @@ const handlerProtege = async (event) => {
     while (restants.size) {
       const dispo = Array.from(restants).map((s) => parSeq.get(s)).filter((g) => predsExpl(g).every((s) => !restants.has(s)));
       const pool = dispo.length ? dispo : Array.from(restants).map((s) => parSeq.get(s)); // cycle : on retombe sur l'ordre standard
+      // Une étape qui dépend explicitement de celle qu'on vient de placer (ex. coloris tête après massicot) la suit immédiatement.
+      const derniere = triees.length ? triees[triees.length - 1].sequence : null;
+      const suiveuses = derniere == null ? [] : pool.filter((g) => predsExpl(g).includes(derniere));
+      (suiveuses.length ? suiveuses : pool).sort(avant);
+      if (suiveuses.length) { triees.push(suiveuses[0]); restants.delete(suiveuses[0].sequence); continue; }
       pool.sort(avant);
       triees.push(pool[0]); restants.delete(pool[0].sequence);
     }
