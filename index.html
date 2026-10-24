@@ -2503,7 +2503,7 @@
           <option value="absent">Absent(e) — congés, absence…</option>
           <option value="en arrêt">En arrêt (arrêt de travail)</option>
           <option value="partiel">Disponible sur une plage horaire réduite</option>
-          <option value="disponible">Disponible normalement (annuler une absence)</option>
+          <option value="disponible">Annuler une absence (redevenir disponible)</option>
         </select>
       </div>
       <div style="display:flex; gap:10px;">
@@ -2547,7 +2547,7 @@
       if (st === 'absent') t = `<b>${esc(prenom)}</b> sera <b>absent(e)</b> ${periode}.`;
       else if (st === 'en arrêt') t = `<b>${esc(prenom)}</b> sera <b>en arrêt</b> ${periode}.`;
       else if (st === 'partiel') t = `<b>${esc(prenom)}</b> sera disponible <b>seulement de ${esc(heureD.value || '…')} à ${esc(heureF.value || '…')}</b> ${periode}.`;
-      else t = `<b>${esc(prenom)}</b> sera de nouveau <b>disponible normalement</b> ${periode} (toute absence enregistrée sur cette période est supprimée).`;
+      else t = `<b>${esc(prenom)}</b> sera <b>de nouveau disponible</b> ${periode} : les absences ou arrêts enregistrés sur cette période seront supprimés.`;
       document.getElementById('d-resume').innerHTML = t;
     }
     [statutSelect, dDebut, dFin, dInconnue, heureD, heureF].forEach(i => { i.addEventListener('input', majFormulaire); i.addEventListener('change', majFormulaire); });
@@ -2559,7 +2559,7 @@
       try {
         const res = await fetch(`${API}/gerer-disponibilite?personnel_id=${personne.id}&date_debut=${j}&date_fin=${j}`);
         const l = res.ok ? (await res.json())[0] : null;
-        if (l) {
+        if (l && !(l.statut === 'disponible' && !(l.heure_debut && l.heure_fin))) {
           const partiel = l.statut === 'disponible' && l.heure_debut && l.heure_fin;
           statutSelect.value = partiel ? 'partiel' : l.statut;
           if (partiel) { heureD.value = l.heure_debut.slice(0, 5); heureF.value = l.heure_fin.slice(0, 5); }
