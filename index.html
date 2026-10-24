@@ -410,6 +410,56 @@
 
   .modal.large { max-width: 780px; }
   .modal.xlarge { max-width: 1000px; }
+  .occ-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .occ-nav .btn { padding: 3px 11px; font-size: 13px; }
+  .occ-lbl { font-size: 14px; min-width: 150px; text-align: center; }
+  .occ-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .occ-seg button { border: 0; background: transparent; padding: 4px 13px; font-size: 12.5px; cursor: pointer; color: var(--ink-700); }
+  .occ-seg button.on { background: var(--accent-teal, #16B8A6); color: #04251F; font-weight: 700; }
+  .occ-kpis { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .occ-chip { padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; color: var(--ink-700); background: #fff; }
+  .occ-chip b { font-size: 13.5px; color: #161C2C; }
+  .occ-att { margin-bottom: 10px; padding: 6px 10px; border-radius: 10px; background: #E6F6F3; border: 1px solid #BFE8E1; font-size: 12.5px; }
+  .occ-att.warn { background: #FFF7EB; border-color: #F5A623; }
+  .occ-att summary { cursor: pointer; font-weight: 600; }
+  .occ-att ul { margin: 6px 0 0; padding-left: 18px; }
+  .occ-acts { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .occ-acts .btn { padding: 4px 10px; font-size: 12px; }
+  .occ-cal-h, .occ-cal-g { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .occ-cal-h span { text-align: center; font-size: 11px; color: var(--ink-500); text-transform: uppercase; letter-spacing: .04em; padding-bottom: 2px; }
+  .occ-case { position: relative; border: 2px solid transparent; border-radius: 8px; min-height: 48px; padding: 4px 6px; text-align: left; cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; font-family: inherit; }
+  .occ-case .n { font-size: 11px; font-weight: 700; opacity: .75; }
+  .occ-case .v { font-size: 12.5px; font-weight: 700; }
+  .occ-case .w { position: absolute; top: 3px; right: 5px; font-size: 12px; color: #B45309; }
+  .occ-case.we { min-height: 34px; opacity: .6; }
+  .occ-case.auj .n { text-decoration: underline; }
+  .occ-case.sel { border-color: #161C2C; }
+  .occ-legende { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 11px; color: var(--ink-500); margin: 6px 0 10px; }
+  .occ-legende i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-left: 6px; border: 1px solid rgba(0,0,0,.08); }
+  .occ-jour { border: 1px solid var(--line); border-left: 5px solid #D5D9E3; border-radius: 10px; margin-bottom: 8px; background: #fff; overflow: hidden; }
+  .occ-jh { display: flex; align-items: center; gap: 8px; padding: 6px 10px; flex-wrap: wrap; font-size: 13px; }
+  .occ-jh .r { margin-left: auto; font-size: 12.5px; color: var(--ink-700); }
+  .occ-row { display: grid; grid-template-columns: 88px minmax(0, 1fr) 190px 54px auto; gap: 8px; align-items: center; padding: 4px 10px; border-top: 1px solid var(--line); font-size: 12.5px; }
+  .occ-row.alerte { background: #FFF7EB; }
+  .occ-row .h { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .occ-row .t, .occ-row .m { min-width: 0; }
+  .occ-row .s { font-size: 11px; color: var(--ink-500); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .occ-row .a { display: inline-flex; gap: 3px; }
+  .occ-row .a .btn { padding: 1px 7px; font-size: 13px; line-height: 1.5; }
+  .occ-row .tag { font-size: 10.5px; padding: 1px 6px; }
+  .occ-vide { padding: 8px 12px; font-size: 12.5px; color: var(--ink-500); font-style: italic; }
+  .occ-annee { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 10px; }
+  .occ-mois { align-self: start; border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 8px 10px; text-align: left; cursor: pointer; font-family: inherit; color: inherit; }
+  .occ-mois:hover { border-color: #16B8A6; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  .occ-mois .mh { display: flex; justify-content: space-between; font-size: 13.5px; }
+  .occ-mois .ms { font-size: 11.5px; color: var(--ink-700); margin: 2px 0 6px; }
+  .occ-mois .hm { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .occ-mois .hm i { display: block; aspect-ratio: 1; border-radius: 2px; border: 1px solid rgba(0,0,0,.05); }
+  @media (max-width: 700px) {
+    .occ-row { grid-template-columns: 76px minmax(0, 1fr) auto; }
+    .occ-row .m { grid-column: 2; } .occ-row .d { grid-column: 3; grid-row: 1; } .occ-row .a { grid-column: 3; grid-row: 2; }
+    .occ-case { min-height: 40px; padding: 2px 3px; } .occ-case .v { font-size: 10.5px; }
+  }
   .slot .stack { display: flex; flex-direction: column; gap: 2px; min-height: 100%; }
   .bar.compact { border-radius: 7px; padding: 2px 8px; min-height: 17px; flex: 1; gap: 6px; font-size: 10px; align-items: center; }
   .bar.compact .b-name { font-weight: 600; }
@@ -2271,31 +2321,37 @@
     const d = minutesHM(c.heure_debut), f = minutesHM(c.heure_fin);
     return Math.max(0, f - d - Math.max(0, Math.min(f, 750) - Math.max(d, 720)));
   }
-  async function occupationDe(persId) {
-    const b = state.brut; if (!b) return null;
+  // Occupation d'une personne sur une liste de jours (isos), à partir de données de planning (semaine affichée ou plage plus large).
+  async function occupationDe(persId, data, isos) {
+    const b = data || state.brut; if (!b) return null;
+    isos = isos || b.jours;
     const refs = await getReferentiels();
     const nomOp = Object.fromEntries(refs.operations.map(o => [o.id, o.nom]));
     const nomMach = Object.fromEntries(b.machines.map(m => [m.id, m.nom]));
     const ordre = Object.fromEntries(b.ordres.map(o => [o.id, o]));
     const persObj = state.personnel.find(x => x.id === persId) || { comp: [] };
     const compSet = new Set((persObj.comp || []).map(x => String(x).toLowerCase()));
-    const jours = b.jours.map(iso => {
-      const dispo = b.dispo.find(d => d.personnel_id === persId && d.date === iso) || null;
-      const affs = b.planning.filter(c => c.date === iso && (c.personnel_ids || []).includes(persId))
+    const parDate = {};
+    b.planning.forEach(c => { if ((c.personnel_ids || []).includes(persId)) (parDate[c.date] = parDate[c.date] || []).push(c); });
+    const dispoDate = {};
+    b.dispo.forEach(d => { if (d.personnel_id === persId) dispoDate[d.date] = d; });
+    const jours = isos.map(iso => {
+      const dispo = dispoDate[iso] || null;
+      const affs = (parDate[iso] || []).slice()
         .sort((x, y) => String(x.heure_debut || '').localeCompare(String(y.heure_debut || '')))
         .map(c => {
           const o = ordre[c.of_id] || {};
           const opN = nomOp[c.operation_id] || '';
           const competent = !opN ? true : compSet.has(opN.toLowerCase());
           return {
-            id: c.id, competent, tache: c.gamme_operatoire_id || null, of_id: c.of_id || null, operation_id: c.operation_id || null, machine_id: c.machine_id || null, sansOf: !c.of_id,
+            id: c.id, iso, competent, tache: c.gamme_operatoire_id || null, of_id: c.of_id || null, operation_id: c.operation_id || null, machine_id: c.machine_id || null, sansOf: !c.of_id,
             debut: c.heure_debut ? String(c.heure_debut).slice(0, 5) : null, fin: c.heure_fin ? String(c.heure_fin).slice(0, 5) : null,
             of: o.numero || '—', titre: o.titres ? o.titres.nom : '', client: o.titres ? (o.titres.client || '') : '', delai: o.delai || '',
             operation: nomOp[c.operation_id] || c.phase || '—', phase: nomOp[c.operation_id] ? (c.phase || '') : '', machine: c.machine_id ? (nomMach[c.machine_id] || '?') : 'Travail manuel',
             statut: c.statut || '', min: minutesCreneau(c),
           };
         });
-      const indispo = dispo && dispo.statut !== 'disponible';
+      const indispo = !!(dispo && dispo.statut !== 'disponible');
       affs.forEach((a, i) => { a.chevauche = affs.some((o, k) => k !== i && a.debut && o.debut && a.debut < o.fin && o.debut < a.fin); });
       return { iso, dispo, indispo, affs, min: affs.reduce((t, a) => t + a.min, 0) };
     });
@@ -2435,117 +2491,239 @@
     document.getElementById('cor-suppr').addEventListener('click', (ev) => { if (confirm('Supprimer définitivement ce créneau (' + a.operation + ', ' + (a.debut ? a.debut + '–' + a.fin : 'journée') + ') ?')) envoyer({ action: 'supprimer' }, ev, 'Créneau supprimé.'); });
   }
 
-  async function ouvrirOccupationPersonne(persId) {
+  // ---------- Occupation d'une personne : vues Semaine / Mois / Année ----------
+  const occEtat = { vue: 'mois', ancre: null, sel: null };
+  let occCache = null;
+  const isoAdd = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const isoDow = (iso) => (new Date(iso + 'T00:00:00Z').getUTCDay() + 6) % 7; // 0 = lundi
+  const isoLundi = (iso) => isoAdd(iso, -isoDow(iso));
+  const isoMoisDebut = (iso) => iso.slice(0, 8) + '01';
+  const isoMoisFin = (iso) => { const d = new Date(iso.slice(0, 8) + '01T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + 1); d.setUTCDate(0); return d.toISOString().slice(0, 10); };
+  const isoPlage = (a, b) => { const r = []; for (let i = a; i <= b; i = isoAdd(i, 1)) r.push(i); return r; };
+
+  async function plageOccupation(forcer) {
+    const debut = [DAYS_ISO[0], isoMoisDebut(AUJOURDHUI_ISO)].sort()[0];
+    const an = Math.max(Number(AUJOURDHUI_ISO.slice(0, 4)), Number(DAYS_ISO[0].slice(0, 4)));
+    const fin = `${an}-12-31`;
+    if (!forcer && occCache && occCache.debut === debut && occCache.fin === fin && Date.now() - occCache.t < 60000) return occCache;
+    const res = await fetch(`/.netlify/functions/lecture-planning?date_debut=${debut}&date_fin=${fin}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+    occCache = { t: Date.now(), debut, fin, data: { planning: d.planning, machines: d.machines, ordres: d.ordres, dispo: d.disponibilites || [], jours: [] } };
+    return occCache;
+  }
+
+  async function ouvrirOccupationPersonne(persId, garder) {
     const p = state.personnel.find(x => x.id === persId); if (!p) return;
-    afficherModale(`<h3>Occupation hebdomadaire — ${esc(p.name)}</h3><div class="empty">Chargement…</div>`, 'xlarge');
-    let occ;
-    try { occ = await occupationDe(persId); } catch (e) { occ = null; }
-    if (!occ) { afficherModale(`<h3>Occupation hebdomadaire</h3><div class="msg error">Données de la semaine indisponibles. Rechargez la page.</div><div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`); document.getElementById('m-cancel').addEventListener('click', fermerModale); return; }
+    if (!garder || !occEtat.ancre) { occEtat.vue = 'mois'; occEtat.ancre = DAYS_ISO[0]; occEtat.sel = null; }
+    afficherModale(`<h3>Occupation — ${esc(p.name)}</h3><div class="empty">Chargement du planning…</div>`, 'xlarge');
+    let occ, plage;
+    try {
+      plage = await plageOccupation(!garder);
+      occ = await occupationDe(persId, plage.data, isoPlage(plage.debut, plage.fin));
+    } catch (e) { occ = null; }
+    if (!occ) { afficherModale(`<h3>Occupation</h3><div class="msg error">Planning indisponible. Rechargez la page.</div><div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`); document.getElementById('m-cancel').addEventListener('click', fermerModale); return; }
+
     const jourNom = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+    const jourCourt = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
     const lib = (iso) => { const d = new Date(iso + 'T00:00:00Z'); return `${jourNom[d.getUTCDay()]} ${d.getUTCDate()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}`; };
-    const ouvres = occ.jours.filter((j, i) => i < 5 || j.affs.length || j.indispo);
-    const joursIndispo = occ.jours.filter((j, i) => i < 5 && j.indispo).length;
-    const capaciteMin = (5 - joursIndispo) * 480;
-    const totalMin = occ.jours.reduce((t, j) => t + j.min, 0);
-    const taux = capaciteMin > 0 ? Math.round(totalMin / capaciteMin * 100) : 0;
-    const toutes = occ.jours.flatMap(j => j.affs);
-    const ofs = Array.from(new Set(toutes.map(a => a.of).filter(x => x !== '—')));
-    const machines = Array.from(new Set(toutes.map(a => a.machine)));
-    const couleur = taux >= 85 ? '#C0392B' : (taux >= 65 ? '#B45309' : '#0F766E');
-    const kpi = (v, l) => `<div style="flex:1; min-width:120px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:#fff;"><div style="font-size:20px; font-weight:700; color:#161C2C;">${v}</div><div style="font-size:11.5px; color:var(--ink-500);">${l}</div></div>`;
-    const horsComp = toutes.filter(a => !a.competent);
-    const chevauch = toutes.filter(a => a.chevauche);
-    const surch = occ.jours.filter(j => j.min > 480);
-    const sansOf = toutes.filter(a => a.sansOf);
-    const points = [];
-    if (horsComp.length) points.push(`<strong>${horsComp.length} affectation(s) hors compétence</strong> : ${Array.from(new Set(horsComp.map(a => a.operation))).map(esc).join(', ')}.`);
-    if (sansOf.length) points.push(`<strong>${sansOf.length} créneau(x) sans OF</strong> (${fmtDuree(sansOf.reduce((t, a) => t + a.min, 0))}) : probables erreurs de saisie, à corriger ou supprimer.`);
-    if (surch.length) points.push(`<strong>Surcharge</strong> (plus de 8 h) : ${surch.map(j => lib(j.iso) + ' (' + fmtDuree(j.min) + ')').join(', ')}.`);
-    if (chevauch.length) points.push(`<strong>${chevauch.length} créneau(x) qui se chevauchent</strong> dans la journée.`);
-    if (joursIndispo && toutes.some(a => a.id && occ.jours.some(j => j.indispo && j.affs.includes(a)))) points.push('<strong>Affectation(s) pendant une absence</strong> : à réaffecter.');
-    const attention = `<div style="margin-bottom:12px; padding:10px 12px; border-radius:10px; background:${points.length ? '#FFF7EB' : '#E6F6F3'}; border:1px solid ${points.length ? '#F5A623' : '#BFE8E1'}; font-size:13px;">
-      ${points.length ? `<div style="font-weight:700; margin-bottom:4px;">Points d'attention</div><ul style="margin:0; padding-left:18px;">${points.map(x => `<li>${x}</li>`).join('')}</ul>` : '✓ Aucun point d\'attention : compétences, horaires et charge sont cohérents.'}
-      <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
-        ${horsComp.length ? '<button class="btn primary" id="occ-auto-hc" style="padding:5px 12px;font-size:12.5px;">Réaffecter automatiquement les affectations hors compétence</button>' : ''}
-        ${toutes.length ? '<button class="btn" id="occ-auto-tout" style="padding:5px 12px;font-size:12.5px;">Libérer cette personne : tout réaffecter automatiquement</button>' : ''}
-        <button class="btn" id="occ-fiche" style="padding:5px 12px;font-size:12.5px;" title="Modifier les compétences (opérations et machines) de cette personne">Modifier ses compétences</button>
-      </div></div>`;
-    const bloc = (j) => {
-      const etat = j.dispo && j.dispo.statut !== 'disponible'
-        ? `<span class="tag danger">${j.dispo.statut === 'en arrêt' ? 'En arrêt' : 'Absent(e)'}</span>`
-        : (j.dispo && j.dispo.heure_debut ? `<span class="tag warn">Disponible ${j.dispo.heure_debut.slice(0, 5)}–${j.dispo.heure_fin.slice(0, 5)}</span>` : '<span class="tag ok">Disponible</span>');
-      const pct = Math.min(100, Math.round(j.min / 480 * 100));
-      const lignes = j.affs.length ? j.affs.map(a => `<tr${!a.competent || a.chevauche || a.sansOf ? ' style="background:#FFF7EB;"' : ''}>
-          <td style="white-space:nowrap;">${a.debut ? a.debut + '–' + a.fin : 'Journée'}${a.chevauche ? '<div style="font-size:11px; color:#B45309; font-weight:600;">⚠ chevauchement</div>' : ''}</td>
-          <td>${a.sansOf ? '<strong style="color:#B45309;">⚠ Sans OF</strong><div style="font-size:11px; color:#B45309;">probable erreur de saisie</div>' : `<strong>${esc(a.of)}</strong><div style="font-size:11px; color:var(--ink-500);">${esc(a.titre)}${a.client ? ' · ' + esc(a.client) : ''}</div>`}</td>
-          <td>${esc(a.operation)}${a.phase ? `<div style="font-size:11px; color:var(--ink-500);">${esc(a.phase)}</div>` : ''}</td>
-          <td>${esc(a.machine)}${!a.competent ? '<div style="font-size:11px; color:#B45309; font-weight:600;">⚠ hors compétence</div>' : ''}</td><td style="white-space:nowrap;">${esc(fmtDuree(a.min))}</td>
-          <td style="white-space:nowrap; text-align:right;"><button class="btn occ-reaff" data-id="${a.id}" style="padding:3px 9px;font-size:12px;">Réaffecter</button> <button class="btn occ-dep" data-id="${a.id}" style="padding:3px 9px;font-size:12px;">Horaire</button> <button class="btn occ-cor ${a.sansOf ? 'primary' : ''}" data-id="${a.id}" style="padding:3px 9px;font-size:12px;">Corriger</button></td></tr>`).join('')
-        : `<tr><td colspan="6" style="color:var(--ink-500); font-style:italic;">${j.indispo ? 'Indisponible ce jour' : 'Aucune affectation'}</td></tr>`;
-      return `<div style="border:1px solid var(--line); border-left:5px solid ${j.indispo ? '#C0392B' : (j.min ? '#16B8A6' : '#D5D9E3')}; border-radius:10px; margin-bottom:10px; background:#fff;">
-        <div style="display:flex; align-items:center; gap:10px; padding:9px 12px; flex-wrap:wrap;">
-          <strong style="font-size:14px; text-transform:capitalize;">${lib(j.iso)}</strong>${etat}
-          ${j.min > 480 ? '<span class="tag danger">Surcharge</span>' : ''}<span style="margin-left:auto; font-size:12.5px; color:var(--ink-700);">${j.min ? fmtDuree(j.min) + ' affectées' : ''}</span>
-          <div style="width:90px;" class="bar-track"><div class="bar-fill ${pct >= 100 ? 'danger' : (pct >= 65 ? 'warn' : '')}" style="width:${pct}%"></div></div>
-        </div>
-        <table style="width:100%; font-size:12.5px;"><thead><tr><th style="width:90px;">Horaire</th><th>OF / Titre</th><th>Opération</th><th>Machine</th><th style="width:70px;">Durée</th><th></th></tr></thead><tbody>${lignes}</tbody></table>
-        ${j.indispo ? '' : `<div style="padding:8px 12px; border-top:1px solid var(--line); ${j.affs.length ? '' : 'background:#F3FBF9;'}"><button class="btn ${j.affs.length ? '' : 'primary'} occ-add" data-iso="${j.iso}" style="padding:4px 12px;font-size:12.5px;">＋ Affecter à une tâche ce jour</button>${j.affs.length ? '' : ' <span style="font-size:12px; color:var(--ink-500);">Aucune affectation : disponible pour une tâche.</span>'}</div>`}</div>`;
+    const parIso = new Map(occ.jours.map(j => [j.iso, j]));
+    const tousAffs = new Map(); occ.jours.forEach(j => j.affs.forEach(a => tousAffs.set(String(a.id), a)));
+    const ouvre = (j) => isoDow(j.iso) < 5;
+    const rouvrir = async () => { occCache = null; try { await chargerDonneesReelles(); } catch (_) { /* affichage de démo */ } ouvrirOccupationPersonne(persId, true); };
+    const retour = () => ouvrirOccupationPersonne(persId, true);
+
+    const pctJour = (j) => Math.round(j.min / 480 * 100);
+    const teinte = (j) => {
+      if (j.indispo) return { bg: 'repeating-linear-gradient(45deg,#FBE9E7,#FBE9E7 5px,#F6D6D2 5px,#F6D6D2 10px)', fg: '#8E2A1F' };
+      const q = pctJour(j);
+      if (!j.min) return { bg: '#F4F6FA', fg: '#8A93A8' };
+      if (q > 100) return { bg: '#F4B6AE', fg: '#7A1D12' };
+      if (q >= 85) return { bg: '#6FD3C5', fg: '#06433B' };
+      if (q >= 50) return { bg: '#A8E6DD', fg: '#0B4F46' };
+      return { bg: '#D6F3EE', fg: '#0B4F46' };
     };
+    const stats = (jours) => {
+      const w = jours.filter(ouvre);
+      const indispoJ = w.filter(j => j.indispo).length;
+      const capa = (w.length - indispoJ) * 480;
+      const total = jours.reduce((t, j) => t + j.min, 0);
+      const affs = jours.flatMap(j => j.affs);
+      return { indispoJ, capa, total, taux: capa > 0 ? Math.round(total / capa * 100) : 0, affs, ofs: new Set(affs.map(a => a.of).filter(x => x !== '—')).size, machines: new Set(affs.map(a => a.machine)).size };
+    };
+    const couleurTaux = (t) => t >= 85 ? '#C0392B' : (t >= 65 ? '#B45309' : '#0F766E');
+
+    const etatTag = (j) => j.dispo && j.dispo.statut !== 'disponible'
+      ? `<span class="tag danger">${j.dispo.statut === 'en arrêt' ? 'En arrêt' : 'Absent(e)'}</span>`
+      : (j.dispo && j.dispo.heure_debut ? `<span class="tag warn">Dispo ${j.dispo.heure_debut.slice(0, 5)}–${j.dispo.heure_fin.slice(0, 5)}</span>` : '');
+    const ligne = (a) => {
+      const alerte = !a.competent || a.chevauche || a.sansOf;
+      return `<div class="occ-row${alerte ? ' alerte' : ''}">
+        <span class="h">${a.debut ? a.debut + '–' + a.fin : 'Journée'}</span>
+        <span class="t"><strong>${a.sansOf ? '<span style="color:#B45309;">⚠ Sans OF</span>' : esc(a.of)}</strong> · ${esc(a.operation)}${a.phase ? ` <span class="s">— ${esc(a.phase)}</span>` : ''}<div class="s" title="${esc(a.titre + (a.client ? ' · ' + a.client : ''))}">${esc(a.titre)}${a.client ? ' · ' + esc(a.client) : ''}</div></span>
+        <span class="m">${esc(a.machine)}${!a.competent ? ' <span class="tag warn" title="L\'opération ne figure pas dans les compétences de cette personne">hors comp.</span>' : ''}${a.chevauche ? ' <span class="tag warn">chevauche</span>' : ''}</span>
+        <span class="d">${esc(fmtDuree(a.min))}</span>
+        <span class="a"><button class="btn occ-reaff" data-id="${a.id}" title="Réaffecter à une autre personne" aria-label="Réaffecter">⇄</button><button class="btn occ-dep" data-id="${a.id}" title="Modifier le jour ou l'horaire" aria-label="Horaire">⏱</button><button class="btn occ-cor ${a.sansOf ? 'primary' : ''}" data-id="${a.id}" title="Corriger l'OF, l'opération ou la machine, ou supprimer" aria-label="Corriger">✎</button></span>
+      </div>`;
+    };
+    const bloc = (j, entete) => `<div class="occ-jour" style="border-left-color:${j.indispo ? '#C0392B' : (j.min ? '#16B8A6' : '#D5D9E3')};">
+      <div class="occ-jh"><strong style="text-transform:capitalize;">${lib(j.iso)}</strong>${etatTag(j)}${j.min > 480 ? '<span class="tag danger">Surcharge</span>' : ''}
+        <span class="r">${j.min ? fmtDuree(j.min) : ''}</span>${j.indispo ? '' : `<button class="btn occ-add ${j.affs.length ? '' : 'primary'}" data-iso="${j.iso}" style="padding:2px 10px;font-size:12px;">＋ Affecter</button>`}${entete || ''}</div>
+      ${j.affs.length ? j.affs.map(ligne).join('') : `<div class="occ-vide">${j.indispo ? 'Indisponible ce jour' : 'Aucune affectation : disponible pour une tâche.'}</div>`}</div>`;
+
+    // ----- calcul de la période affichée -----
+    const periode = () => {
+      const a = occEtat.ancre;
+      if (occEtat.vue === 'semaine') { const l = isoLundi(a); return { debut: l, fin: isoAdd(l, 6), label: `Semaine du ${dateCourte(l)} au ${dateCourte(isoAdd(l, 4))}` }; }
+      if (occEtat.vue === 'mois') { const d = new Date(a.slice(0, 8) + '01T00:00:00Z'); return { debut: isoMoisDebut(a), fin: isoMoisFin(a), label: `${MOIS_FR[d.getUTCMonth()][0].toUpperCase() + MOIS_FR[d.getUTCMonth()].slice(1)} ${d.getUTCFullYear()}` }; }
+      return { debut: plage.debut > `${plage.fin.slice(0, 4)}-01-01` ? isoMoisDebut(plage.debut) : `${plage.fin.slice(0, 4)}-01-01`, fin: plage.fin, label: `Année ${plage.fin.slice(0, 4)} · mois restants` };
+    };
+
+    const rendre = () => {
+      const per = periode();
+      const jours = isoPlage(per.debut, per.fin).map(i => parIso.get(i)).filter(Boolean);
+      const st = stats(jours);
+      const toutes = st.affs;
+      const horsComp = toutes.filter(a => !a.competent);
+      const chevauch = toutes.filter(a => a.chevauche);
+      const sansOf = toutes.filter(a => a.sansOf);
+      const surch = jours.filter(j => j.min > 480);
+      const pendantAbsence = jours.filter(j => j.indispo && j.affs.length);
+      const points = [];
+      if (horsComp.length) points.push(`<strong>${horsComp.length} affectation(s) hors compétence</strong> : ${Array.from(new Set(horsComp.map(a => a.operation))).slice(0, 8).map(esc).join(', ')}.`);
+      if (sansOf.length) points.push(`<strong>${sansOf.length} créneau(x) sans OF</strong> (${fmtDuree(sansOf.reduce((t, a) => t + a.min, 0))}) : probables erreurs de saisie, à corriger ou supprimer.`);
+      if (surch.length) points.push(`<strong>Surcharge</strong> (plus de 8 h) : ${surch.slice(0, 8).map(j => lib(j.iso) + ' (' + fmtDuree(j.min) + ')').join(', ')}${surch.length > 8 ? '…' : ''}.`);
+      if (chevauch.length) points.push(`<strong>${chevauch.length} créneau(x) qui se chevauchent</strong>.`);
+      if (pendantAbsence.length) points.push(`<strong>Affectation(s) pendant une absence</strong> : ${pendantAbsence.slice(0, 8).map(j => lib(j.iso)).join(', ')}${pendantAbsence.length > 8 ? '…' : ''}.`);
+
+      const chip = (v, l) => `<span class="occ-chip"><b>${v}</b> ${l}</span>`;
+      const kpis = `<div class="occ-kpis">${chip(`<span style="color:${couleurTaux(st.taux)};">${st.taux} %</span>`, 'occupation')}${chip(fmtDuree(st.total), `sur ${fmtDuree(st.capa)}`)}${chip(st.ofs, 'OF')}${chip(st.machines, 'machine(s)')}${chip(st.indispoJ, 'j. d’absence')}</div>`;
+      const attention = `<details class="occ-att${points.length ? ' warn' : ''}" ${points.length && points.length <= 2 ? 'open' : ''}>
+        <summary>${points.length ? `⚠ ${points.length} point(s) d'attention sur la période` : '✓ Aucun point d\'attention (compétences, horaires, charge)'}</summary>
+        ${points.length ? `<ul>${points.map(x => `<li>${x}</li>`).join('')}</ul>` : ''}
+        <div class="occ-acts">
+          ${horsComp.length ? '<button class="btn primary" id="occ-auto-hc">Réaffecter automatiquement le hors-compétence</button>' : ''}
+          ${toutes.length ? '<button class="btn" id="occ-auto-tout">Libérer la période : tout réaffecter automatiquement</button>' : ''}
+          <button class="btn" id="occ-fiche" title="Modifier les compétences (opérations et machines)">Modifier ses compétences</button>
+        </div></details>`;
+
+      // navigation
+      const nav = `<div class="occ-nav">
+        <div class="occ-seg">${['semaine', 'mois', 'annee'].map(v => `<button class="${occEtat.vue === v ? 'on' : ''}" data-vue="${v}">${v === 'annee' ? 'Année' : v[0].toUpperCase() + v.slice(1)}</button>`).join('')}</div>
+        ${occEtat.vue === 'annee' ? '' : '<button class="btn" id="occ-prec" aria-label="Précédent">‹</button>'}<strong class="occ-lbl">${esc(per.label)}</strong>${occEtat.vue === 'annee' ? '' : '<button class="btn" id="occ-suiv" aria-label="Suivant">›</button>'}
+        <button class="btn" id="occ-auj" style="margin-left:auto;">Aujourd'hui</button></div>`;
+
+      let corps = '';
+      if (occEtat.vue === 'semaine') {
+        corps = jours.filter(j => ouvre(j) || j.affs.length || j.indispo).map(j => bloc(j)).join('');
+      } else if (occEtat.vue === 'mois') {
+        const decal = isoDow(per.debut);
+        const cases = Array.from({ length: decal }, () => '<div></div>').concat(jours.map(j => {
+          const t = teinte(j); const sel = occEtat.sel === j.iso; const we = !ouvre(j);
+          return `<button class="occ-case${sel ? ' sel' : ''}${we ? ' we' : ''}${j.iso === AUJOURDHUI_ISO ? ' auj' : ''}" data-iso="${j.iso}" style="background:${t.bg}; color:${t.fg};" title="${esc(lib(j.iso))}">
+            <span class="n">${Number(j.iso.slice(8))}</span>
+            <span class="v">${j.indispo ? (j.dispo.statut === 'en arrêt' ? 'Arrêt' : 'Absent') : (j.min ? fmtDuree(j.min) : (we ? '' : '—'))}</span>
+            ${j.affs.some(a => !a.competent || a.sansOf || a.chevauche) ? '<span class="w">⚠</span>' : ''}</button>`;
+        }));
+        const choisi = occEtat.sel && parIso.get(occEtat.sel) && occEtat.sel >= per.debut && occEtat.sel <= per.fin ? parIso.get(occEtat.sel) : null;
+        corps = `<div class="occ-cal"><div class="occ-cal-h">${jourCourt.map(x => `<span>${x}</span>`).join('')}</div><div class="occ-cal-g">${cases.join('')}</div></div>
+          <div class="occ-legende"><i style="background:#D6F3EE"></i>&lt; 50 %<i style="background:#A8E6DD"></i>50–84 %<i style="background:#6FD3C5"></i>85–100 %<i style="background:#F4B6AE"></i>surcharge<i style="background:repeating-linear-gradient(45deg,#FBE9E7,#FBE9E7 3px,#F6D6D2 3px,#F6D6D2 6px)"></i>absence / arrêt<span style="margin-left:auto;">Cliquez sur un jour pour le détail et les modifications</span></div>
+          ${choisi ? bloc(choisi, '<button class="btn" id="occ-voir-sem" style="padding:2px 10px;font-size:12px;">Voir la semaine</button>') : '<div class="occ-vide" style="border:1px dashed var(--line); border-radius:10px;">Sélectionnez un jour du calendrier pour afficher ses affectations.</div>'}`;
+      } else {
+        const mois = [];
+        for (let m = per.debut; m <= per.fin; m = isoAdd(isoMoisFin(m), 1)) mois.push(m);
+        corps = `<div class="occ-annee">${mois.map(m => {
+          const js = isoPlage(m, isoMoisFin(m)).map(i => parIso.get(i)).filter(Boolean); const s = stats(js);
+          const d = new Date(m + 'T00:00:00Z'); const decal = isoDow(m);
+          const pts = s.affs.filter(a => !a.competent || a.sansOf || a.chevauche).length;
+          return `<button class="occ-mois" data-mois="${m}">
+            <div class="mh"><strong style="text-transform:capitalize;">${MOIS_FR[d.getUTCMonth()]}</strong><span style="color:${couleurTaux(s.taux)}; font-weight:700;">${s.taux} %</span></div>
+            <div class="ms">${fmtDuree(s.total)} · ${s.ofs} OF${s.indispoJ ? ` · ${s.indispoJ} j abs.` : ''}${pts ? ` · <span style="color:#B45309;">⚠ ${pts}</span>` : ''}</div>
+            <div class="hm">${Array.from({ length: decal }, () => '<i style="visibility:hidden"></i>').join('')}${js.map(j => `<i style="background:${teinte(j).bg}; ${ouvre(j) ? '' : 'opacity:.45;'}" title="${esc(lib(j.iso) + (j.min ? ' : ' + fmtDuree(j.min) : ''))}"></i>`).join('')}</div></button>`;
+        }).join('')}</div>`;
+      }
+
+      document.getElementById('occ-corps').innerHTML = `${nav}${kpis}${attention}${corps}`;
+
+      // ----- événements -----
+      const q = (s) => document.querySelectorAll('#occ-corps ' + s);
+      q('[data-vue]').forEach(b => b.addEventListener('click', () => { occEtat.vue = b.dataset.vue; rendre(); }));
+      const pas = (sens) => {
+        if (occEtat.vue === 'semaine') occEtat.ancre = isoAdd(isoLundi(occEtat.ancre), 7 * sens);
+        else { const d = new Date(occEtat.ancre.slice(0, 8) + '01T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + sens); occEtat.ancre = d.toISOString().slice(0, 10); occEtat.sel = null; }
+        if (occEtat.ancre < plage.debut && isoMoisFin(occEtat.ancre) < plage.debut) { toast('Pas de planning chargé avant cette date.'); occEtat.ancre = plage.debut; }
+        if (occEtat.ancre > plage.fin) occEtat.ancre = isoMoisDebut(plage.fin);
+        rendre();
+      };
+      const bp = document.getElementById('occ-prec'); if (bp) bp.addEventListener('click', () => pas(-1));
+      const bs = document.getElementById('occ-suiv'); if (bs) bs.addEventListener('click', () => pas(1));
+      document.getElementById('occ-auj').addEventListener('click', () => { occEtat.ancre = AUJOURDHUI_ISO; occEtat.sel = AUJOURDHUI_ISO; if (occEtat.vue === 'annee') occEtat.vue = 'mois'; rendre(); });
+      q('.occ-case').forEach(b => b.addEventListener('click', () => { occEtat.sel = b.dataset.iso; rendre(); }));
+      q('.occ-mois').forEach(b => b.addEventListener('click', () => { occEtat.vue = 'mois'; occEtat.ancre = b.dataset.mois; occEtat.sel = null; rendre(); }));
+      const vs = document.getElementById('occ-voir-sem'); if (vs) vs.addEventListener('click', () => { occEtat.vue = 'semaine'; occEtat.ancre = occEtat.sel; rendre(); });
+      const trouver = (id) => tousAffs.get(String(id));
+      q('.occ-reaff').forEach(b => b.addEventListener('click', () => ouvrirReaffectation(p, trouver(b.dataset.id), rouvrir, retour)));
+      q('.occ-dep').forEach(b => b.addEventListener('click', () => ouvrirDeplacement(p, trouver(b.dataset.id), occ.jours, rouvrir, retour)));
+      q('.occ-cor').forEach(b => b.addEventListener('click', () => ouvrirCorrection(p, trouver(b.dataset.id), rouvrir, retour)));
+      q('.occ-add').forEach(b => b.addEventListener('click', () => ouvrirAjoutTache(p, b.dataset.iso, lib(b.dataset.iso), rouvrir, retour)));
+      const lotAuto = async (liste, intitule) => {
+        if (!confirm(`${intitule}\n\n${liste.length} affectation(s) seront confiées automatiquement à une personne compétente et libre. Continuer ?`)) return;
+        let ok = 0; const ko = [];
+        for (const a of liste) {
+          try {
+            const r = await fetch(`${API}/gerer-affectation`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'auto', planning_jour_id: a.id, ancien_id: persId, portee: 'creneau' }) });
+            const d = await lireJson(r); if (!r.ok) throw new Error(d.error || 'Erreur');
+            ok++;
+          } catch (e) { ko.push(`${dateCourte(a.iso)} ${a.operation} ${a.debut || ''} : ${e.message}`); }
+        }
+        toast(`${ok} affectation(s) réaffectée(s)${ko.length ? ', ' + ko.length + ' impossible(s)' : ''}.`, ko.length ? 'error' : undefined);
+        if (ko.length) alert('Non réaffectées :\n' + ko.slice(0, 15).join('\n') + (ko.length > 15 ? '\n…' : ''));
+        rouvrir();
+      };
+      const bHc = document.getElementById('occ-auto-hc'); if (bHc) bHc.addEventListener('click', () => lotAuto(horsComp, `Réaffecter les affectations de ${p.name} hors compétence (${per.label}) ?`));
+      const bTout = document.getElementById('occ-auto-tout'); if (bTout) bTout.addEventListener('click', () => lotAuto(toutes, `Libérer ${p.name} (${per.label}) ?`));
+      document.getElementById('occ-fiche').addEventListener('click', () => ouvrirModalePersonne(p));
+      rendre.courant = { per, jours, st };
+    };
+
     afficherModale(`
-      <h3>Occupation hebdomadaire — ${esc(p.name)}</h3>
-      <div style="font-size:12.5px; color:var(--ink-700); margin:-4px 0 12px;">${esc(p.role || '')} · semaine du ${dateCourte(occ.jours[0].iso)} au ${dateCourte(occ.jours[4].iso)}</div>
-      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
-        ${kpi(`<span style="color:${couleur};">${taux} %</span>`, 'taux d’occupation')}
-        ${kpi(fmtDuree(totalMin), `affectées sur ${fmtDuree(capaciteMin)} disponibles`)}
-        ${kpi(ofs.length, 'OF concernés')}
-        ${kpi(machines.length, 'machine(s) / postes')}
-        ${kpi(joursIndispo, 'jour(s) d’absence ou d’arrêt')}
-      </div>
-      ${attention}
-      ${ouvres.map(bloc).join('')}
-      <div class="plan-note" style="margin-top:4px;">Durées en travail effectif (pause déjeuner de 12h00 à 12h30 déduite). Une affectation sans horaire précis compte pour une journée de 8 h. Capacité : 8 h par jour ouvré, moins les jours d'absence ou d'arrêt.</div>
+      <h3>Occupation — ${esc(p.name)}</h3>
+      <div style="font-size:12.5px; color:var(--ink-700); margin:-4px 0 10px;">${esc(p.role || '')}</div>
+      <div id="occ-corps"></div>
+      <div class="plan-note" style="margin-top:6px;">Durées en travail effectif (pause 12h00–12h30 déduite). Sans horaire précis : journée de 8 h. Capacité : 8 h par jour ouvré (lundi–vendredi), hors absences.</div>
       <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="occ-pdf">Télécharger en PDF</button></div>`, 'xlarge');
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
-    const rouvrir = async () => { try { await chargerDonneesReelles(); } catch (_) { /* affichage de démo */ } ouvrirOccupationPersonne(persId); };
-    const trouver = (id) => toutes.find(a => String(a.id) === String(id));
-    document.querySelectorAll('.occ-reaff').forEach(b => b.addEventListener('click', () => ouvrirReaffectation(p, trouver(b.dataset.id), rouvrir, () => ouvrirOccupationPersonne(persId))));
-    document.querySelectorAll('.occ-dep').forEach(b => b.addEventListener('click', () => ouvrirDeplacement(p, trouver(b.dataset.id), occ.jours, rouvrir, () => ouvrirOccupationPersonne(persId))));
-    document.querySelectorAll('.occ-cor').forEach(b => b.addEventListener('click', () => ouvrirCorrection(p, trouver(b.dataset.id), rouvrir, () => ouvrirOccupationPersonne(persId))));
-    const lotAuto = async (liste, intitule) => {
-      if (!confirm(`${intitule}\n\n${liste.length} affectation(s) seront confiées automatiquement à une personne compétente et libre. Continuer ?`)) return;
-      let ok = 0; const ko = [];
-      for (const a of liste) {
-        try {
-          const r = await fetch(`${API}/gerer-affectation`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'auto', planning_jour_id: a.id, ancien_id: persId, portee: 'creneau' }) });
-          const d = await lireJson(r); if (!r.ok) throw new Error(d.error || 'Erreur');
-          ok++;
-        } catch (e) { ko.push(`${a.operation} ${a.debut || ''} : ${e.message}`); }
-      }
-      toast(`${ok} affectation(s) réaffectée(s)${ko.length ? ', ' + ko.length + ' impossible(s)' : ''}.`, ko.length ? 'error' : undefined);
-      if (ko.length) alert('Non réaffectées :\n' + ko.join('\n'));
-      rouvrir();
-    };
-    document.querySelectorAll('.occ-add').forEach(b => b.addEventListener('click', () => ouvrirAjoutTache(p, b.dataset.iso, lib(b.dataset.iso), rouvrir, () => ouvrirOccupationPersonne(persId))));
-    const bHc = document.getElementById('occ-auto-hc'); if (bHc) bHc.addEventListener('click', () => lotAuto(horsComp, `Réaffecter les affectations de ${p.name} hors compétence ?`));
-    const bTout = document.getElementById('occ-auto-tout'); if (bTout) bTout.addEventListener('click', () => lotAuto(toutes, `Libérer ${p.name} sur la semaine ?`));
-    document.getElementById('occ-fiche').addEventListener('click', () => ouvrirModalePersonne(p));
+    rendre();
     document.getElementById('occ-pdf').addEventListener('click', async (ev) => {
       ev.target.disabled = true;
       try {
         await chargerLibsPdf();
+        const { per, jours, st } = rendre.courant;
         const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-        doc.setFontSize(16); doc.text(pdfTxt(`Occupation hebdomadaire - ${p.name}`), 14, 15);
-        doc.setFontSize(10); doc.text(pdfTxt(`${p.role || ''}  |  Semaine du ${dateCourte(occ.jours[0].iso)} au ${dateCourte(occ.jours[4].iso)}`), 14, 21);
-        doc.text(pdfTxt(`Taux d'occupation : ${taux} %  |  ${fmtDuree(totalMin)} affectees sur ${fmtDuree(capaciteMin)} disponibles  |  ${ofs.length} OF  |  ${joursIndispo} jour(s) d'absence ou d'arret`), 14, 27);
-        const corps = [];
-        ouvres.forEach(j => {
-          const etat = j.dispo && j.dispo.statut !== 'disponible' ? (j.dispo.statut === 'en arrêt' ? 'EN ARRET' : 'ABSENT(E)') : (j.dispo && j.dispo.heure_debut ? `Disponible ${j.dispo.heure_debut.slice(0, 5)}-${j.dispo.heure_fin.slice(0, 5)}` : '');
-          corps.push([{ content: pdfTxt(`${lib(j.iso)}${etat ? '  -  ' + etat : ''}${j.min ? '  -  ' + fmtDuree(j.min) : ''}`), colSpan: 6, styles: { fillColor: [225, 240, 238], fontStyle: 'bold' } }]);
-          if (!j.affs.length) corps.push([{ content: j.indispo ? 'Indisponible' : 'Aucune affectation', colSpan: 6, styles: { textColor: [120, 120, 120], fontStyle: 'italic' } }]);
-          j.affs.forEach(a => corps.push([a.debut ? `${a.debut}-${a.fin}` : 'Journee', a.of, `${a.titre}${a.client ? ' (' + a.client + ')' : ''}`, `${a.operation}${a.phase ? ' - ' + a.phase : ''}`, a.machine, fmtDuree(a.min)].map(pdfTxt)));
-        });
-        doc.autoTable({ startY: 32, head: [['Horaire', 'OF', 'Titre', 'Operation', 'Machine', 'Duree']], body: corps, styles: { fontSize: 9 }, headStyles: { fillColor: [10, 15, 29] }, margin: { left: 14, right: 14 } });
-        doc.save(`occupation-${p.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${occ.jours[0].iso}.pdf`);
+        doc.setFontSize(16); doc.text(pdfTxt(`Occupation - ${p.name}`), 14, 15);
+        doc.setFontSize(10); doc.text(pdfTxt(`${p.role || ''}  |  ${per.label}`), 14, 21);
+        doc.text(pdfTxt(`Taux d'occupation : ${st.taux} %  |  ${fmtDuree(st.total)} affectees sur ${fmtDuree(st.capa)} disponibles  |  ${st.ofs} OF  |  ${st.indispoJ} jour(s) d'absence ou d'arret`), 14, 27);
+        let tableau;
+        if (occEtat.vue === 'annee') {
+          const corps = [];
+          for (let m = per.debut; m <= per.fin; m = isoAdd(isoMoisFin(m), 1)) {
+            const js = isoPlage(m, isoMoisFin(m)).map(i => parIso.get(i)).filter(Boolean); const s = stats(js);
+            corps.push([`${MOIS_FR[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`, `${s.taux} %`, fmtDuree(s.total), fmtDuree(s.capa), String(s.ofs), String(s.indispoJ)].map(pdfTxt));
+          }
+          tableau = { head: [['Mois', 'Occupation', 'Affecte', 'Capacite', 'OF', 'Jours d\'absence']], body: corps };
+        } else {
+          const corps = [];
+          jours.filter(j => j.affs.length || j.indispo).forEach(j => {
+            const etat = j.dispo && j.dispo.statut !== 'disponible' ? (j.dispo.statut === 'en arrêt' ? 'EN ARRET' : 'ABSENT(E)') : (j.dispo && j.dispo.heure_debut ? `Disponible ${j.dispo.heure_debut.slice(0, 5)}-${j.dispo.heure_fin.slice(0, 5)}` : '');
+            corps.push([{ content: pdfTxt(`${lib(j.iso)}${etat ? '  -  ' + etat : ''}${j.min ? '  -  ' + fmtDuree(j.min) : ''}`), colSpan: 6, styles: { fillColor: [225, 240, 238], fontStyle: 'bold' } }]);
+            if (!j.affs.length) corps.push([{ content: 'Indisponible', colSpan: 6, styles: { textColor: [120, 120, 120], fontStyle: 'italic' } }]);
+            j.affs.forEach(a => corps.push([a.debut ? `${a.debut}-${a.fin}` : 'Journee', a.of, `${a.titre}${a.client ? ' (' + a.client + ')' : ''}`, `${a.operation}${a.phase ? ' - ' + a.phase : ''}`, a.machine, fmtDuree(a.min)].map(pdfTxt)));
+          });
+          if (!corps.length) corps.push([{ content: 'Aucune affectation sur la periode', colSpan: 6, styles: { fontStyle: 'italic' } }]);
+          tableau = { head: [['Horaire', 'OF', 'Titre', 'Operation', 'Machine', 'Duree']], body: corps };
+        }
+        doc.autoTable({ startY: 32, ...tableau, styles: { fontSize: 9 }, headStyles: { fillColor: [10, 15, 29] }, margin: { left: 14, right: 14 } });
+        doc.save(`occupation-${p.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${occEtat.vue}-${per.debut}.pdf`);
       } catch (e) { toast(`PDF impossible : ${e.message}`, 'error'); }
       ev.target.disabled = false;
     });
