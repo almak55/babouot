@@ -15,7 +15,7 @@
 // L'opération est idempotente et ne bloque jamais la planification.
 
 const EL = require('./en-ligne');
-const { baseCode } = EL;
+const { baseCode, cleNom } = EL;
 
 // Tri topologique stable : prédécesseurs déclarés d'abord, puis ordre standard, puis séquence.
 // Une étape qui dépend de celle qui vient d'être placée la suit immédiatement.
@@ -64,23 +64,24 @@ async function normaliserGamme(supabase, ofId, options) {
       .select('id, sequence, statut, predecesseurs, dependances, operations(id, code, nom, ordre_defaut)').eq('of_id', ofId);
     if (error || !data || !data.length) return false;
     const aTraiter = (g) => tout || !Array.isArray(g.predecesseurs) || g.predecesseurs.length === 0;
-    if (!data.some(aTraiter)) return false;
     const [regles, modele] = await Promise.all([EL.chargerRegles(supabase), chargerModele(supabase)]);
-    const code = (g) => baseCode(g.operations && g.operations.code);
-    const parBase = new Map();                       // code de base -> étapes de l'OF
-    data.forEach((g) => { const c = code(g); if (!parBase.has(c)) parBase.set(c, []); parBase.get(c).push(g); });
-    const ligneModele = (c) => Array.from(modele.values()).find((r) => baseCode(r.operation_code) === c);
+    const code = (g) => (g.operations && g.operations.code) || '';
+    const clesDe = (c, nom) => { const ks = regles.cles ? regles.cles(c) : [baseCode(c)]; const n = nom || (regles.noms && regles.noms.get(c)); if (n && cleNom(n) && !ks.includes('N:' + cleNom(n))) ks.push('N:' + cleNom(n)); return ks; };
+    const clesGamme = new Map(data.map((g) => [g.sequence, clesDe(code(g), g.operations && g.operations.nom)]));
+    const memeOp = (ks, g) => clesGamme.get(g.sequence).some((k) => ks.includes(k));
+    const ligneModele = (g) => Array.from(modele.values()).find((r) => memeOp(clesDe(r.operation_code), g));
 
     // Prédécesseurs d'une étape d'après le modèle, en sautant les opérations absentes de l'OF.
     const depuisModele = (g) => {
-      const ligne = ligneModele(code(g));
+      const ligne = ligneModele(g);
       if (!ligne) return { seqs: [], simultanes: new Map() };
       const seqs = new Set(); const simultanes = new Map();
       const explorer = (codesModele, vus, direct) => {
         for (const cm of codesModele || []) {
           if (vus.has(cm)) continue; vus.add(cm);
           const r = modele.get(cm); if (!r) continue;
-          const presentes = (parBase.get(baseCode(r.operation_code)) || []).filter((x) => x.sequence !== g.sequence);
+          const ks = clesDe(r.operation_code);
+          const presentes = data.filter((x) => x.sequence !== g.sequence && memeOp(ks, x));
           if (presentes.length) {
             presentes.forEach((x) => { seqs.add(x.sequence); if (direct && (ligne.simultane || []).includes(cm)) simultanes.set(x.sequence, ligne.seuil_pct || 10); });
           } else explorer(r.predecesseurs, vus, false);
@@ -91,7 +92,13 @@ async function normaliserGamme(supabase, ofId, options) {
     };
 
     // Dans l'ordre logique les étapes sont résolues du début vers la fin.
-    const base0 = data.map((g) => ({ ...g, predecesseurs: aTraiter(g) ? null : g.predecesseurs }));
+    // Pour le classement, un partenaire « en ligne » compte comme prédécesseur : il passe toujours avant.
+    const partenaireDe = (g) => data.find((y) => y.sequence !== g.sequence && regles.has(`${code(g)}|${code(y)}`) && !regles.has(`${code(y)}|${code(g)}`));
+    const base0 = data.map((g) => {
+      if (!aTraiter(g)) return { ...g, predecesseurs: g.predecesseurs };
+      const y = partenaireDe(g);
+      return { ...g, predecesseurs: y ? [y.sequence] : null };
+    });
     const ordre = ordreLogique(base0);
     const rang = new Map(ordre.map((g, i) => [g.sequence, i]));
     const predsDe = new Map(data.map((g) => [g.sequence, aTraiter(g) ? null : g.predecesseurs.slice()]));
@@ -132,13 +139,33 @@ async function normaliserGamme(supabase, ofId, options) {
       } else predsDe.set(g.sequence, []);
     }
 
+    // 2e passe (toutes étapes non terminées) : met les liens en cohérence, y compris ceux saisis ou déduits plus tôt.
+    //  - le modèle de gamme et le partenaire « en ligne » doivent figurer parmi les prédécesseurs
+    //    (contrôle couvertures ↔ montage, applats ← montage…) ;
+    //  - un prédécesseur redondant (déjà ancêtre d'un autre prédécesseur) ou annexe (étape « en ligne » dont le
+    //    partenaire est aussi prédécesseur) est retiré : le contrôle ne dépend plus de la découpe, mais du montage.
+    const ancetres = (s0) => { const out = new Set(); const pile = [...(predsDe.get(s0) || [])]; while (pile.length) { const p = pile.pop(); if (out.has(p)) continue; out.add(p); (predsDe.get(p) || []).forEach((x) => pile.push(x)); } return out; };
+    const originaux = new Map(data.map((g) => [g.sequence, Array.isArray(g.predecesseurs) ? g.predecesseurs.slice() : null]));
+    for (const g of ordreLogique(data.map((x) => ({ ...x, predecesseurs: predsDe.get(x.sequence) })))) {
+      if (g.statut === 'terminé') continue;
+      const preds = new Set(predsDe.get(g.sequence) || []);
+      const y = partenaireDe(g);
+      const ajouts = [...depuisModele(g).seqs, ...(y ? [y.sequence] : [])];
+      for (const a of ajouts) if (!preds.has(a) && !creeUneBoucle(resolu(), g.sequence, a)) preds.add(a);
+      const liste = Array.from(preds);
+      const sansAnnexes = liste.filter((p) => !liste.some((q) => q !== p && regles.has(`${codeParSeq.get(p)}|${codeParSeq.get(q)}`)));
+      const base = sansAnnexes.length ? sansAnnexes : liste;
+      const garde = base.filter((p) => !base.some((q) => q !== p && ancetres(q).has(p)));
+      predsDe.set(g.sequence, garde.length ? garde : base);
+    }
+    const memeListe = (a, b) => Array.isArray(a) && a.length === b.length && a.every((p) => b.includes(p));
+
     let modifiees = 0;
     for (const g of data) {
-      if (!aTraiter(g)) continue;
+      if (g.statut === 'terminé') continue;
       const nouveaux = predsDe.get(g.sequence) || [];
       const dep = depsDe.get(g.sequence);
-      const memePreds = Array.isArray(g.predecesseurs) && g.predecesseurs.length === nouveaux.length && g.predecesseurs.every((p) => nouveaux.includes(p));
-      if (memePreds && !dep) continue;
+      if (memeListe(originaux.get(g.sequence), nouveaux) && !dep) continue;
       const maj = { predecesseurs: nouveaux };
       if (dep) maj.dependances = { ...(g.dependances || {}), ...dep };
       const { error: e2 } = await supabase.from('gammes_operatoires').update(maj).eq('id', g.id);
@@ -146,7 +173,7 @@ async function normaliserGamme(supabase, ofId, options) {
       modifiees++;
     }
     return modifiees > 0;
-  } catch (_) { return false; }   // ne jamais bloquer la planification
+  } catch (e) { if (process.env.DEBUG_ORDRE) console.error(e); return false; }   // ne jamais bloquer la planification
 }
 
 module.exports = { ordreLogique, normaliserGamme };

@@ -19,27 +19,48 @@ function typePhase(nom) {
   return 'production';
 }
 
-// Code « de base » d'une opération : accents/casse neutralisés, suffixes _PLEIADE / _CARTONNES retirés,
-// pour que « MONTAGE_COUVERTURE_PLEIADE » soit reconnu comme « MONTAGE_COUVERTURE ».
-const baseCode = (c) => String(c || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/_(PLEIADE|CARTONNES?)(?=_|$)/g, '');
+// Identité d'une opération pour les règles : son code « de base » (accents/casse neutralisés, suffixes _PLEIADE /
+// _CARTONNES retirés) ET son nom nettoyé (sans « de », « pléiade », « cartonnés », pluriels ignorés, mots triés).
+// Ainsi « Montage couverture Pléiade » est reconnu comme « Montage de couverture », quel que soit son code.
+const sansAccents = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+const baseCode = (c) => sansAccents(c).toUpperCase().replace(/_(PLEIADE|CARTONNES?)(?=_|$)/g, '');
+const cleNom = (nom) => sansAccents(nom).toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(' ')
+  .filter((m) => m && !['de', 'des', 'du', 'la', 'le', 'les', 'd', 'et', 'en', 'pleiade', 'cartonne', 'cartonnes'].includes(m))
+  .map((m) => m.replace(/s$/, '')).sort().join(' ');
 
 class Regles extends Set {
+  constructor() { super(); this.noms = new Map(); }
+  // Clés d'identité d'un code d'opération (nom connu par la table operations).
+  cles(code) {
+    const ks = [baseCode(code)];
+    const n = this.noms.get(code);
+    if (n) { const c = cleNom(n); if (c) ks.push('N:' + c); }
+    return ks;
+  }
   has(cle) {
     if (super.has(cle)) return true;
     const [a, b] = String(cle).split('|');
-    return super.has(`${baseCode(a)}|${baseCode(b)}`);
+    const ka = this.cles(a), kb = this.cles(b);
+    return ka.some((x) => kb.some((y) => super.has(`${x}|${y}`)));
   }
 }
 
 // Ensemble des couples "OPERATION|PREDECESSEUR". Table absente (migration 34 pas encore exécutée) : aucun couple.
 async function chargerRegles(supabase) {
+  const r = new Regles();
   try {
-    const { data, error } = await supabase.from('liaisons_en_ligne').select('operation_code, avec_operation_code');
-    if (error) return new Regles();
-    const r = new Regles();
-    (data || []).forEach((x) => { r.add(`${x.operation_code}|${x.avec_operation_code}`); r.add(`${baseCode(x.operation_code)}|${baseCode(x.avec_operation_code)}`); });
-    return r;
-  } catch (_) { return new Regles(); }
+    const [liens, ops] = await Promise.all([
+      supabase.from('liaisons_en_ligne').select('operation_code, avec_operation_code'),
+      supabase.from('operations').select('code, nom'),
+    ]);
+    if (!ops.error) (ops.data || []).forEach((o) => r.noms.set(o.code, o.nom));
+    if (liens.error) return r;
+    (liens.data || []).forEach((x) => {
+      r.add(`${x.operation_code}|${x.avec_operation_code}`);
+      r.cles(x.operation_code).forEach((ka) => r.cles(x.avec_operation_code).forEach((kb) => r.add(`${ka}|${kb}`)));
+    });
+  } catch (_) { /* aucune règle */ }
+  return r;
 }
 
 function estEnLigne(regles, opCode, opPredCode, lien) {
@@ -82,4 +103,4 @@ function appliquerEnLigne(etapes, regles) {
   });
 }
 
-module.exports = { typePhase, chargerRegles, estEnLigne, appliquerEnLigne, baseCode };
+module.exports = { typePhase, chargerRegles, estEnLigne, appliquerEnLigne, baseCode, cleNom };
