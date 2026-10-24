@@ -2543,10 +2543,18 @@
       const d = dDebut.value, f = dFin.value;
       const periode = dInconnue.checked ? `à partir du ${fr(d)}, sans date de retour connue`
         : (!d || !f ? '…' : (d === f ? `le ${fr(d)} uniquement` : `du ${fr(d)} au ${fr(f)} inclus (${nbJours(d, f)} jours)`));
+      // durée de travail effectif de la plage, pause déjeuner (12h00-12h30) déduite
+      const hmin = (h) => { const [a, b] = String(h || '0:0').split(':'); return Number(a) * 60 + Number(b); };
+      let effectif = '';
+      if (st === 'partiel' && heureD.value && heureF.value && heureF.value > heureD.value) {
+        const dm = hmin(heureD.value), fm = hmin(heureF.value);
+        const m = fm - dm - Math.max(0, Math.min(fm, 750) - Math.max(dm, 720));
+        effectif = ` Soit <b>${Math.floor(m / 60)} h${m % 60 ? String(m % 60).padStart(2, '0') : ''} de travail effectif</b> par jour (pause déjeuner de 12h00 à 12h30 déduite).`;
+      }
       let t;
       if (st === 'absent') t = `<b>${esc(prenom)}</b> sera <b>absent(e)</b> ${periode}.`;
       else if (st === 'en arrêt') t = `<b>${esc(prenom)}</b> sera <b>en arrêt</b> ${periode}.`;
-      else if (st === 'partiel') t = `<b>${esc(prenom)}</b> sera disponible <b>seulement de ${esc(heureD.value || '…')} à ${esc(heureF.value || '…')}</b> ${periode}.`;
+      else if (st === 'partiel') t = `<b>${esc(prenom)}</b> sera disponible <b>seulement de ${esc(heureD.value || '…')} à ${esc(heureF.value || '…')}</b> ${periode}.${effectif}`;
       else t = `<b>${esc(prenom)}</b> sera <b>de nouveau disponible</b> ${periode} : les absences ou arrêts enregistrés sur cette période seront supprimés.`;
       document.getElementById('d-resume').innerHTML = t;
     }
@@ -4315,7 +4323,7 @@
         const heuresSemaine = data.planning.filter(c => (c.personnel_ids || []).includes(p.id)).reduce((total, c) => {
           if (!c.heure_debut || !c.heure_fin) return total + 8;
           let min = minutesDe(c.heure_fin) - minutesDe(c.heure_debut);
-          if (minutesDe(c.heure_debut) < 720 && minutesDe(c.heure_fin) > 750) min -= 30; // pause du midi comprise dans la plage
+          min -= Math.max(0, Math.min(minutesDe(c.heure_fin), 750) - Math.max(minutesDe(c.heure_debut), 720)); // pause 12h00-12h30 : seule la part qui chevauche la plage est déduite
           return total + min / 60;
         }, 0);
         const dispoAuj = (data.disponibilites || []).find(d => d.personnel_id === p.id && d.date === AUJOURDHUI_ISO);
