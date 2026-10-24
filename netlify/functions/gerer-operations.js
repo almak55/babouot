@@ -6,7 +6,7 @@
 // POST   body { nom, famille?, apres_code? }  -> crée l'opération (code déduit du nom)
 //        apres_code : place la nouvelle opération juste après celle-ci dans l'ordre par défaut
 //        (sinon : à la fin).
-// PUT    body { code, nom?, famille? }        -> renomme / change la famille (le code ne change pas)
+// PUT    body { code, nom?, famille?, apres_code? }  -> modifie nom, famille, position (le code ne change pas)
 // DELETE ?code=XXX                            -> supprime, sauf si l'opération est déjà utilisée
 
 const { getSupabase } = require('./lib/supabaseclient');
@@ -77,6 +77,27 @@ const handlerProtege = async (event) => {
         maj.nom = nom;
       }
       if (body.famille !== undefined) maj.famille = String(body.famille).trim() || null;
+      // Repositionnement : apres_code = code de l'opération précédente, '__debut' = en première place
+      if (body.apres_code !== undefined && body.apres_code !== null && body.apres_code !== '__garder') {
+        const { data: toutes, error: e1 } = await supabase.from('operations').select('code, ordre_defaut');
+        if (e1) throw e1;
+        const triees = toutes.slice().sort((x, y) => (x.ordre_defaut ?? 1e9) - (y.ordre_defaut ?? 1e9));
+        const autres = triees.filter((o) => o.code !== body.code);
+        let idx = 0;
+        if (body.apres_code === '') idx = autres.length;                       // à la fin
+        else if (body.apres_code !== '__debut') {
+          const i = autres.findIndex((o) => o.code === body.apres_code);
+          idx = i >= 0 ? i + 1 : autres.length;
+        }
+        autres.splice(idx, 0, { code: body.code });
+        for (let i = 0; i < autres.length; i++) {
+          const ordre = (i + 1) * 10;
+          const ancien = toutes.find((o) => o.code === autres[i].code);
+          if (ancien && ancien.ordre_defaut === ordre) continue;
+          const r = await supabase.from('operations').update({ ordre_defaut: ordre }).eq('code', autres[i].code);
+          if (r.error) throw r.error;
+        }
+      }
       const { data, error } = await supabase.from('operations').update(maj).eq('code', body.code)
         .select('id, code, nom, famille, ordre_defaut').single();
       if (error) throw error;
