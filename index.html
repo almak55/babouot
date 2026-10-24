@@ -2032,12 +2032,31 @@
           actions = `<button class="btn" style="${btn}" data-gact="replanifier" data-id="${g.id}">Modifier</button>
                      <button class="btn" style="${btn}" data-gact="deplanifier" data-id="${g.id}">Déplanifier</button>`;
         }
+        const el = g.en_ligne && g.en_ligne.possible ? g.en_ligne : null;
+        const modeHtml = !el ? '' : (g.statut === 'à planifier'
+          ? `<select data-gmode="${g.id}" title="Fonctionnement par rapport à « ${esc(el.avec)} »" style="font-size:12px;padding:3px 6px;width:auto;"><option value="en_ligne" ${el.actif ? 'selected' : ''}>En ligne avec ${esc(el.avec)}</option><option value="hors_ligne" ${el.actif ? '' : 'selected'}>Hors ligne (après ${esc(el.avec)})</option></select>`
+          : `<span class="tag ${el.actif ? 'ok' : ''}">${el.actif ? 'En ligne' : 'Hors ligne'}</span>`);
         return `<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px;">
-            <span style="flex:1;min-width:130px;">${esc(nom)}</span>
+            <span style="flex:1;min-width:130px;">${esc(nom)}</span>${modeHtml}
             <span class="tag ${classe}">${ETAT[g.statut] || esc(g.statut)}</span>
             <span style="display:flex;gap:6px;min-width:150px;justify-content:flex-end;">${actions}</span>
           </div>`;
       }).join('') || '<div class="empty">Aucune étape.</div>';
+      const possibles = gammes.filter(g => g.en_ligne && g.en_ligne.possible && g.statut === 'à planifier');
+      if (possibles.length) {
+        list.insertAdjacentHTML('afterbegin', `<div style="padding:8px 10px; margin-bottom:6px; border-radius:10px; background:var(--teal-50,#E6F6F3); font-size:12.5px; color:#161C2C;">
+          <strong>En ligne</strong> : la machine démarre avec la précédente et sa production se déroule en même temps (même durée). <strong>Hors ligne</strong> : l'opération se fait plus tard, après la fin de la précédente, avec son propre temps.
+          <span style="display:inline-flex; gap:6px; margin-left:8px;"><button class="btn" style="padding:3px 9px;font-size:12px;" data-gmode-tout="en_ligne">Tout en ligne</button><button class="btn" style="padding:3px 9px;font-size:12px;" data-gmode-tout="hors_ligne">Tout hors ligne</button></span></div>`);
+        const appliquerMode = async (corps) => {
+          try {
+            const r = await fetch(`${API}/modifier-gamme`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: ofUuid, mode_ligne: corps }) });
+            const d = await lireJson(r); if (!r.ok) throw new Error(d.error || 'Erreur serveur (HTTP ' + r.status + ')');
+            toast('Mode de fonctionnement enregistré.'); ouvrirModaleGamme(ofUuid, ofNumero);
+          } catch (e) { zoneMsg().innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+        };
+        list.querySelectorAll('[data-gmode]').forEach(sel => sel.addEventListener('change', () => appliquerMode({ gamme_id: sel.dataset.gmode, mode: sel.value })));
+        list.querySelectorAll('[data-gmode-tout]').forEach(b => b.addEventListener('click', () => appliquerMode({ mode: b.dataset.gmodeTout })));
+      }
       list.querySelectorAll('[data-gact]').forEach(b => b.addEventListener('click', async () => {
         const id = b.dataset.id, act = b.dataset.gact;
         if (act === 'planifier' || act === 'replanifier') {
@@ -3008,6 +3027,7 @@
           <h2>Phases de travail standard</h2>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
             <select id="ts-filtre" style="min-width:170px;"><option value="">Toutes les opérations</option></select>
+            <button class="btn" id="ts-ligne" title="Opérations qui fonctionnent en ligne (production simultanée)">Opérations en ligne</button>
             <button class="btn" id="ts-ops" title="Ajouter ou modifier des opérations du catalogue">Gérer les opérations</button>
             <button class="btn" id="ts-copie" title="Copier les réglages d'une machine vers d'autres machines">Copier vers…</button>
             <button class="btn" id="ts-export" title="Exporter au format Excel (sert aussi de modèle à remplir)">Exporter Excel</button>
@@ -3038,6 +3058,7 @@
     `);
     wrap.querySelector('#ts-new').addEventListener('click', () => ouvrirModalePhase(null));
     wrap.querySelector('#ts-ops').addEventListener('click', () => ouvrirModaleOperations());
+    wrap.querySelector('#ts-ligne').addEventListener('click', () => ouvrirModaleEnLigne());
     wrap.querySelector('#ts-copie').addEventListener('click', () => ouvrirModaleCopie());
     wrap.querySelector('#ts-export').addEventListener('click', () => exporterExcel());
     const fichier = wrap.querySelector('#ts-import-file');
@@ -3337,6 +3358,55 @@
         toast(edition ? 'Caractéristique mise à jour.' : `Caractéristique « ${d.cle} » créée.`); fermerModale(); render();
       } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
     });
+  }
+
+  // ----- Opérations « en ligne » : production simultanée avec l'opération précédente -----
+  async function ouvrirModaleEnLigne() {
+    let liaisons, ops;
+    try {
+      const [r1, refs] = await Promise.all([fetch(`${API}/gerer-en-ligne`), (referentielsCache = null, getReferentiels())]);
+      const d = await lireJson(r1);
+      if (!r1.ok) throw new Error(d.error || ('Erreur serveur (HTTP ' + r1.status + ')'));
+      liaisons = d.liaisons; ops = refs.operations;
+    } catch (e) { toast(`Impossible de charger : ${e.message}`, 'error'); return; }
+    const options = (vide) => `<option value="">${vide}</option>` + ops.map(o => `<option value="${esc(o.code)}">${esc(o.nom)}</option>`).join('');
+    afficherModale(`
+      <h3>Opérations en ligne</h3>
+      <p style="font-size:12.5px; color:var(--ink-700); margin:0 0 12px;">Quand deux opérations tournent <strong>en ligne</strong>, la seconde démarre (et se règle) en même temps que la précédente, puis sa <strong>production</strong> a la même durée et se déroule dans la même fenêtre. Les temps de <strong>mise en route, réglage et nettoyage</strong> restent propres à chaque machine. Les phases sont reconnues d'après leur nom (« Mise en route », « Réglage », « Nettoyage » ; toute autre phase est de la production).</p>
+      <div style="border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:14px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="field"><label>Cette opération…</label><select id="el-op">${options('— choisir —')}</select></div>
+          <div class="field"><label>…tourne en ligne avec l'opération précédente</label><select id="el-avec">${options('— choisir —')}</select></div>
+        </div>
+        <div id="m-msg"></div>
+        <div style="text-align:right;"><button class="btn primary" id="el-add">Ajouter</button></div>
+      </div>
+      <div style="max-height:280px; overflow:auto; border:1px solid var(--line); border-radius:10px;">
+        <table><thead><tr><th>Opération</th><th>En ligne avec</th><th></th></tr></thead><tbody>
+        ${liaisons.length ? liaisons.map(l => `<tr><td>${esc(l.operation)}</td><td>${esc(l.avec)}</td><td style="text-align:right;"><button class="btn el-del" data-op="${esc(l.operation_code)}" data-avec="${esc(l.avec_operation_code)}">Retirer</button></td></tr>`).join('') : '<tr><td colspan="3" class="empty">Aucune liaison.</td></tr>'}
+        </tbody></table>
+      </div>
+      <div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`, 'xlarge');
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.getElementById('el-add').addEventListener('click', async () => {
+      const msg = document.getElementById('m-msg');
+      const operation_code = document.getElementById('el-op').value, avec_operation_code = document.getElementById('el-avec').value;
+      if (!operation_code || !avec_operation_code) { msg.innerHTML = '<div class="msg error">Choisissez les deux opérations.</div>'; return; }
+      try {
+        const res = await fetch(`${API}/gerer-en-ligne`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation_code, avec_operation_code }) });
+        const d = await lireJson(res);
+        if (!res.ok) throw new Error(d.error || ('Erreur serveur (HTTP ' + res.status + ')'));
+        toast('Liaison en ligne ajoutée.'); ouvrirModaleEnLigne();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
+    document.querySelectorAll('.el-del').forEach(b => b.addEventListener('click', async () => {
+      try {
+        const res = await fetch(`${API}/gerer-en-ligne?operation_code=${encodeURIComponent(b.dataset.op)}&avec_operation_code=${encodeURIComponent(b.dataset.avec)}`, { method: 'DELETE' });
+        const d = await lireJson(res);
+        if (!res.ok) throw new Error(d.error || ('Erreur serveur (HTTP ' + res.status + ')'));
+        toast('Liaison retirée.'); ouvrirModaleEnLigne();
+      } catch (e) { toast(e.message, 'error'); }
+    }));
   }
 
   // ----- Catalogue des opérations : ajout / modification / suppression manuels -----
@@ -3800,7 +3870,7 @@
         return `
           <div class="plan-step" data-gamme="${e.gamme_id}">
             <div class="step-head"><strong>${esc(e.operation)}</strong>
-              <span class="plan-note">${e.predecesseurs && e.predecesseurs.length ? 'après : ' + (e.dependances && e.dependances.length ? e.dependances.map(d => (nomDeSeq(d.sequence)) + (d.mode === 'progressif' ? ` (dès ${d.seuil_pct} %)` : '')).join(', ') : e.predecesseurs.map(nomDeSeq).join(', ')) : 'dès le début'} · ${e.debut ? fmtDateHeure(e.debut) + ' → ' + fmtDateHeure(e.fin) : 'non planifiable'}</span></div>
+              <span class="plan-note">${e.predecesseurs && e.predecesseurs.length ? 'après : ' + (e.dependances && e.dependances.length ? e.dependances.map(d => (nomDeSeq(d.sequence)) + (d.mode === 'progressif' ? ` (dès ${d.seuil_pct} %)` : (d.mode === 'en_ligne' ? ' (EN LIGNE : même production)' : ''))).join(', ') : e.predecesseurs.map(nomDeSeq).join(', ')) : 'dès le début'} · ${e.debut ? fmtDateHeure(e.debut) + ' → ' + fmtDateHeure(e.fin) : 'non planifiable'}</span></div>
             <div class="step-grid">
               <div class="field"><label>Machine${e.machine ? ' retenue : ' + esc(e.machine.nom) : ''}</label><select class="pl-machine">${machOpts}</select></div>
               <div class="field"><label>Personnel (imposer)</label>

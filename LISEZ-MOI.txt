@@ -1,0 +1,12 @@
+MISE A JOUR BABOUOT - a copier a la racine du depot (en conservant les dossiers)
+
+1. Supabase > SQL Editor : executer migration_34_en_ligne.sql (une seule fois).
+2. Copier dans le depot, en remplacant/ajoutant :
+   - index.html                                   (racine)
+   - 00_tout_en_un.sql, migration_34_en_ligne.sql (racine, documentation SQL)
+   - netlify/functions/*.js                       (7 fichiers)
+   - netlify/functions/lib/*.js                   (4 fichiers)
+3. Commit + push, attendre le deploiement Netlify, puis Ctrl+F5.
+
+Contenu : operations en ligne / hors ligne, gestion des operations, disponibilites par periode,
+points bloquants affiches, pause dejeuner dans les calculs de charge.
