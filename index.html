@@ -5869,13 +5869,13 @@
       $('pa-onglets').querySelectorAll('.pa-mois').forEach((b) => b.addEventListener('click', () => { courant = b.dataset.m; rendre(); }));
       $('pa-creer').style.display = m ? '' : 'none';
       if (courant === 'reste') {
-        const liste = (t, l) => `<h4 style="margin:8px 0 4px;">${t} (${l.length})</h4><table class="sp-table"><thead><tr><th>Titre</th><th>Qté</th><th>MP</th><th>Carte</th><th>Tête</th><th>Peau</th></tr></thead><tbody>${l.map((x) => `<tr><td>${esc(x.titre)}</td><td>${x.quantite || '—'}</td><td>${x.mp || '—'}</td><td>${x.carte_dos || '—'}</td><td>${pastille(x.tete)}</td><td>${esc(x.peau || '—')}</td></tr>`).join('')}</tbody></table>`;
+        const liste = (t, l) => `<h4 style="margin:8px 0 4px;">${t} (${l.length})</h4><table class="sp-table"><thead><tr><th>Titre</th><th>Qté</th><th>Cahiers</th><th>Carte</th><th>Tête</th><th>Peau</th></tr></thead><tbody>${l.map((x) => `<tr><td>${esc(x.titre)}</td><td>${x.quantite || '—'}</td><td>${x.mp || '—'}</td><td>${x.carte_dos || '—'}</td><td>${pastille(x.tete)}</td><td>${esc(x.peau || '—')}</td></tr>`).join('')}</tbody></table>`;
         $('pa-corps').innerHTML = liste('Blocs à coudre', prop.a_coudre) + liste('Blocs à emboîter', prop.a_emboiter); return;
       }
       const traites = data.lignes.filter((l) => l.mois === courant && (l.statut === 'fait' || l.statut === 'of_cree'));
       const blocTraites = traites.length ? `<h4 style="margin:14px 0 4px;">Déjà traités ce mois (${traites.length})</h4>
-        <table class="sp-table" style="opacity:.8;"><thead><tr><th>Titre</th><th>Qté</th><th>Carte de dos</th><th>Tête</th><th>Peau</th><th>Situation</th><th></th></tr></thead><tbody>
-        ${traites.map((l) => `<tr><td style="${l.statut === 'fait' ? 'text-decoration:line-through;' : ''}">${esc(l.titre)} ${l.flags ? `<span style="color:var(--muted);font-size:12px;">${esc(l.flags)}</span>` : ''}</td><td>${l.quantite || '—'}</td><td>${l.carte_dos || '—'}</td><td>${pastille(l.tete)}</td><td>${esc(l.peau || '—')}</td>
+        <table class="sp-table" style="opacity:.8;"><thead><tr><th>Titre</th><th>Qté</th><th>Cahiers</th><th>Carte de dos</th><th>Tête</th><th>Peau</th><th>Situation</th><th></th></tr></thead><tbody>
+        ${traites.map((l) => `<tr><td style="${l.statut === 'fait' ? 'text-decoration:line-through;' : ''}">${esc(l.titre)} ${l.flags ? `<span style="color:var(--muted);font-size:12px;">${esc(l.flags)}</span>` : ''}</td><td>${l.quantite || '—'}</td><td>${l.mp || '—'}</td><td>${l.carte_dos || '—'}</td><td>${pastille(l.tete)}</td><td>${esc(l.peau || '—')}</td>
           <td>${l.statut === 'fait' ? '<span class="tag ok">Déjà fabriqué</span>' : '<span class="tag ok">OF créé</span>'}</td>
           <td style="text-align:right;">${l.statut === 'fait' ? `<button class="btn pa-remettre" type="button" data-id="${l.id}" style="padding:3px 10px;font-size:12px;">Remettre à produire</button>` : ''}</td></tr>`).join('')}</tbody></table>` : '';
       const brancherTraites = () => $('pa-corps').querySelectorAll('.pa-remettre').forEach((bt) => bt.addEventListener('click', async () => {
@@ -5893,16 +5893,16 @@
           <span><strong>${m.series}</strong> série(s) de cartes — <strong>${m.reglages}</strong> changement(s) de réglage</span>
           <span><strong>${m.nettoyages}</strong> changement(s) de tête (nettoyage jaspage)</span></div>
         ${m.sans_carte.length ? `<div class="msg" style="margin-bottom:6px;">⚠ Carte de dos manquante (hors classement) : ${m.sans_carte.map((x) => esc(x.titre)).join(' ; ')}</div>` : ''}
-        <div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Jour BDM</th><th>#</th><th>Titre</th><th>Qté</th><th>Carte de dos</th><th>Tête</th><th>Peau</th><th>Livraison</th><th>OF</th></tr></thead><tbody>
+        <div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Jour BDM</th><th>#</th><th>Titre</th><th>Qté</th><th>Cahiers</th><th>Carte de dos</th><th>Tête</th><th>Peau</th><th>Livraison</th><th>OF</th></tr></thead><tbody>
         ${m.sequence.map((s, i) => { const l = lignesMois.find((x) => x.id === s.id) || {};
           return `<tr style="${s.change_reglage ? 'border-top:2px solid var(--accent,#0f766e);' : ''}">
           <td>${i === 0 || m.sequence[i - 1].jour_bdm !== s.jour_bdm ? 'J' + s.jour_bdm : ''}</td><td>${i + 1}</td>
           <td>${esc(s.titre)} ${s.a_verifier ? '<span title="Modifié récemment" style="color:#c0392b;">●</span>' : ''} ${l.flags ? `<span style="color:var(--muted);font-size:12px;">${esc(l.flags)}</span>` : ''}</td>
-          <td>${champ(s.id, 'quantite', s.quantite, 70)}</td><td>${champ(s.id, 'carte_dos', s.carte_dos, 46)}${s.change_reglage ? ' <span title="Nouveau réglage BDM">⚙</span>' : ''}</td>
+          <td>${champ(s.id, 'quantite', s.quantite, 70)}</td><td>${champ(s.id, 'mp', s.mp, 46)}</td><td>${champ(s.id, 'carte_dos', s.carte_dos, 46)}${s.change_reglage ? ' <span title="Nouveau réglage BDM">⚙</span>' : ''}</td>
           <td>${champ(s.id, 'tete', s.tete, 90)}${s.change_tete ? ' <span title="Nettoyage jaspage">🧽</span>' : ''}</td><td>${champ(s.id, 'peau', s.peau, 90)}</td>
           <td style="white-space:nowrap;${l.date_livraison && l.date_livraison < auj ? 'color:#c0392b;' : ''}">${l.date_livraison ? dateCourte(l.date_livraison) : nomMois(m.mois)}</td>
           <td style="white-space:nowrap;text-align:right;">${l.of_id ? '<span style="color:#0f766e;">✓ OF créé</span>' : `<button class="btn pa-of" type="button" data-id="${s.id}" data-rang="${i + 1}" data-titre="${esc(s.titre)}" title="Créer l'OF Pléiade de ce titre uniquement" style="padding:3px 10px;font-size:12px;">Créer l'OF</button> <button class="btn pa-fait" type="button" data-id="${s.id}" data-titre="${esc(s.titre)}" title="Ce titre a déjà été fabriqué : le sortir du planning à produire" style="padding:3px 10px;font-size:12px;">Déjà fabriqué</button>`}</td></tr>`; }).join('')}
-        ${m.sans_carte.map((x) => { const l = lignesMois.find((y) => y.id === x.id) || {}; return `<tr style="background:var(--field-bg);"><td></td><td>—</td><td>${esc(x.titre)}</td><td>${champ(x.id, 'quantite', l.quantite, 70)}</td><td>${champ(x.id, 'carte_dos', '', 46)}</td><td>${champ(x.id, 'tete', l.tete, 90)}</td><td>${champ(x.id, 'peau', l.peau, 90)}</td><td>${l.date_livraison ? dateCourte(l.date_livraison) : nomMois(m.mois)}</td><td style="white-space:nowrap;text-align:right;">${l.of_id ? '<span style="color:#0f766e;">✓ OF créé</span>' : `<button class="btn pa-of" type="button" data-id="${x.id}" data-rang="${m.sequence.length + 1}" data-titre="${esc(x.titre)}" title="Créer l'OF Pléiade de ce titre uniquement" style="padding:3px 10px;font-size:12px;">Créer l'OF</button> <button class="btn pa-fait" type="button" data-id="${x.id}" data-titre="${esc(x.titre)}" title="Ce titre a déjà été fabriqué : le sortir du planning à produire" style="padding:3px 10px;font-size:12px;">Déjà fabriqué</button>`}</td></tr>`; }).join('')}
+        ${m.sans_carte.map((x) => { const l = lignesMois.find((y) => y.id === x.id) || {}; return `<tr style="background:var(--field-bg);"><td></td><td>—</td><td>${esc(x.titre)}</td><td>${champ(x.id, 'quantite', l.quantite, 70)}</td><td>${champ(x.id, 'mp', l.mp, 46)}</td><td>${champ(x.id, 'carte_dos', '', 46)}</td><td>${champ(x.id, 'tete', l.tete, 90)}</td><td>${champ(x.id, 'peau', l.peau, 90)}</td><td>${l.date_livraison ? dateCourte(l.date_livraison) : nomMois(m.mois)}</td><td style="white-space:nowrap;text-align:right;">${l.of_id ? '<span style="color:#0f766e;">✓ OF créé</span>' : `<button class="btn pa-of" type="button" data-id="${x.id}" data-rang="${m.sequence.length + 1}" data-titre="${esc(x.titre)}" title="Créer l'OF Pléiade de ce titre uniquement" style="padding:3px 10px;font-size:12px;">Créer l'OF</button> <button class="btn pa-fait" type="button" data-id="${x.id}" data-titre="${esc(x.titre)}" title="Ce titre a déjà été fabriqué : le sortir du planning à produire" style="padding:3px 10px;font-size:12px;">Déjà fabriqué</button>`}</td></tr>`; }).join('')}
         </tbody></table></div>${blocTraites}`;
       brancherTraites();
       $('pa-corps').querySelectorAll('.pa-fait').forEach((bt) => bt.addEventListener('click', async () => {
@@ -5924,7 +5924,7 @@
         } catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; bt.disabled = false; }
       }));
       $('pa-corps').querySelectorAll('input[data-id]').forEach((inp) => inp.addEventListener('change', async () => {
-        const v = inp.value.trim(); const num = ['quantite', 'carte_dos'].includes(inp.dataset.k);
+        const v = inp.value.trim(); const num = ['quantite', 'mp', 'carte_dos'].includes(inp.dataset.k);
         try {
           await api('PUT', { id: inp.dataset.id, [inp.dataset.k]: num ? (v === '' ? null : parseInt(v, 10)) : (v === '' ? null : v) });
           data = await api('GET'); prop = await api('POST', { action: 'proposer' }); rendre();
