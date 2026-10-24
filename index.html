@@ -3629,9 +3629,10 @@
         <div style="padding:12px 18px; font-size:12px; color:var(--ink-500); border-bottom:1px solid var(--line);">
           Une phase <strong>sans machine</strong> est le standard de l'opération. Une phase <strong>rattachée à une machine</strong> la remplace pour cette machine. Chaque phase se calcule en <strong>forfait</strong>, <strong>durée × un nombre</strong>, <strong>cadence</strong> ou par <strong>formule</strong> selon les caractéristiques du produit (largeur, nombre de pages, grammage…).
         </div>
+        <div id="ts-bulk" style="display:none; align-items:center; gap:10px; padding:8px 18px; background:var(--paper-raised-2,#F3F5FA); border-bottom:1px solid var(--line); font-size:13px;"><span id="ts-bulk-n"></span><button class="btn danger-btn" id="ts-bulk-del" style="margin-left:auto;">Supprimer la sélection</button></div>
         <table>
-          <thead><tr><th>Opération</th><th>Machine</th><th>Phase</th><th>Calcul</th><th>Occupe la machine</th><th>Pers.</th><th></th></tr></thead>
-          <tbody id="ts-tbody"><tr><td colspan="7" class="empty">Chargement…</td></tr></tbody>
+          <thead><tr><th style="width:28px;"><input type="checkbox" id="ts-all" title="Tout cocher / décocher (lignes affichées)"></th><th>Opération</th><th>Machine</th><th>Phase</th><th>Calcul</th><th>Occupe la machine</th><th>Pers.</th><th></th></tr></thead>
+          <tbody id="ts-tbody"><tr><td colspan="8" class="empty">Chargement…</td></tr></tbody>
         </table>
       </div>
       <div class="panel">
@@ -3676,14 +3677,23 @@
       const afficher = () => {
         const sel = filtre.value;
         const lignes = phases.filter(p => !sel || p.operation_id === sel);
+        const majSelection = () => {
+          const cochees = Array.from(tbody.querySelectorAll('.ts-chk:checked'));
+          const barre = wrap.querySelector('#ts-bulk'); barre.style.display = cochees.length ? 'flex' : 'none';
+          wrap.querySelector('#ts-bulk-n').textContent = `${cochees.length} phase(s) sélectionnée(s)`;
+          const tous = wrap.querySelector('#ts-all'); const tot = tbody.querySelectorAll('.ts-chk').length;
+          tous.checked = tot > 0 && cochees.length === tot;
+        };
         if (lignes.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="7" class="empty">${phases.length ? 'Aucune phase pour cette opération.' : 'Aucune phase définie pour l\'instant. Cliquez sur « Nouvelle phase » pour saisir vos premiers temps standards.'}</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="8" class="empty">${phases.length ? 'Aucune phase pour cette opération.' : 'Aucune phase définie pour l\'instant. Cliquez sur « Nouvelle phase » pour saisir vos premiers temps standards.'}</td></tr>`;
+          majSelection();
           return;
         }
         tbody.innerHTML = '';
         lignes.forEach(p => {
           tbody.appendChild(el(`
             <tr>
+              <td><input type="checkbox" class="ts-chk" data-id="${p.id}"></td>
               <td>${p.operations.nom}</td>
               <td>${p.machines ? p.machines.nom : '<span class="chip">Standard</span>'}</td>
               <td><span class="mono" style="color:var(--ink-500); margin-right:6px;">${p.ordre}.</span>${p.nom}</td>
@@ -3697,6 +3707,27 @@
             </tr>
           `));
         });
+        tbody.querySelectorAll('.ts-chk').forEach(c => c.addEventListener('change', majSelection));
+        wrap.querySelector('#ts-all').onchange = (ev) => { tbody.querySelectorAll('.ts-chk').forEach(c => { c.checked = ev.target.checked; }); majSelection(); };
+        wrap.querySelector('#ts-bulk-del').onclick = () => {
+          const ids = Array.from(tbody.querySelectorAll('.ts-chk:checked')).map(c => c.dataset.id);
+          if (!ids.length) return;
+          afficherModale(`
+            <h3>Supprimer ${ids.length} phase(s) ?</h3>
+            <p style="font-size:13px; color:var(--ink-700); margin:0;">Les phases cochées seront supprimées définitivement. Les OF déjà chiffrés ne seront recalculés qu'à leur prochain chiffrage.</p>
+            <div id="m-msg"></div>
+            <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn danger-btn" id="m-confirm-delete">Supprimer ${ids.length} phase(s)</button></div>`);
+          document.getElementById('m-cancel').addEventListener('click', fermerModale);
+          document.getElementById('m-confirm-delete').addEventListener('click', async (ev) => {
+            ev.target.disabled = true; const msg = document.getElementById('m-msg'); let ko = 0;
+            for (const id of ids) {
+              try { const r = await fetch(`${API}/gerer-temps-standards?id=${id}`, { method: 'DELETE' }); if (!r.ok) ko++; } catch (_) { ko++; }
+            }
+            if (ko) { msg.innerHTML = `<div class="msg error">${ko} suppression(s) en échec sur ${ids.length}.</div>`; ev.target.disabled = false; render(); return; }
+            toast(`${ids.length} phase(s) supprimée(s).`); fermerModale(); render();
+          });
+        };
+        majSelection();
         tbody.querySelectorAll('.ts-edit').forEach(b => b.addEventListener('click', () => ouvrirModalePhase(phases.find(x => x.id === b.dataset.id))));
         tbody.querySelectorAll('.ts-del').forEach(b => b.addEventListener('click', () => {
           const p = phases.find(x => x.id === b.dataset.id);
@@ -3721,7 +3752,7 @@
       filtre.addEventListener('change', afficher);
       afficher();
     } catch (e) {
-      tbody.innerHTML = `<tr><td colspan="7" class="empty">Backend indisponible. (${e.message})</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" class="empty">Backend indisponible. (${e.message})</td></tr>`;
     }
   }
 
