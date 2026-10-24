@@ -2098,8 +2098,20 @@
       <div style="font-size:12.5px; margin-bottom:10px;"><strong>Dépendances :</strong> ${liens.apres.length ? liens.apres.map(l => `${MODE[l.mode] || 'après'} « ${esc(l.operation)} »`).join(' ; ') : 'aucune (peut démarrer dès que possible)'}</div>
       ${Object.keys(parJour).sort().map(bloc).join('')}
       <div class="plan-note">Consultation seule : rien n'est modifié. Durées en travail effectif (pause 12h00–12h30 déduite). Pour changer l'affectation ou l'horaire d'un créneau, utilisez la page « Charge » de la personne.</div>
-      <div class="actions"><button class="btn" id="m-cancel">Retour à la gamme</button></div>`, 'large');
+      <div id="recal-msg"></div>
+      <div class="actions">${creneaux.some(c => !c.heure_debut) ? `<button class="btn primary" id="m-recaler" title="Remplace les créneaux « Journée » par la durée réelle du chiffrage">Recaler sur le chiffrage</button>` : ''}<button class="btn" id="m-cancel">Retour à la gamme</button></div>`, 'large');
     document.getElementById('m-cancel').addEventListener('click', retour);
+    const bRec = document.getElementById('m-recaler');
+    if (bRec) bRec.addEventListener('click', async () => {
+      bRec.disabled = true; bRec.textContent = 'Recalage…';
+      const zone = document.getElementById('recal-msg');
+      try {
+        const r = await fetch(`${API}/recaler-durees`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gamme_id: gammeId }) });
+        const j = await lireJson(r); if (!r.ok) throw new Error(j.error || 'Erreur serveur (HTTP ' + r.status + ')');
+        if (!j.etapes_concernees) { zone.innerHTML = '<div class="msg">Rien à recaler : cette étape n\'a pas de durée chiffrée (ou est déjà à ses heures). Vérifiez le chiffrage de l\'OF.</div>'; bRec.disabled = false; bRec.textContent = 'Recaler sur le chiffrage'; return; }
+        ouvrirDetailEtape(gammeId, ofUuid, ofNumero);
+      } catch (e) { zone.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; bRec.disabled = false; bRec.textContent = 'Recaler sur le chiffrage'; }
+    });
   }
 
   // Gamme opératoire d'un OF : voir l'état de chaque étape, la planifier, la déplanifier ou la supprimer.
