@@ -2010,7 +2010,7 @@
 
   // Gamme opératoire d'un OF : voir l'état de chaque étape, la planifier, la déplanifier ou la supprimer.
   async function ouvrirModaleGamme(ofUuid, ofNumero) {
-    afficherModale(`<h3>Gamme opératoire — ${esc(ofNumero)}</h3><div id="gamme-list" class="empty">Chargement…</div><div id="gamme-msg"></div><div class="actions"><button class="btn" id="gamme-fermer">Fermer</button></div>`);
+    afficherModale(`<h3>Gamme opératoire — ${esc(ofNumero)}</h3><div id="gamme-list" class="empty">Chargement…</div><div id="gamme-msg"></div><div class="actions"><button class="btn" id="gamme-fermer">Fermer</button></div>`, 'large');
     document.getElementById('gamme-fermer').addEventListener('click', fermerModale);
     const zoneMsg = () => document.getElementById('gamme-msg');
     try {
@@ -2034,12 +2034,19 @@
         }
         const el = g.en_ligne && g.en_ligne.possible ? g.en_ligne : null;
         const modeHtml = !el ? '' : (g.statut === 'à planifier'
-          ? `<select data-gmode="${g.id}" title="Fonctionnement par rapport à « ${esc(el.avec)} »" style="font-size:12px;padding:3px 6px;width:auto;"><option value="en_ligne" ${el.actif ? 'selected' : ''}>En ligne avec ${esc(el.avec)}</option><option value="hors_ligne" ${el.actif ? '' : 'selected'}>Hors ligne (après ${esc(el.avec)})</option></select>`
+          ? `<select data-gmode="${g.id}" title="Fonctionnement par rapport à « ${esc(el.avec)} »" style="font-size:13px;padding:6px 8px;width:auto;max-width:100%;"><option value="en_ligne" ${el.actif ? 'selected' : ''}>En ligne avec ${esc(el.avec)}</option><option value="hors_ligne" ${el.actif ? '' : 'selected'}>Hors ligne (après ${esc(el.avec)})</option></select>`
           : `<span class="tag ${el.actif ? 'ok' : ''}">${el.actif ? 'En ligne' : 'Hors ligne'}</span>`);
-        return `<div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 0; border-bottom:1px solid var(--line); font-size:13px;">
-            <span style="flex:1;min-width:130px;">${esc(nom)}</span>${modeHtml}
-            <span class="tag ${classe}">${ETAT[g.statut] || esc(g.statut)}</span>
-            <span style="display:flex;gap:6px;min-width:150px;justify-content:flex-end;">${actions}</span>
+        const couleur = g.statut === 'à planifier' ? '#F5A623' : (g.statut === 'terminé' ? '#8A94AB' : '#16B8A6');
+        const enLigneActif = !!(el && el.actif);
+        return `<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 14px; margin:0 0 8px ${enLigneActif ? '22px' : '0'}; border:1px solid var(--line); border-left:5px solid ${couleur}; border-radius:10px; background:#fff; position:relative;">
+            <span style="flex:0 0 28px; height:28px; border-radius:50%; background:${couleur}; color:#0A0F1D; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center;">${g.sequence}</span>
+            <div style="flex:1; min-width:170px;">
+              <div style="font-size:15px; font-weight:700; color:#161C2C; line-height:1.25;">${esc(nom)}</div>
+              ${el ? `<div style="margin-top:3px; font-size:12px; color:${enLigneActif ? '#0F766E' : '#5B6478'}; font-weight:600;">${enLigneActif ? '↳ en ligne avec ' : 'hors ligne, après '}${esc(el.avec)}</div>` : ''}
+            </div>
+            <span class="tag ${classe}" style="font-size:12px;">${ETAT[g.statut] || esc(g.statut)}</span>
+            ${el && g.statut === 'à planifier' ? `<div style="flex:1 1 100%; margin-left:40px;">${modeHtml}</div>` : (el ? modeHtml : '')}
+            <span style="display:flex; gap:6px; justify-content:flex-end; flex-wrap:wrap;">${actions}</span>
           </div>`;
       }).join('') || '<div class="empty">Aucune étape.</div>';
       const possibles = gammes.filter(g => g.en_ligne && g.en_ligne.possible && g.statut === 'à planifier');
