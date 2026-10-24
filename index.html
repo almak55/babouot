@@ -544,6 +544,9 @@
   .pred-list { align-items: flex-start; }
   .pred-row { justify-content: flex-start; }
   .pred-row select { min-width: 250px; padding: 5px 8px; font-size: 12.5px; }
+  .modal .field .pred-name input[type=checkbox] { width: auto; margin: 0; flex: 0 0 auto; }
+  .modal .field .pred-row select { width: auto; max-width: 100%; min-width: 250px; }
+  .modal .field .pred-row .pred-pct input { width: 64px; }
   .pred-pct { font-size: 12.5px; color: var(--ink-700); display: inline-flex; align-items: center; gap: 5px; }
   .pred-pct input { width: 64px; padding: 4px 6px; font-size: 12.5px; }
   .pred-field { grid-column: 1 / -1; }
@@ -4572,12 +4575,14 @@
       const lignesPred = autres.map(x => {
         const opt = (e.dependances || {})[x.sequence];
         const coche = actuels.includes(x.sequence);
-        const mode = opt && opt.mode === 'progressif' ? 'progressif' : 'fin';
+        const regle = (e.regle_en_ligne || []).includes(x.sequence);   // couple « en ligne » connu (ex. contrôle couvertures / montage)
+        const mode = opt && opt.en_ligne === true ? 'en_ligne' : (opt && opt.en_ligne === false ? 'fin' : (opt && opt.mode === 'progressif' ? 'progressif' : (regle ? 'en_ligne' : 'fin')));
         const pct = opt && opt.seuil_pct !== undefined && opt.seuil_pct !== null ? opt.seuil_pct : 10;
         return `<div class="pred-row">
           <label class="pred-name"><input type="checkbox" class="s-pred-check" data-seq="${x.sequence}" ${coche ? 'checked' : ''}> ${esc(libelles.get(x.sequence))}</label>
-          <select class="s-pred-mode ${coche ? '' : 'hidden'}" data-seq="${x.sequence}">
-            <option value="fin" ${mode === 'fin' ? 'selected' : ''}>Attendre la fin</option>
+          <select class="s-pred-mode ${coche ? '' : 'hidden'}" data-seq="${x.sequence}" data-regle="${regle ? 1 : 0}">
+            <option value="fin" ${mode === 'fin' ? 'selected' : ''}>Attendre la fin (hors ligne)</option>
+            <option value="en_ligne" ${mode === 'en_ligne' ? 'selected' : ''}>En ligne : démarre en même temps, production simultanée</option>
             <option value="progressif" ${mode === 'progressif' ? 'selected' : ''}>Démarrage progressif</option>
           </select>
           <span class="pred-pct ${coche && mode === 'progressif' ? '' : 'hidden'}">dès <input class="s-pred-pct" type="number" min="0" max="100" step="1" value="${pct}"> % avancé</span>
@@ -4586,7 +4591,7 @@
       const predHtml = autres.length ? `
         <div class="field pred-field"><label>Démarre après… <span class="plan-note">(cochez une ou plusieurs opérations ; aucune case cochée = peut démarrer dès le début)</span></label>
           <div class="pred-list">${lignesPred}</div>
-          <small>Les opérations sont listées dans l'ordre de saisie de l'OF, ce n'est <strong>pas</strong> l'ordre d'exécution : c'est vous qui définissez ce qui vient après quoi. <strong>Attendre la fin</strong> : l'opération démarre quand la coche est terminée. <strong>Démarrage progressif</strong> : elle démarre dès qu'une part de l'opération cochée est faite (ex. la pliure dès que des feuilles refendues sont prêtes), mais ne peut pas finir avant elle.</small></div>` : '';
+          <small>Les opérations sont listées dans l'ordre de saisie de l'OF, ce n'est <strong>pas</strong> l'ordre d'exécution : c'est vous qui définissez ce qui vient après quoi. <strong>Attendre la fin</strong> : l'opération démarre quand la coche est terminée. <strong>En ligne</strong> : elle démarre en même temps que l'opération cochée (réglage en parallèle) et sa production se déroule dans les mêmes temps (ex. contrôle couvertures pendant le montage). <strong>Démarrage progressif</strong> : elle démarre dès qu'une part de l'opération cochée est faite (ex. la pliure dès que des feuilles refendues sont prêtes), mais ne peut pas finir avant elle.</small></div>` : '';
       const manquants = e.parametres_manquants.length
         ? `<div class="msg error" style="margin:6px 0 0;">À renseigner : ${e.parametres_requis.filter(p => e.parametres_manquants.includes(p.cle)).map(p => esc(p.libelle)).join(', ')}.</div>` : '';
       const erreursF = (e.erreurs_formule || []).map(x => `<div class="msg error" style="margin:6px 0 0;">Formule « ${esc(x.phase)} » : ${esc(x.message)}</div>`).join('');
@@ -4720,6 +4725,10 @@
             if (sel.value === 'progressif') {
               const pct = row.querySelector('.s-pred-pct').value;
               dependances[seq] = { mode: 'progressif', seuil_pct: pct === '' ? 10 : Number(pct) };
+            } else if (sel.value === 'en_ligne') {
+              dependances[seq] = { mode: 'en_ligne' };
+            } else if (sel.dataset.regle === '1') {
+              dependances[seq] = { mode: 'fin', hors_ligne: true };   // couple normalement en ligne, mais choisi hors ligne pour cet OF
             }
           });
           etape.predecesseurs = preds;
