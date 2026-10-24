@@ -3297,6 +3297,9 @@
       if (!res.ok) throw new Error(d.error || ('Erreur serveur (HTTP ' + res.status + ')'));
       ops = d.operations;
     } catch (e) { toast(`Impossible de charger les opérations : ${e.message}`, 'error'); return; }
+    const listeCases = (id, exclure) => `<div class="op-list" id="${id}" style="max-height:150px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));">${ops.filter(o => o.code !== exclure).map(o => `<label><input type="checkbox" value="${esc(o.code)}"> ${esc(o.nom)}</label>`).join('')}</div>`;
+    // plusieurs cases cochées : l'opération se place après la dernière (dans l'ordre des gammes) ; aucune : inchangé
+    const derniereCochee = (id) => { const cochees = Array.from(document.querySelectorAll(`#${id} input:checked`)).map(i => i.value); let r = ''; ops.forEach(o => { if (cochees.includes(o.code)) r = o.code; }); return r; };
     const familles = Array.from(new Set(ops.map(o => o.famille).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'fr'));
     afficherModale(`
       <h3>Opérations du catalogue</h3>
@@ -3317,9 +3320,6 @@
       </div>
       <div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`, 'xlarge');
     const rafraichir = () => { referentielsCache = null; ouvrirModaleOperations(); };
-    const listeCases = (id, exclure) => `<div class="op-list" id="${id}" style="max-height:150px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));">${ops.filter(o => o.code !== exclure).map(o => `<label><input type="checkbox" value="${esc(o.code)}"> ${esc(o.nom)}</label>`).join('')}</div>`;
-    // plusieurs cases cochées : l'opération se place après la dernière (dans l'ordre des gammes) ; aucune : inchangé
-    const derniereCochee = (id) => { const cochees = Array.from(document.querySelectorAll(`#${id} input:checked`)).map(i => i.value); let r = ''; ops.forEach(o => { if (cochees.includes(o.code)) r = o.code; }); return r; };
     const appeler = async (methode, url, corps) => {
       const res = await fetch(url, { method: methode, headers: { 'Content-Type': 'application/json' }, body: corps ? JSON.stringify(corps) : undefined });
       const d = await lireJson(res);
