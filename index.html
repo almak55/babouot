@@ -2957,6 +2957,7 @@
           <h2>Phases de travail standard</h2>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
             <select id="ts-filtre" style="min-width:170px;"><option value="">Toutes les opérations</option></select>
+            <button class="btn" id="ts-ops" title="Ajouter ou modifier des opérations du catalogue">Gérer les opérations</button>
             <button class="btn" id="ts-copie" title="Copier les réglages d'une machine vers d'autres machines">Copier vers…</button>
             <button class="btn" id="ts-export" title="Exporter au format Excel (sert aussi de modèle à remplir)">Exporter Excel</button>
             <button class="btn" id="ts-import" title="Importer un fichier Excel">Importer Excel</button>
@@ -2985,6 +2986,7 @@
       </div>
     `);
     wrap.querySelector('#ts-new').addEventListener('click', () => ouvrirModalePhase(null));
+    wrap.querySelector('#ts-ops').addEventListener('click', () => ouvrirModaleOperations());
     wrap.querySelector('#ts-copie').addEventListener('click', () => ouvrirModaleCopie());
     wrap.querySelector('#ts-export').addEventListener('click', () => exporterExcel());
     const fichier = wrap.querySelector('#ts-import-file');
@@ -3284,6 +3286,65 @@
         toast(edition ? 'Caractéristique mise à jour.' : `Caractéristique « ${d.cle} » créée.`); fermerModale(); render();
       } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
     });
+  }
+
+  // ----- Catalogue des opérations : ajout / modification / suppression manuels -----
+  async function ouvrirModaleOperations() {
+    let ops;
+    try {
+      const res = await fetch(`${API}/gerer-operations`);
+      const d = await lireJson(res);
+      if (!res.ok) throw new Error(d.error || ('Erreur serveur (HTTP ' + res.status + ')'));
+      ops = d.operations;
+    } catch (e) { toast(`Impossible de charger les opérations : ${e.message}`, 'error'); return; }
+    const familles = Array.from(new Set(ops.map(o => o.famille).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'fr'));
+    afficherModale(`
+      <h3>Opérations du catalogue</h3>
+      <p style="font-size:12.5px; color:var(--ink-700); margin:0 0 12px;">Ajoutez une opération absente de la liste. Elle devient aussitôt disponible dans les gammes, les machines, le personnel et les temps standards (pensez à lui définir une phase dans « Temps standards »).</p>
+      <div style="border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:14px;">
+        <div class="field"><label>Nouvelle opération</label><input id="op-nom" placeholder="ex : Contrecollage des gardes"></div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="field"><label>Famille (facultatif)</label><input id="op-fam" list="op-fam-list" placeholder="ex : finition"><datalist id="op-fam-list">${familles.map(f => `<option value="${esc(f)}">`).join('')}</datalist></div>
+          <div class="field"><label>Placer après</label><select id="op-apres"><option value="">— À la fin —</option>${ops.map(o => `<option value="${esc(o.code)}">${esc(o.nom)}</option>`).join('')}</select></div>
+        </div>
+        <div id="m-msg"></div>
+        <div style="text-align:right;"><button class="btn primary" id="op-add">Ajouter l'opération</button></div>
+      </div>
+      <div style="max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:10px;">
+        <table><thead><tr><th>Opération</th><th>Famille</th><th></th></tr></thead><tbody>
+        ${ops.map(o => `<tr><td>${esc(o.nom)}</td><td>${esc(o.famille || '—')}</td><td style="text-align:right; white-space:nowrap;"><button class="btn op-ren" data-code="${esc(o.code)}" data-nom="${esc(o.nom)}">Renommer</button> <button class="btn op-del" data-code="${esc(o.code)}" data-nom="${esc(o.nom)}" ${o.utilisee ? 'disabled title="Déjà utilisée"' : ''}>Supprimer</button></td></tr>`).join('')}
+        </tbody></table>
+      </div>
+      <div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`, 'xlarge');
+    const rafraichir = () => { referentielsCache = null; ouvrirModaleOperations(); };
+    const appeler = async (methode, url, corps) => {
+      const res = await fetch(url, { method: methode, headers: { 'Content-Type': 'application/json' }, body: corps ? JSON.stringify(corps) : undefined });
+      const d = await lireJson(res);
+      if (!res.ok) throw new Error(d.error || ('Erreur serveur (HTTP ' + res.status + ')'));
+      return d;
+    };
+    document.getElementById('m-cancel').addEventListener('click', () => { referentielsCache = null; fermerModale(); render(); });
+    document.getElementById('op-add').addEventListener('click', async () => {
+      const msg = document.getElementById('m-msg');
+      const nom = document.getElementById('op-nom').value.trim();
+      if (!nom) { msg.innerHTML = '<div class="msg error">Indiquez le nom de l\'opération.</div>'; return; }
+      msg.innerHTML = '<div class="msg">Ajout…</div>';
+      try {
+        await appeler('POST', `${API}/gerer-operations`, { nom, famille: document.getElementById('op-fam').value, apres_code: document.getElementById('op-apres').value });
+        toast(`Opération « ${nom} » ajoutée.`); rafraichir();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
+    document.querySelectorAll('.op-ren').forEach(b => b.addEventListener('click', async () => {
+      const nom = prompt('Nouveau nom de l\'opération :', b.dataset.nom);
+      if (!nom || !nom.trim() || nom.trim() === b.dataset.nom) return;
+      try { await appeler('PUT', `${API}/gerer-operations`, { code: b.dataset.code, nom }); toast('Opération renommée.'); rafraichir(); }
+      catch (e) { toast(e.message, 'error'); }
+    }));
+    document.querySelectorAll('.op-del').forEach(b => b.addEventListener('click', async () => {
+      if (!confirm(`Supprimer l'opération « ${b.dataset.nom} » ?`)) return;
+      try { await appeler('DELETE', `${API}/gerer-operations?code=${encodeURIComponent(b.dataset.code)}`); toast('Opération supprimée.'); rafraichir(); }
+      catch (e) { toast(e.message, 'error'); }
+    }));
   }
 
   // ----- Copier les réglages d'une machine vers d'autres -----
