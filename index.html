@@ -5853,7 +5853,7 @@
         <br>Légende : <strong>S</strong> solde · <strong>N</strong> nouveauté · <strong>T</strong> train (en cours) · <strong>R</strong> réimpression.</div>
       <div id="pa-onglets" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;"></div>
       <div id="pa-corps"></div><div id="m-msg"></div>
-      <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="pa-creer">Créer les OF de ce mois, dans cet ordre</button></div>`, 'xlarge');
+      <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn" id="pa-coches" style="display:none;">Créer les OF cochés</button><button class="btn primary" id="pa-creer">Créer tous les OF de ce mois, dans cet ordre</button></div>`, 'xlarge');
     const $ = (id) => document.getElementById(id);
     $('m-cancel').addEventListener('click', fermerModale);
     const couleurTete = { 'orange': '#f6c177', 'vert': '#b7d77a', 'gris clair': '#d4d8dc', 'gris foncé': '#9aa1a8', 'bleu': '#8ec5ee', 'sable': '#e8d3a8' };
@@ -5867,10 +5867,20 @@
         return `<button class="btn pa-mois" data-m="${mo}" style="${mo === courant ? 'background:var(--accent,#0f766e);color:#fff;' : ''}">${nomMois(mo)} (${pm ? pm.total_titres : 0}${nt ? ` · ${nt} ✓` : ''})</button>`; }).join('')
         + `<button class="btn pa-mois" data-m="reste" style="${courant === 'reste' ? 'background:var(--accent,#0f766e);color:#fff;' : ''}">À coudre / à emboîter</button>`;
       $('pa-onglets').querySelectorAll('.pa-mois').forEach((b) => b.addEventListener('click', () => { courant = b.dataset.m; rendre(); }));
-      $('pa-creer').style.display = m ? '' : 'none';
+      $('pa-creer').style.display = m ? '' : 'none'; $('pa-coches').style.display = 'none';
       if (courant === 'reste') {
-        const liste = (t, l) => `<h4 style="margin:8px 0 4px;">${t} (${l.length})</h4><table class="sp-table"><thead><tr><th>Titre</th><th>Qté</th><th>Cahiers</th><th>Carte</th><th>Tête</th><th>Peau</th></tr></thead><tbody>${l.map((x) => `<tr><td>${esc(x.titre)}</td><td>${x.quantite || '—'}</td><td>${x.mp || '—'}</td><td>${x.carte_dos || '—'}</td><td>${pastille(x.tete)}</td><td>${esc(x.peau || '—')}</td></tr>`).join('')}</tbody></table>`;
-        $('pa-corps').innerHTML = liste('Blocs à coudre', prop.a_coudre) + liste('Blocs à emboîter', prop.a_emboiter); return;
+        const liste = (t, l) => `<h4 style="margin:8px 0 4px;">${t} (${l.length})</h4><table class="sp-table"><thead><tr><th>Titre</th><th>Qté</th><th>Cahiers</th><th>Carte</th><th>Tête</th><th>Peau</th><th></th></tr></thead><tbody>${l.map((x) => `<tr><td>${esc(x.titre)}</td><td>${x.quantite || '—'}</td><td>${x.mp || '—'}</td><td>${x.carte_dos || '—'}</td><td>${pastille(x.tete)}</td><td>${esc(x.peau || '—')}</td><td style="text-align:right;">${x.of_id ? '<span style="color:#0f766e;">✓ OF créé</span>' : `<button class="btn pa-of" type="button" data-id="${x.id}" data-rang="1" data-titre="${esc(x.titre)}" style="padding:3px 10px;font-size:12px;">Créer l'OF</button>`}</td></tr>`).join('')}</tbody></table>`;
+        $('pa-corps').innerHTML = liste('Blocs à coudre', prop.a_coudre) + liste('Blocs à emboîter', prop.a_emboiter);
+        $('pa-corps').querySelectorAll('.pa-of').forEach((bt) => bt.addEventListener('click', async () => {
+          if (!window.confirm(`Créer l'OF Pléiade « ${bt.dataset.titre} » (ce titre uniquement) ?`)) return;
+          bt.disabled = true;
+          try {
+            const r = await api('POST', { action: 'generer', ids: [bt.dataset.id], rang_depart: 1 }); const x = (r.resultats || [])[0] || {};
+            if (x.erreur || !x.numero) throw new Error(x.erreur || 'Création impossible.');
+            toast(`OF ${x.numero} créé : ${x.titre}.`); data = await api('GET'); prop = await api('POST', { action: 'proposer' }); rendre(); chargerDonneesReelles();
+          } catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; bt.disabled = false; }
+        }));
+        return;
       }
       const traites = data.lignes.filter((l) => l.mois === courant && (l.statut === 'fait' || l.statut === 'of_cree'));
       const blocTraites = traites.length ? `<h4 style="margin:14px 0 4px;">Déjà traités ce mois (${traites.length})</h4>
@@ -5893,18 +5903,21 @@
           <span><strong>${m.series}</strong> série(s) de cartes — <strong>${m.reglages}</strong> changement(s) de réglage</span>
           <span><strong>${m.nettoyages}</strong> changement(s) de tête (nettoyage jaspage)</span></div>
         ${m.sans_carte.length ? `<div class="msg" style="margin-bottom:6px;">⚠ Carte de dos manquante (hors classement) : ${m.sans_carte.map((x) => esc(x.titre)).join(' ; ')}</div>` : ''}
-        <div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Jour BDM</th><th>#</th><th>Titre</th><th>Qté</th><th>Cahiers</th><th>Carte de dos</th><th>Tête</th><th>Peau</th><th>Livraison</th><th>OF</th></tr></thead><tbody>
+        <div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th><input type="checkbox" id="pa-all" title="Tout cocher / décocher"></th><th>Jour BDM</th><th>#</th><th>Titre</th><th>Qté</th><th>Cahiers</th><th>Carte de dos</th><th>Tête</th><th>Peau</th><th>Livraison</th><th>OF</th></tr></thead><tbody>
         ${m.sequence.map((s, i) => { const l = lignesMois.find((x) => x.id === s.id) || {};
           return `<tr style="${s.change_reglage ? 'border-top:2px solid var(--accent,#0f766e);' : ''}">
-          <td>${i === 0 || m.sequence[i - 1].jour_bdm !== s.jour_bdm ? 'J' + s.jour_bdm : ''}</td><td>${i + 1}</td>
+          <td>${l.of_id ? '' : `<input type="checkbox" class="pa-chk" data-id="${s.id}">`}</td><td>${i === 0 || m.sequence[i - 1].jour_bdm !== s.jour_bdm ? 'J' + s.jour_bdm : ''}</td><td>${i + 1}</td>
           <td>${esc(s.titre)} ${s.a_verifier ? '<span title="Modifié récemment" style="color:#c0392b;">●</span>' : ''} ${l.flags ? `<span style="color:var(--muted);font-size:12px;">${esc(l.flags)}</span>` : ''}</td>
           <td>${champ(s.id, 'quantite', s.quantite, 70)}</td><td>${champ(s.id, 'mp', s.mp, 46)}</td><td>${champ(s.id, 'carte_dos', s.carte_dos, 46)}${s.change_reglage ? ' <span title="Nouveau réglage BDM">⚙</span>' : ''}</td>
           <td>${champ(s.id, 'tete', s.tete, 90)}${s.change_tete ? ' <span title="Nettoyage jaspage">🧽</span>' : ''}</td><td>${champ(s.id, 'peau', s.peau, 90)}</td>
           <td style="white-space:nowrap;${l.date_livraison && l.date_livraison < auj ? 'color:#c0392b;' : ''}">${l.date_livraison ? dateCourte(l.date_livraison) : nomMois(m.mois)}</td>
           <td style="white-space:nowrap;text-align:right;">${l.of_id ? '<span style="color:#0f766e;">✓ OF créé</span>' : `<button class="btn pa-of" type="button" data-id="${s.id}" data-rang="${i + 1}" data-titre="${esc(s.titre)}" title="Créer l'OF Pléiade de ce titre uniquement" style="padding:3px 10px;font-size:12px;">Créer l'OF</button> <button class="btn pa-fait" type="button" data-id="${s.id}" data-titre="${esc(s.titre)}" title="Ce titre a déjà été fabriqué : le sortir du planning à produire" style="padding:3px 10px;font-size:12px;">Déjà fabriqué</button>`}</td></tr>`; }).join('')}
-        ${m.sans_carte.map((x) => { const l = lignesMois.find((y) => y.id === x.id) || {}; return `<tr style="background:var(--field-bg);"><td></td><td>—</td><td>${esc(x.titre)}</td><td>${champ(x.id, 'quantite', l.quantite, 70)}</td><td>${champ(x.id, 'mp', l.mp, 46)}</td><td>${champ(x.id, 'carte_dos', '', 46)}</td><td>${champ(x.id, 'tete', l.tete, 90)}</td><td>${champ(x.id, 'peau', l.peau, 90)}</td><td>${l.date_livraison ? dateCourte(l.date_livraison) : nomMois(m.mois)}</td><td style="white-space:nowrap;text-align:right;">${l.of_id ? '<span style="color:#0f766e;">✓ OF créé</span>' : `<button class="btn pa-of" type="button" data-id="${x.id}" data-rang="${m.sequence.length + 1}" data-titre="${esc(x.titre)}" title="Créer l'OF Pléiade de ce titre uniquement" style="padding:3px 10px;font-size:12px;">Créer l'OF</button> <button class="btn pa-fait" type="button" data-id="${x.id}" data-titre="${esc(x.titre)}" title="Ce titre a déjà été fabriqué : le sortir du planning à produire" style="padding:3px 10px;font-size:12px;">Déjà fabriqué</button>`}</td></tr>`; }).join('')}
+        ${m.sans_carte.map((x) => { const l = lignesMois.find((y) => y.id === x.id) || {}; return `<tr style="background:var(--field-bg);"><td>${l.of_id ? '' : `<input type="checkbox" class="pa-chk" data-id="${x.id}">`}</td><td></td><td>—</td><td>${esc(x.titre)}</td><td>${champ(x.id, 'quantite', l.quantite, 70)}</td><td>${champ(x.id, 'mp', l.mp, 46)}</td><td>${champ(x.id, 'carte_dos', '', 46)}</td><td>${champ(x.id, 'tete', l.tete, 90)}</td><td>${champ(x.id, 'peau', l.peau, 90)}</td><td>${l.date_livraison ? dateCourte(l.date_livraison) : nomMois(m.mois)}</td><td style="white-space:nowrap;text-align:right;">${l.of_id ? '<span style="color:#0f766e;">✓ OF créé</span>' : `<button class="btn pa-of" type="button" data-id="${x.id}" data-rang="${m.sequence.length + 1}" data-titre="${esc(x.titre)}" title="Créer l'OF Pléiade de ce titre uniquement" style="padding:3px 10px;font-size:12px;">Créer l'OF</button> <button class="btn pa-fait" type="button" data-id="${x.id}" data-titre="${esc(x.titre)}" title="Ce titre a déjà été fabriqué : le sortir du planning à produire" style="padding:3px 10px;font-size:12px;">Déjà fabriqué</button>`}</td></tr>`; }).join('')}
         </tbody></table></div>${blocTraites}`;
       brancherTraites();
+      const majCoches = () => { const n = $('pa-corps').querySelectorAll('.pa-chk:checked').length; $('pa-coches').style.display = n ? '' : 'none'; $('pa-coches').textContent = `Créer les OF cochés (${n})`; };
+      $('pa-corps').querySelectorAll('.pa-chk').forEach((c) => c.addEventListener('change', majCoches));
+      const tout = $('pa-all'); if (tout) tout.addEventListener('change', () => { $('pa-corps').querySelectorAll('.pa-chk').forEach((c) => { c.checked = tout.checked; }); majCoches(); });
       $('pa-corps').querySelectorAll('.pa-fait').forEach((bt) => bt.addEventListener('click', async () => {
         if (!window.confirm(`Marquer « ${bt.dataset.titre} » comme déjà fabriqué ? Le titre sort du planning à produire (vous pourrez le remettre).`)) return;
         bt.disabled = true;
@@ -5946,6 +5959,22 @@
       const ok = sortie.filter((x) => x.numero).length;
       $('m-msg').innerHTML = `<div class="msg ${ok === sortie.length ? 'ok' : ''}">${ok} OF créé(s) sur ${sortie.length}.${sortie.filter((x) => x.erreur).map((x) => `<br>⚠ ${esc(x.titre)} : ${esc(x.erreur)}`).join('')}</div>`;
       $('pa-creer').disabled = false; data = await api('GET'); prop = await api('POST', { action: 'proposer' }); rendre(); chargerDonneesReelles();
+    });
+    $('pa-coches').addEventListener('click', async () => {
+      const cases = Array.from($('pa-corps').querySelectorAll('.pa-chk:checked'));
+      if (!cases.length) return;
+      if (!window.confirm(`Créer ${cases.length} OF Pléiade (ceux qui sont cochés, dans l'ordre affiché) ?`)) return;
+      $('pa-coches').disabled = true; $('pa-creer').disabled = true; const sortie = [];
+      for (let i = 0; i < cases.length; i++) {
+        const ligne = data.lignes.find((l) => l.id === cases[i].dataset.id) || {};
+        $('m-msg').innerHTML = `<div class="msg">Création ${i + 1} / ${cases.length} : ${esc(ligne.titre || '')}…</div>`;
+        try { const r = await api('POST', { action: 'generer', ids: [cases[i].dataset.id], rang_depart: i + 1 }); sortie.push(r.resultats[0]); }
+        catch (e) { sortie.push({ titre: ligne.titre, erreur: e.message }); }
+      }
+      const ok = sortie.filter((x) => x.numero).length;
+      data = await api('GET'); prop = await api('POST', { action: 'proposer' }); rendre(); chargerDonneesReelles();
+      $('pa-coches').disabled = false; $('pa-creer').disabled = false;
+      $('m-msg').innerHTML = `<div class="msg ${ok === sortie.length ? 'ok' : ''}">${ok} OF créé(s) sur ${sortie.length}.${sortie.filter((x) => x.erreur).map((x) => `<br>⚠ ${esc(x.titre)} : ${esc(x.erreur)}`).join('')}</div>`;
     });
     rendre();
   }
