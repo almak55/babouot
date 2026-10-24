@@ -2125,6 +2125,18 @@
           } catch (e) { zoneMsg().innerHTML = `<div class="msg error">${esc(e.message)}</div>`; ev.target.disabled = false; }
         });
       } catch (_) { /* catalogue indisponible : l'ajout n'est pas proposé */ }
+      list.insertAdjacentHTML('afterbegin', `<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:6px 10px; margin-bottom:6px; border-radius:10px; background:var(--paper-raised-2,#F3F5FA); font-size:12.5px;">
+        <span style="flex:1; min-width:200px;">Les opérations sont classées selon leurs dépendances (modèle de gamme et opérations en ligne).</span>
+        <button class="btn" id="gamme-relier" style="padding:3px 10px;font-size:12px;" title="Refait toutes les dépendances de cet OF d'après le modèle de gamme et les couples en ligne">Recalculer les dépendances</button></div>`);
+      document.getElementById('gamme-relier').addEventListener('click', async (ev) => {
+        if (!confirm('Recalculer toutes les dépendances de cet OF d\u2019après le modèle de gamme ?\nLes liens saisis à la main seront remplacés. Les créneaux déjà planifiés ne bougent pas.')) return;
+        ev.target.disabled = true;
+        try {
+          const r = await fetch(`${API}/modifier-gamme`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: ofUuid, recalculer_liens: true }) });
+          const d = await lireJson(r); if (!r.ok) throw new Error(d.error || 'Erreur serveur (HTTP ' + r.status + ')');
+          toast((d.avertissements && d.avertissements[0]) || 'Dépendances recalculées.'); ouvrirModaleGamme(ofUuid, ofNumero);
+        } catch (e) { zoneMsg().innerHTML = `<div class="msg error">${esc(e.message)}</div>`; ev.target.disabled = false; }
+      });
       const possibles = gammes.filter(g => g.en_ligne && g.en_ligne.possible && g.statut === 'à planifier');
       if (possibles.length) {
         list.insertAdjacentHTML('afterbegin', `<div style="padding:8px 10px; margin-bottom:6px; border-radius:10px; background:var(--teal-50,#E6F6F3); font-size:12.5px; color:#161C2C;">
