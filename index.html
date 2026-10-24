@@ -2515,7 +2515,7 @@
       <div class="field hidden" id="d-horaires-wrap">
         <label><input type="checkbox" id="d-partiel"> Disponible seulement sur une plage horaire</label>
         <div style="display:flex; gap:10px; margin-top:8px;">
-          <div class="field"><label>De</label><input id="d-heure-debut" type="time" value="08:30"></div>
+          <div class="field"><label>De</label><input id="d-heure-debut" type="time" value="08:00"></div>
           <div class="field"><label>À</label><input id="d-heure-fin" type="time" value="16:30"></div>
         </div>
       </div>
@@ -2551,7 +2551,7 @@
         statutSelect.value = l ? l.statut : 'disponible'; majAffichageHoraires();
         const partiel = !!(l && l.statut === 'disponible' && l.heure_debut && l.heure_fin);
         partielCheckbox.checked = partiel;
-        heureD.value = partiel ? l.heure_debut.slice(0, 5) : '08:30'; heureF.value = partiel ? l.heure_fin.slice(0, 5) : '16:30';
+        heureD.value = partiel ? l.heure_debut.slice(0, 5) : '08:00'; heureF.value = partiel ? l.heure_fin.slice(0, 5) : '16:30';
         majHeures();
       } catch (_) { /* pré-remplissage facultatif */ }
     }
