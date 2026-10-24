@@ -2058,6 +2058,47 @@
     }, 0);
   }
 
+  // Détail de ce qui est planifié pour une étape de gamme (consultation, rien n'est modifié)
+  async function ouvrirDetailEtape(gammeId, ofUuid, ofNumero) {
+    const retour = () => ouvrirModaleGamme(ofUuid, ofNumero);
+    afficherModale(`<h3>Planning de l'étape — ${esc(ofNumero)}</h3><div class="empty">Chargement…</div>`, 'large');
+    let d;
+    try {
+      const r = await fetch(`${API}/detail-etape?gamme_id=${gammeId}`);
+      d = await lireJson(r); if (!r.ok) throw new Error(d.error || 'Erreur serveur (HTTP ' + r.status + ')');
+    } catch (e) { afficherModale(`<h3>Planning de l'étape</h3><div class="msg error">${esc(e.message)}</div><div class="actions"><button class="btn" id="m-cancel">Retour</button></div>`); document.getElementById('m-cancel').addEventListener('click', retour); return; }
+    const { etape, liens, resume, creneaux } = d;
+    const jourFr = (iso) => { const x = new Date(iso + 'T00:00:00Z'); return `${['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'][x.getUTCDay()]} ${dateCourte(iso).slice(0, 5)}`; };
+    const MODE = { fin: 'après la fin de', en_ligne: 'en ligne avec', debut: 'dès le démarrage de', progressif: 'dès démarrage progressif de' };
+    const parJour = {};
+    creneaux.forEach(c => { (parJour[c.date] = parJour[c.date] || []).push(c); });
+    const bloc = (iso) => {
+      const cs = parJour[iso]; const tot = cs.reduce((t, c) => t + c.minutes, 0);
+      return `<div style="border:1px solid var(--line); border-radius:10px; margin-bottom:8px; background:#fff; overflow:hidden;">
+        <div style="display:flex; gap:8px; padding:6px 10px; background:var(--paper-raised-2,#F3F5FA); font-size:13px;"><strong style="text-transform:capitalize;">${jourFr(iso)}</strong><span style="margin-left:auto; color:var(--ink-700);">${fmtDuree(tot)}</span></div>
+        ${cs.map(c => `<div style="display:grid; grid-template-columns:92px minmax(0,1fr) minmax(0,1fr) 54px; gap:8px; padding:5px 10px; border-top:1px solid var(--line); font-size:12.5px; align-items:center;">
+          <span style="white-space:nowrap;">${c.heure_debut ? c.heure_debut + '–' + c.heure_fin : 'Journée'}</span>
+          <span>${esc(c.phase || etape.operation)}<div style="font-size:11px; color:var(--ink-500);">${esc(c.machine)}</div></span>
+          <span>${c.personnes.length ? esc(c.personnes.join(', ')) : '<em style="color:var(--ink-500);">aucune personne affectée</em>'}</span>
+          <span>${fmtDuree(c.minutes)}</span></div>`).join('')}</div>`;
+    };
+    const kpi = (v, l) => `<span class="occ-chip"><b>${v}</b> ${l}</span>`;
+    afficherModale(`
+      <h3>${esc(etape.operation)} — ${esc(etape.of_numero)}</h3>
+      <div style="font-size:12.5px; color:var(--ink-700); margin:-4px 0 10px;">${esc(etape.titre)} · étape ${etape.sequence} · ${esc(etape.statut)}</div>
+      ${creneaux.length ? `
+        <div class="occ-kpis">
+          ${kpi(`${jourFr(resume.debut.date)} ${resume.debut.heure}`, 'début')}${kpi(`${jourFr(resume.fin.date)} ${resume.fin.heure}`, 'fin')}
+          ${kpi(fmtDuree(resume.minutes), 'de travail')}${kpi(resume.jours, 'jour(s)')}${kpi(esc(resume.machines.join(', ')), '')}
+        </div>
+        <div style="font-size:12.5px; margin-bottom:8px;"><strong>Personnes :</strong> ${resume.personnes.length ? esc(resume.personnes.join(', ')) : '<em>aucune affectée</em>'}</div>` : '<div class="msg">Aucun créneau planifié pour cette étape.</div>'}
+      <div style="font-size:12.5px; margin-bottom:10px;"><strong>Dépendances :</strong> ${liens.apres.length ? liens.apres.map(l => `${MODE[l.mode] || 'après'} « ${esc(l.operation)} »`).join(' ; ') : 'aucune (peut démarrer dès que possible)'}</div>
+      ${Object.keys(parJour).sort().map(bloc).join('')}
+      <div class="plan-note">Consultation seule : rien n'est modifié. Durées en travail effectif (pause 12h00–12h30 déduite). Pour changer l'affectation ou l'horaire d'un créneau, utilisez la page « Charge » de la personne.</div>
+      <div class="actions"><button class="btn" id="m-cancel">Retour à la gamme</button></div>`, 'large');
+    document.getElementById('m-cancel').addEventListener('click', retour);
+  }
+
   // Gamme opératoire d'un OF : voir l'état de chaque étape, la planifier, la déplanifier ou la supprimer.
   async function ouvrirModaleGamme(ofUuid, ofNumero) {
     afficherModale(`<h3>Gamme opératoire — ${esc(ofNumero)}</h3><div id="gamme-list" class="empty">Chargement…</div><div id="gamme-msg"></div><div class="actions"><button class="btn" id="gamme-fermer">Fermer</button></div>`, 'large');
@@ -2079,8 +2120,11 @@
           actions = `<button class="btn primary" style="${btn}" data-gact="planifier" data-id="${g.id}">Planifier</button>
                      <button class="btn" style="${btn}color:var(--danger,#c0392b);" data-gact="supprimer" data-id="${g.id}" data-nom="${esc(nom)}">Supprimer</button>`;
         } else if (g.statut === 'planifié') {
-          actions = `<button class="btn" style="${btn}" data-gact="replanifier" data-id="${g.id}">Modifier</button>
+          actions = `<button class="btn primary" style="${btn}" data-gact="voir" data-id="${g.id}" title="Consulter le planning de cette étape sans rien modifier">Voir</button>
+                     <button class="btn" style="${btn}" data-gact="replanifier" data-id="${g.id}" title="Replanifier : le planning actuel de l'étape est retiré puis recalculé">Modifier</button>
                      <button class="btn" style="${btn}" data-gact="deplanifier" data-id="${g.id}">Déplanifier</button>`;
+        } else {
+          actions = `<button class="btn" style="${btn}" data-gact="voir" data-id="${g.id}" title="Consulter ce qui a été planifié">Voir</button>`;
         }
         const el = g.en_ligne && g.en_ligne.possible ? g.en_ligne : null;
         const modeHtml = !el ? '' : (g.statut === 'à planifier'
@@ -2154,7 +2198,9 @@
       }
       list.querySelectorAll('[data-gact]').forEach(b => b.addEventListener('click', async () => {
         const id = b.dataset.id, act = b.dataset.gact;
+        if (act === 'voir') { ouvrirDetailEtape(id, ofUuid, ofNumero); return; }
         if (act === 'planifier' || act === 'replanifier') {
+          if (act === 'replanifier' && !confirm('« Modifier » replanifie cette étape : son planning actuel est retiré, puis vous choisissez de nouvelles informations.\n\nPour seulement consulter ce qui est planifié, utilisez « Voir ».\n\nContinuer ?')) return;
           if (act === 'replanifier') {
             // déjà planifiée : on la déplanifie d'abord, puis on rouvre l'affectation sur cette étape
             try {
