@@ -2235,14 +2235,17 @@
           <td>${p.comp.map(c=>`<span class="tag ok" style="margin-right:4px;">${c}</span>`).join('')}</td>
           <td><button class="statut-btn" data-id="${p.id}" data-action="dispo"><span class="tag ${statutTag(p.statut)}">${p.statut}</span></button></td>
           <td style="min-width:110px;">
-            <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--ink-500);"><span>${p.charge}%</span></div>
-            <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${p.charge}%"></div></div>
+            <button class="charge-btn" data-id="${p.id}" title="Voir l'occupation de la semaine" style="all:unset; cursor:pointer; display:block; width:100%;">
+              <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--ink-500);"><span>${p.charge}%</span><span style="color:var(--teal,#0F766E); font-weight:600;">Détail ›</span></div>
+              <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${p.charge}%"></div></div>
+            </button>
           </td>
           <td style="white-space:nowrap;"><button class="btn fiche-pers" data-id="${p.id}">Fiche</button> <button class="btn edit-pers" data-id="${p.id}">Compétences</button></td>
         </tr>
       `));
     });
     wrap.querySelector('#pers-ajout').addEventListener('click', () => ouvrirModalePersonne(null));
+    tbody.querySelectorAll('.charge-btn').forEach(btn => btn.addEventListener('click', () => ouvrirOccupationPersonne(btn.dataset.id)));
     tbody.querySelectorAll('.fiche-pers').forEach(btn => btn.addEventListener('click', () => ouvrirModalePersonne(state.personnel.find(x => x.id === btn.dataset.id))));
     tbody.querySelectorAll('.edit-pers').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -2257,6 +2260,113 @@
       });
     });
     return wrap;
+  }
+
+  // ---------- Occupation hebdomadaire d'une personne : affectations, heures, absences ----------
+  const minutesHM = (t) => { const [h, m] = String(t).split(':'); return Number(h) * 60 + Number(m); };
+  const fmtDuree = (min) => { const h = Math.floor(min / 60), m = Math.round(min % 60); return m ? `${h} h ${String(m).padStart(2, '0')}` : `${h} h`; };
+  // Minutes de travail effectif d'un créneau (pause 12h00-12h30 déduite) ; sans heures : journée entière (8 h).
+  function minutesCreneau(c) {
+    if (!c.heure_debut || !c.heure_fin) return 480;
+    const d = minutesHM(c.heure_debut), f = minutesHM(c.heure_fin);
+    return Math.max(0, f - d - Math.max(0, Math.min(f, 750) - Math.max(d, 720)));
+  }
+  async function occupationDe(persId) {
+    const b = state.brut; if (!b) return null;
+    const refs = await getReferentiels();
+    const nomOp = Object.fromEntries(refs.operations.map(o => [o.id, o.nom]));
+    const nomMach = Object.fromEntries(b.machines.map(m => [m.id, m.nom]));
+    const ordre = Object.fromEntries(b.ordres.map(o => [o.id, o]));
+    const jours = b.jours.map(iso => {
+      const dispo = b.dispo.find(d => d.personnel_id === persId && d.date === iso) || null;
+      const affs = b.planning.filter(c => c.date === iso && (c.personnel_ids || []).includes(persId))
+        .sort((x, y) => String(x.heure_debut || '').localeCompare(String(y.heure_debut || '')))
+        .map(c => {
+          const o = ordre[c.of_id] || {};
+          return {
+            debut: c.heure_debut ? String(c.heure_debut).slice(0, 5) : null, fin: c.heure_fin ? String(c.heure_fin).slice(0, 5) : null,
+            of: o.numero || '—', titre: o.titres ? o.titres.nom : '', client: o.titres ? (o.titres.client || '') : '', delai: o.delai || '',
+            operation: nomOp[c.operation_id] || c.phase || '—', phase: nomOp[c.operation_id] ? (c.phase || '') : '', machine: c.machine_id ? (nomMach[c.machine_id] || '?') : 'Travail manuel',
+            statut: c.statut || '', min: minutesCreneau(c),
+          };
+        });
+      const indispo = dispo && dispo.statut !== 'disponible';
+      return { iso, dispo, indispo, affs, min: affs.reduce((t, a) => t + a.min, 0) };
+    });
+    return { jours, refs };
+  }
+
+  async function ouvrirOccupationPersonne(persId) {
+    const p = state.personnel.find(x => x.id === persId); if (!p) return;
+    afficherModale(`<h3>Occupation hebdomadaire — ${esc(p.name)}</h3><div class="empty">Chargement…</div>`, 'xlarge');
+    let occ;
+    try { occ = await occupationDe(persId); } catch (e) { occ = null; }
+    if (!occ) { afficherModale(`<h3>Occupation hebdomadaire</h3><div class="msg error">Données de la semaine indisponibles. Rechargez la page.</div><div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`); document.getElementById('m-cancel').addEventListener('click', fermerModale); return; }
+    const jourNom = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+    const lib = (iso) => { const d = new Date(iso + 'T00:00:00Z'); return `${jourNom[d.getUTCDay()]} ${d.getUTCDate()}/${String(d.getUTCMonth() + 1).padStart(2, '0')}`; };
+    const ouvres = occ.jours.filter((j, i) => i < 5 || j.affs.length || j.indispo);
+    const joursIndispo = occ.jours.filter((j, i) => i < 5 && j.indispo).length;
+    const capaciteMin = (5 - joursIndispo) * 480;
+    const totalMin = occ.jours.reduce((t, j) => t + j.min, 0);
+    const taux = capaciteMin > 0 ? Math.round(totalMin / capaciteMin * 100) : 0;
+    const toutes = occ.jours.flatMap(j => j.affs);
+    const ofs = Array.from(new Set(toutes.map(a => a.of).filter(x => x !== '—')));
+    const machines = Array.from(new Set(toutes.map(a => a.machine)));
+    const couleur = taux >= 85 ? '#C0392B' : (taux >= 65 ? '#B45309' : '#0F766E');
+    const kpi = (v, l) => `<div style="flex:1; min-width:120px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:#fff;"><div style="font-size:20px; font-weight:700; color:#161C2C;">${v}</div><div style="font-size:11.5px; color:var(--ink-500);">${l}</div></div>`;
+    const bloc = (j) => {
+      const etat = j.dispo && j.dispo.statut !== 'disponible'
+        ? `<span class="tag danger">${j.dispo.statut === 'en arrêt' ? 'En arrêt' : 'Absent(e)'}</span>`
+        : (j.dispo && j.dispo.heure_debut ? `<span class="tag warn">Disponible ${j.dispo.heure_debut.slice(0, 5)}–${j.dispo.heure_fin.slice(0, 5)}</span>` : '<span class="tag ok">Disponible</span>');
+      const pct = Math.min(100, Math.round(j.min / 480 * 100));
+      const lignes = j.affs.length ? j.affs.map(a => `<tr>
+          <td style="white-space:nowrap;">${a.debut ? a.debut + '–' + a.fin : 'Journée'}</td>
+          <td><strong>${esc(a.of)}</strong><div style="font-size:11px; color:var(--ink-500);">${esc(a.titre)}${a.client ? ' · ' + esc(a.client) : ''}</div></td>
+          <td>${esc(a.operation)}${a.phase ? `<div style="font-size:11px; color:var(--ink-500);">${esc(a.phase)}</div>` : ''}</td>
+          <td>${esc(a.machine)}</td><td style="white-space:nowrap;">${esc(fmtDuree(a.min))}</td></tr>`).join('')
+        : `<tr><td colspan="5" style="color:var(--ink-500); font-style:italic;">${j.indispo ? 'Indisponible ce jour' : 'Aucune affectation'}</td></tr>`;
+      return `<div style="border:1px solid var(--line); border-left:5px solid ${j.indispo ? '#C0392B' : (j.min ? '#16B8A6' : '#D5D9E3')}; border-radius:10px; margin-bottom:10px; background:#fff;">
+        <div style="display:flex; align-items:center; gap:10px; padding:9px 12px; flex-wrap:wrap;">
+          <strong style="font-size:14px; text-transform:capitalize;">${lib(j.iso)}</strong>${etat}
+          <span style="margin-left:auto; font-size:12.5px; color:var(--ink-700);">${j.min ? fmtDuree(j.min) + ' affectées' : ''}</span>
+          <div style="width:90px;" class="bar-track"><div class="bar-fill ${pct >= 100 ? 'danger' : (pct >= 65 ? 'warn' : '')}" style="width:${pct}%"></div></div>
+        </div>
+        <table style="width:100%; font-size:12.5px;"><thead><tr><th style="width:90px;">Horaire</th><th>OF / Titre</th><th>Opération</th><th>Machine</th><th style="width:70px;">Durée</th></tr></thead><tbody>${lignes}</tbody></table></div>`;
+    };
+    afficherModale(`
+      <h3>Occupation hebdomadaire — ${esc(p.name)}</h3>
+      <div style="font-size:12.5px; color:var(--ink-700); margin:-4px 0 12px;">${esc(p.role || '')} · semaine du ${dateCourte(occ.jours[0].iso)} au ${dateCourte(occ.jours[4].iso)}</div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
+        ${kpi(`<span style="color:${couleur};">${taux} %</span>`, 'taux d’occupation')}
+        ${kpi(fmtDuree(totalMin), `affectées sur ${fmtDuree(capaciteMin)} disponibles`)}
+        ${kpi(ofs.length, 'OF concernés')}
+        ${kpi(machines.length, 'machine(s) / postes')}
+        ${kpi(joursIndispo, 'jour(s) d’absence ou d’arrêt')}
+      </div>
+      ${ouvres.map(bloc).join('')}
+      <div class="plan-note" style="margin-top:4px;">Durées en travail effectif (pause déjeuner de 12h00 à 12h30 déduite). Une affectation sans horaire précis compte pour une journée de 8 h. Capacité : 8 h par jour ouvré, moins les jours d'absence ou d'arrêt.</div>
+      <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="occ-pdf">Télécharger en PDF</button></div>`, 'xlarge');
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.getElementById('occ-pdf').addEventListener('click', async (ev) => {
+      ev.target.disabled = true;
+      try {
+        await chargerLibsPdf();
+        const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+        doc.setFontSize(16); doc.text(pdfTxt(`Occupation hebdomadaire - ${p.name}`), 14, 15);
+        doc.setFontSize(10); doc.text(pdfTxt(`${p.role || ''}  |  Semaine du ${dateCourte(occ.jours[0].iso)} au ${dateCourte(occ.jours[4].iso)}`), 14, 21);
+        doc.text(pdfTxt(`Taux d'occupation : ${taux} %  |  ${fmtDuree(totalMin)} affectees sur ${fmtDuree(capaciteMin)} disponibles  |  ${ofs.length} OF  |  ${joursIndispo} jour(s) d'absence ou d'arret`), 14, 27);
+        const corps = [];
+        ouvres.forEach(j => {
+          const etat = j.dispo && j.dispo.statut !== 'disponible' ? (j.dispo.statut === 'en arrêt' ? 'EN ARRET' : 'ABSENT(E)') : (j.dispo && j.dispo.heure_debut ? `Disponible ${j.dispo.heure_debut.slice(0, 5)}-${j.dispo.heure_fin.slice(0, 5)}` : '');
+          corps.push([{ content: pdfTxt(`${lib(j.iso)}${etat ? '  -  ' + etat : ''}${j.min ? '  -  ' + fmtDuree(j.min) : ''}`), colSpan: 6, styles: { fillColor: [225, 240, 238], fontStyle: 'bold' } }]);
+          if (!j.affs.length) corps.push([{ content: j.indispo ? 'Indisponible' : 'Aucune affectation', colSpan: 6, styles: { textColor: [120, 120, 120], fontStyle: 'italic' } }]);
+          j.affs.forEach(a => corps.push([a.debut ? `${a.debut}-${a.fin}` : 'Journee', a.of, `${a.titre}${a.client ? ' (' + a.client + ')' : ''}`, `${a.operation}${a.phase ? ' - ' + a.phase : ''}`, a.machine, fmtDuree(a.min)].map(pdfTxt)));
+        });
+        doc.autoTable({ startY: 32, head: [['Horaire', 'OF', 'Titre', 'Operation', 'Machine', 'Duree']], body: corps, styles: { fontSize: 9 }, headStyles: { fillColor: [10, 15, 29] }, margin: { left: 14, right: 14 } });
+        doc.save(`occupation-${p.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${occ.jours[0].iso}.pdf`);
+      } catch (e) { toast(`PDF impossible : ${e.message}`, 'error'); }
+      ev.target.disabled = false;
+    });
   }
 
   // ---------- Feuille journalière de placement du personnel (PDF) ----------
@@ -4482,6 +4592,7 @@
         });
       });
       state.planning = planningParMachine;
+      state.brut = { planning: data.planning, machines: data.machines, ordres: data.ordres, dispo: data.disponibilites || [], jours: DAYS_ISO.slice() };
 
       render();
       chargerConflitsAbsence();
