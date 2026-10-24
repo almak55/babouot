@@ -31,6 +31,7 @@
 const { getSupabase } = require('./lib/supabaseclient');
 const { calculerEtapes } = require('./lib/durees');
 const PL = require('./lib/planification');
+const { typePhase } = require('./lib/en-ligne');
 const { purgerObsoletes } = require('./lib/obsoletes');
 
 const { enMinutes, dateDe, heureDe, debutDeJour, hhmm, MIN_JOUR, HORIZON_JOURS, libelleFerie } = PL;
@@ -182,11 +183,15 @@ const handlerProtege = async (event) => {
     // null = comportement par défaut (étape précédente), conservé tel quel.
     const positionDe = new Map(etapesCalc.map((e, i) => [e.sequence, i]));
     // Options de lien (démarrage progressif), indexées par position du prédécesseur.
+    const enLigneDe = (e) => new Set((e.en_ligne || []).map((x) => x.sequence));
     const liensDe = (e) => {
       const out = {};
+      enLigneDe(e).forEach((seq) => { const i = positionDe.get(Number(seq)); if (i !== undefined) out[i] = { en_ligne: true }; });
       Object.entries(e.dependances || {}).forEach(([seq, v]) => {
         const i = positionDe.get(Number(seq));
-        if (i !== undefined && v && v.mode === 'progressif') {
+        if (i !== undefined && enLigneDe(e).has(Number(seq))) {
+          out[i] = { en_ligne: true };
+        } else if (i !== undefined && v && v.mode === 'progressif') {
           const pct = Number(v.seuil_pct);
           out[i] = { mode: 'progressif', seuil_pct: Number.isFinite(pct) ? pct : 10 };
         }
@@ -207,9 +212,9 @@ const handlerProtege = async (event) => {
       const nbMax = Math.max(1, ...e.phases.map((p) => p.nb_personnes));
       let phases;
       if (e.duree_manuelle_h !== null) {
-        phases = [{ nom: 'Étape (durée manuelle)', duree_min: Math.round(e.duree_manuelle_h * 60), besoin_machine: e.phases.length === 0 ? e.machines_compatibles.length > 0 : besoinMachinePhases, nb_personnes: nbMax }];
+        phases = [{ nom: 'Étape (durée manuelle)', type_phase: 'production', duree_min: Math.round(e.duree_manuelle_h * 60), besoin_machine: e.phases.length === 0 ? e.machines_compatibles.length > 0 : besoinMachinePhases, nb_personnes: nbMax }];
       } else {
-        phases = e.phases.map((p) => ({ nom: p.nom, duree_min: Math.round(p.duree_h * 60), besoin_machine: !!p.occupe_machine, nb_personnes: p.nb_personnes, type_calcul: p.type_calcul }));
+        phases = e.phases.map((p) => ({ nom: p.nom, type_phase: typePhase(p.nom), duree_min: Math.round(p.duree_h * 60), besoin_machine: !!p.occupe_machine, nb_personnes: p.nb_personnes, type_calcul: p.type_calcul }));
       }
       // Étape déjà entamée : seule la part restante est replanifiée. La mise en route et le réglage sont
       // déjà faits ; le nettoyage reste dû ; le reste (cadence, par élément, formule) est proratisé.
@@ -260,6 +265,7 @@ const handlerProtege = async (event) => {
       index: i,
       duree_min: em.fixe ? 0 : em.phases.reduce((total, p) => total + (p.repartissable && em.personnes_imposees
         ? PL.dureeAvecEffectif(p.duree_min, p.nb_personnes, em.personnes_imposees.length) : p.duree_min), 0),
+      reglage_min: em.fixe ? 0 : em.phases.filter((p) => p.type_phase === 'reglage').reduce((t, p) => t + p.duree_min, 0),
       predecesseurs: em.predecesseurs ?? null,
       liens: em.liens || {},
     })));
@@ -272,7 +278,7 @@ const handlerProtege = async (event) => {
           duree_min: n.duree_min, predecesseurs: n.predecesseurs.map((i) => etapesCalc[i].sequence),
           dependances: n.predecesseurs.map((i) => {
             const lien = (etapesMoteur[n.index].liens || {})[i];
-            return { sequence: etapesCalc[i].sequence, mode: lien ? 'progressif' : 'fin', seuil_pct: lien ? lien.seuil_pct : null };
+            return { sequence: etapesCalc[i].sequence, mode: lien ? (lien.en_ligne ? 'en_ligne' : 'progressif') : 'fin', seuil_pct: lien && !lien.en_ligne ? lien.seuil_pct : null };
           }),
           es: n.es, ef: n.ef, ls: n.ls, lf: n.lf, marge_min: n.marge_min, critique: n.critique,
         };

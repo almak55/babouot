@@ -1,7 +1,12 @@
 // functions/modifier-gamme.js
 //
 // POST /.netlify/functions/modifier-gamme
-// body : { of_id, ajouter?: ["EMBOITAGE_1", ...], supprimer?: ["gamme_id", ...] }
+// body : { of_id, ajouter?: ["EMBOITAGE_1", ...], supprimer?: ["gamme_id", ...],
+//         mode_ligne?: { mode: 'en_ligne' | 'hors_ligne' | 'auto', gamme_id?: "uuid" (sinon toutes les étapes de l'OF) } }
+//
+// mode_ligne : pour les opérations qui peuvent tourner en ligne avec leur précédente (voir lib/en-ligne.js),
+// choisit en ligne (production simultanée), hors ligne (après la fin de la précédente, durée propre) ou
+// auto (règle générale). Réservé aux étapes « à planifier ».
 //
 // Ajoute à un OF existant des opérations du catalogue (par leur code) ou en
 // retire. Une même opération peut être ajoutée plusieurs fois. Les opérations
@@ -11,11 +16,12 @@
 // pointaient vers elles sont nettoyés.
 
 const { getSupabase } = require('./lib/supabaseclient');
+const EL = require('./lib/en-ligne');
 
 const handlerProtege = async (event) => {
   try {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: JSON.stringify({ error: 'Méthode non autorisée, utiliser POST.' }) };
-    const { of_id: ofId, ajouter, supprimer } = JSON.parse(event.body || '{}');
+    const { of_id: ofId, ajouter, supprimer, mode_ligne: modeLigne } = JSON.parse(event.body || '{}');
     if (!ofId) return { statusCode: 400, body: JSON.stringify({ error: 'of_id requis.' }) };
     const supabase = getSupabase();
     const avertissements = [];
@@ -61,6 +67,37 @@ const handlerProtege = async (event) => {
         }
         gammes = await lire();
       }
+    }
+
+    if (modeLigne) {
+      if (!['en_ligne', 'hors_ligne', 'auto'].includes(modeLigne.mode)) return { statusCode: 400, body: JSON.stringify({ error: 'mode_ligne.mode invalide (en_ligne | hors_ligne | auto).' }) };
+      const { data: tout, error: eL } = await supabase.from('gammes_operatoires')
+        .select('id, sequence, statut, predecesseurs, dependances, operations(code)').eq('of_id', ofId);
+      if (eL) throw eL;
+      const tri = (tout || []).slice().sort((a, b) => a.sequence - b.sequence);
+      const regles = await EL.chargerRegles(supabase);
+      let touchees = 0;
+      for (let i = 0; i < tri.length; i++) {
+        const g = tri[i];
+        if (modeLigne.gamme_id && g.id !== modeLigne.gamme_id) continue;
+        const preds = Array.isArray(g.predecesseurs) ? g.predecesseurs : (i > 0 ? [tri[i - 1].sequence] : []);
+        const dep = { ...(g.dependances || {}) };
+        let change = false;
+        preds.forEach((s) => {
+          const p = tri.find((x) => x.sequence === s);
+          if (!p || !regles.has(`${g.operations.code}|${p.operations.code}`)) return;
+          if (g.statut !== 'à planifier') { avertissements.push(`Étape ${g.sequence} inchangée : elle est « ${g.statut} » (déplanifiez-la d'abord).`); return; }
+          const lien = { ...(dep[String(s)] || {}) };
+          if (modeLigne.mode === 'auto') delete lien.en_ligne; else lien.en_ligne = modeLigne.mode === 'en_ligne';
+          if (Object.keys(lien).length) dep[String(s)] = lien; else delete dep[String(s)];
+          change = true;
+        });
+        if (!change) continue;
+        const { error: eU } = await supabase.from('gammes_operatoires').update({ dependances: dep }).eq('id', g.id);
+        if (eU) throw eU;
+        touchees++;
+      }
+      if (!touchees && !avertissements.length) avertissements.push('Aucune opération de cet OF ne peut tourner en ligne.');
     }
 
     const codes = Array.isArray(ajouter) ? ajouter.filter(Boolean) : [];
