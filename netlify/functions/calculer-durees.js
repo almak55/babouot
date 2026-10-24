@@ -121,8 +121,11 @@ const handlerProtege = async (event) => {
           Object.entries(e.dependances || {}).forEach(([seq, v]) => {
             const n = Number(seq);
             if (!Number.isInteger(n) || n === etape.sequence || !sequences.has(n)) return;
-            if (!v || v.mode !== 'progressif') return;                       // seul le mode progressif se mémorise
+            if (!v) return;
             if (Array.isArray(maj.predecesseurs) && !maj.predecesseurs.includes(n)) return;   // lien retiré
+            if (v.mode === 'en_ligne') { options[n] = { en_ligne: true }; return; }              // en même temps que le prédécesseur
+            if (v.mode === 'fin' && v.hors_ligne) { options[n] = { en_ligne: false }; return; }  // hors ligne : couple en ligne annulé sur ce lien
+            if (v.mode !== 'progressif') return;                                               // « attendre la fin » = comportement par défaut
             const pct = Number(String(v.seuil_pct).replace(',', '.'));
             options[n] = { mode: 'progressif', seuil_pct: Number.isFinite(pct) ? Math.max(0, Math.min(100, Math.round(pct))) : 10 };
           });
