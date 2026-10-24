@@ -5859,8 +5859,8 @@
     $('pa-corps').addEventListener('click', (ev) => { const b = ev.target.closest('.pa-voir-of'); if (!b) return; const o = (state.ordres || []).find((x) => x.uuid === b.dataset.uuid); if (!o) { toast('OF introuvable dans la liste chargée : actualisez la page.', 'error'); return; } ouvrirModaleGamme(o.uuid, o.id); });
     // Liste à cocher des opérations de la gamme avant création (modèle Pléiade) ; résout avec la liste de codes, ou null si annulé.
     const demanderEtapes = async (idRef, nbOf) => {
-      let etapes;
-      try { etapes = (await api('POST', { action: 'etapes', id: idRef })).etapes; }
+      let etapes, catalogue;
+      try { const rr = await api('POST', { action: 'etapes', id: idRef }); etapes = rr.etapes; const deModele = new Set(etapes.map((e) => e.operation_code)); catalogue = (rr.catalogue || []).filter((o) => !deModele.has(o.code)); }
       catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; return null; }
       return new Promise((resolve) => {
         const zone = $('m-msg');
@@ -5869,13 +5869,16 @@
           <div style="font-size:12px;color:var(--muted);margin:2px 0 6px;">Cochez les opérations nécessaires. Les dépendances sont recalculées en sautant celles que vous décochez.</div>
           <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:2px 14px;max-height:240px;overflow:auto;">
           ${etapes.map((e) => `<label style="display:flex;gap:6px;align-items:center;font-size:13px;"><input type="checkbox" class="pa-et" value="${esc(e.code)}" ${e.par_defaut ? 'checked' : ''}>${esc(e.libelle)}${e.condition && e.condition !== 'toujours' ? ` <em style="color:var(--muted);font-size:11px;">(${esc(e.condition)})</em>` : ''}</label>`).join('')}</div>
+          ${catalogue.length ? `<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:13px;font-weight:600;">Autres opérations du catalogue (${catalogue.length}) — ajoutées en fin de gamme</summary>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:2px 14px;max-height:200px;overflow:auto;margin-top:6px;">${catalogue.map((o) => `<label style="display:flex;gap:6px;align-items:center;font-size:13px;"><input type="checkbox" class="pa-ex" value="${esc(o.code)}">${esc(o.nom)}</label>`).join('')}</div></details>` : ''}
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;"><button class="btn" id="pa-et-non">Annuler</button><button class="btn primary" id="pa-et-ok">Créer ${nbOf > 1 ? `les ${nbOf} OF` : 'l\'OF'}</button></div></div>`;
         zone.scrollIntoView({ block: 'nearest' });
         $('pa-et-non').onclick = () => { zone.innerHTML = ''; resolve(null); };
         $('pa-et-ok').onclick = () => {
           const codes = Array.from(zone.querySelectorAll('.pa-et:checked')).map((c) => c.value);
           if (!codes.length) { toast('Cochez au moins une opération.', 'error'); return; }
-          zone.innerHTML = ''; resolve(codes);
+          const extras = Array.from(zone.querySelectorAll('.pa-ex:checked')).map((c) => c.value);
+          zone.innerHTML = ''; resolve({ etapes: codes, operations_extra: extras });
         };
       });
     };
@@ -5899,7 +5902,7 @@
           const etapes = await demanderEtapes(bt.dataset.id, 1); if (!etapes) return;
           bt.disabled = true;
           try {
-            const r = await api('POST', { action: 'generer', ids: [bt.dataset.id], rang_depart: 1, etapes }); const x = (r.resultats || [])[0] || {};
+            const r = await api('POST', { action: 'generer', ids: [bt.dataset.id], rang_depart: 1, ...etapes }); const x = (r.resultats || [])[0] || {};
             if (x.erreur || !x.numero) throw new Error(x.erreur || 'Création impossible.');
             toast(`OF ${x.numero} créé : ${x.titre}.`); data = await api('GET'); prop = await api('POST', { action: 'proposer' }); rendre(); chargerDonneesReelles();
           } catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; bt.disabled = false; }
@@ -5952,7 +5955,7 @@
         const etapes = await demanderEtapes(bt.dataset.id, 1); if (!etapes) return;
         bt.disabled = true; $('m-msg').innerHTML = `<div class="msg">Création de l'OF « ${esc(bt.dataset.titre)} »…</div>`;
         try {
-          const r = await api('POST', { action: 'generer', ids: [bt.dataset.id], rang_depart: Number(bt.dataset.rang) || 1, etapes });
+          const r = await api('POST', { action: 'generer', ids: [bt.dataset.id], rang_depart: Number(bt.dataset.rang) || 1, ...etapes });
           const x = (r.resultats || [])[0] || {};
           if (x.erreur || !x.numero) throw new Error(x.erreur || 'Création impossible.');
           toast(`OF ${x.numero} créé : ${x.titre}.`);
@@ -5977,7 +5980,7 @@
       const ordre = m.sequence.filter((s) => lignes.some((l) => l.id === s.id));
       for (let i = 0; i < ordre.length; i++) {
         $('m-msg').innerHTML = `<div class="msg">Création ${i + 1} / ${ordre.length} : ${esc(ordre[i].titre)}…</div>`;
-        try { const r = await api('POST', { action: 'generer', ids: [ordre[i].id], rang_depart: i + 1, etapes }); sortie.push(r.resultats[0]); }
+        try { const r = await api('POST', { action: 'generer', ids: [ordre[i].id], rang_depart: i + 1, ...etapes }); sortie.push(r.resultats[0]); }
         catch (e) { sortie.push({ titre: ordre[i].titre, erreur: e.message }); }
       }
       const ok = sortie.filter((x) => x.numero).length;
@@ -5992,7 +5995,7 @@
       for (let i = 0; i < cases.length; i++) {
         const ligne = data.lignes.find((l) => l.id === cases[i].dataset.id) || {};
         $('m-msg').innerHTML = `<div class="msg">Création ${i + 1} / ${cases.length} : ${esc(ligne.titre || '')}…</div>`;
-        try { const r = await api('POST', { action: 'generer', ids: [cases[i].dataset.id], rang_depart: i + 1, etapes }); sortie.push(r.resultats[0]); }
+        try { const r = await api('POST', { action: 'generer', ids: [cases[i].dataset.id], rang_depart: i + 1, ...etapes }); sortie.push(r.resultats[0]); }
         catch (e) { sortie.push({ titre: ligne.titre, erreur: e.message }); }
       }
       const ok = sortie.filter((x) => x.numero).length;
