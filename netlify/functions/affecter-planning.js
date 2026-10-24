@@ -21,6 +21,7 @@
 const { getSupabase } = require('./lib/supabaseclient');
 const { jourDebutSuggere, aujourdhuiParis } = require('./lib/debut-etape');
 const PL = require('./lib/planification');
+const { calculerEtapes } = require('./lib/durees');
 
 const handlerProtege = async (event) => {
   try {
@@ -106,31 +107,72 @@ const handlerProtege = async (event) => {
       };
     }
 
-    // Date automatique : si la machine est déjà prise ce jour-là, on prend le prochain jour ouvré libre.
-    if (dateAuto && machineId) {
+    // Durée réelle de l'étape (chiffrage ou durée manuelle) : le créneau n'occupe que le temps nécessaire,
+    // pas une journée entière. Étape non chiffrée : une journée entière, comme avant.
+    const calcul = await calculerEtapes(supabase, gamme.of_id);
+    const etapeCalc = calcul ? calcul.etapes.find((e) => e.gamme_id === gamme.id) : null;
+    const calLigne = calcul ? calcul.calendrier.find((c) => c.code === 'normal') : null;
+    const cal = calLigne || { heure_debut: '08:00', heure_fin: '16:30', pause_debut: '12:00', pause_minutes: 30 };
+    const phasesEtape = !etapeCalc ? [] : (etapeCalc.duree_manuelle_h !== null && etapeCalc.duree_manuelle_h !== undefined
+      ? [{ nom: 'Étape (durée manuelle)', duree_h: Number(etapeCalc.duree_manuelle_h) }]
+      : (etapeCalc.phases || []).map((p) => ({ nom: p.nom, duree_h: Number(p.duree_h) })));
+    const avecDuree = phasesEtape.some((p) => p.duree_h > 0);
+
+    // Découpe la durée en créneaux horaires à partir de `jourDebut`, en sautant la pause et les jours non ouvrés.
+    const decouper = (jourDebut) => {
+      const dMin = PL.hhmm(cal.heure_debut), fMin = PL.hhmm(cal.heure_fin);
+      const pD = PL.hhmm(cal.pause_debut), pF = pD + Number(cal.pause_minutes);
+      const fenetres = [[dMin, pD], [pF, fMin]];
+      const hh = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+      let jour = PL.debutDeJour(PL.enMinutes(jourDebut, '00:00'));
+      while (!PL.estOuvre(jour)) jour += PL.MIN_JOUR;
+      let f = 0, curseur = fenetres[0][0];
+      const morceaux = [];
+      for (const ph of phasesEtape) {
+        let reste = Math.round(ph.duree_h * 60);
+        let garde = 0;
+        while (reste > 0 && garde++ < 2000) {
+          if (f >= fenetres.length) { f = 0; jour += PL.MIN_JOUR; while (!PL.estOuvre(jour)) jour += PL.MIN_JOUR; curseur = fenetres[0][0]; }
+          const [wd, wf] = fenetres[f];
+          if (curseur < wd) curseur = wd;
+          if (curseur >= wf) { f++; if (f < fenetres.length) curseur = fenetres[f][0]; continue; }
+          const pris = Math.min(reste, wf - curseur);
+          morceaux.push({ date: PL.dateDe(jour), heure_debut: hh(curseur), heure_fin: hh(curseur + pris), phase: ph.nom });
+          curseur += pris; reste -= pris;
+        }
+      }
+      return morceaux;
+    };
+    const chevauche = (m, ligne) => !ligne.heure_debut || !ligne.heure_fin
+      || (PL.hhmm(String(ligne.heure_debut).slice(0, 5)) < PL.hhmm(m.heure_fin) && PL.hhmm(m.heure_debut) < PL.hhmm(String(ligne.heure_fin).slice(0, 5)));
+
+    // Machine déjà prise sur l'un des créneaux ? (heures prises en compte ; une ligne sans heures bloque toute la journée)
+    const machineBloquee = async (morceaux) => {
+      if (!machineId) return null;
+      const dates = Array.from(new Set(morceaux.map((m) => m.date)));
+      const { data: prises, error: e1 } = await supabase.from('planning_jour')
+        .select('id, date, heure_debut, heure_fin').eq('machine_id', machineId).in('date', dates).neq('statut', 'annulé');
+      if (e1) throw e1;
+      return morceaux.find((m) => prises.some((p) => p.date === m.date && chevauche(m, p))) || null;
+    };
+
+    let morceaux = avecDuree ? decouper(date) : [{ date, heure_debut: null, heure_fin: null, phase: null }];
+    if (dateAuto) {
+      // Date automatique : si la machine est déjà prise, on avance jusqu'au prochain jour ouvré où elle est libre.
       for (let essai = 0; essai < 60; essai++) {
-        const { data: prise, error: priseErr } = await supabase
-          .from('planning_jour').select('id').eq('machine_id', machineId).eq('date', date).neq('statut', 'annulé');
-        if (priseErr) throw priseErr;
-        if (!prise.length) break;
+        const bloc = avecDuree ? await machineBloquee(morceaux) : (machineId ? (await machineBloquee(morceaux)) : null);
+        if (!bloc) break;
         let j = PL.enMinutes(date, '00:00') + PL.MIN_JOUR;
         while (!PL.estOuvre(j)) j += PL.MIN_JOUR;
         date = PL.dateDe(j);
+        morceaux = avecDuree ? decouper(date) : [{ date, heure_debut: null, heure_fin: null, phase: null }];
       }
     }
-
-    // Vérifier que la machine est libre ce jour-là.
-    const { data: machineOccupee, error: machineError } = machineId ? await supabase
-      .from('planning_jour')
-      .select('id')
-      .eq('machine_id', machineId)
-      .eq('date', date)
-      .neq('statut', 'annulé') : { data: [], error: null };
-    if (machineError) throw machineError;
-    if (machineOccupee.length > 0) {
+    const bloc = await machineBloquee(morceaux);
+    if (bloc) {
       return {
         statusCode: 409,
-        body: JSON.stringify({ error: 'Cette machine est déjà affectée ce jour-là.', conflit: 'machine' }),
+        body: JSON.stringify({ error: 'Cette machine est déjà affectée sur ce créneau horaire.', conflit: 'machine' }),
       };
     }
 
@@ -139,56 +181,59 @@ const handlerProtege = async (event) => {
         .from('personnel').select('id, nom').in('id', personnelIds);
       if (persNomError) throw persNomError;
       const nomDe = (id) => (personnes.find((p) => p.id === id) || {}).nom || 'Une personne';
+      const dates = Array.from(new Set(morceaux.map((m) => m.date)));
 
-      // Absences ce jour-là
+      // Absences sur les jours concernés
       const { data: absences, error: absError } = await supabase
-        .from('personnel_planning_jour')
-        .select('personnel_id, statut')
-        .in('personnel_id', personnelIds)
-        .eq('date', date);
+        .from('personnel_planning_jour').select('personnel_id, statut, date').in('personnel_id', personnelIds).in('date', dates);
       if (absError) throw absError;
       const absent = absences.find((a) => a.statut === 'absent' || a.statut === 'en arrêt');
       if (absent) {
         return {
           statusCode: 409,
-          body: JSON.stringify({ error: `${nomDe(absent.personnel_id)} est absent(e) ou en arrêt ce jour-là.`, conflit: 'absence' }),
+          body: JSON.stringify({ error: `${nomDe(absent.personnel_id)} est absent(e) ou en arrêt le ${absent.date.split('-').reverse().slice(0, 2).join('/')}.`, conflit: 'absence' }),
         };
       }
 
-      // Déjà affectées ailleurs ce jour-là ? (via la table de liaison)
+      // Déjà affectées ailleurs sur ces créneaux ?
       const { data: occupees, error: persError } = await supabase
         .from('planning_jour_personnel')
-        .select('personnel_id, planning_jour!inner(date, statut)')
+        .select('personnel_id, planning_jour!inner(date, statut, heure_debut, heure_fin)')
         .in('personnel_id', personnelIds)
-        .eq('planning_jour.date', date)
+        .in('planning_jour.date', dates)
         .neq('planning_jour.statut', 'annulé');
       if (persError) throw persError;
-      if (occupees.length > 0) {
+      const prise = occupees.find((o) => morceaux.some((m) => o.planning_jour.date === m.date && chevauche(m, o.planning_jour)));
+      if (prise) {
         return {
           statusCode: 409,
-          body: JSON.stringify({ error: `${nomDe(occupees[0].personnel_id)} est déjà affecté(e) ailleurs ce jour-là.`, conflit: 'personnel' }),
+          body: JSON.stringify({ error: `${nomDe(prise.personnel_id)} est déjà affecté(e) ailleurs sur ce créneau (${prise.planning_jour.date.split('-').reverse().slice(0, 2).join('/')}).`, conflit: 'personnel' }),
         };
       }
     }
 
-    const { data: creneau, error: insertError } = await supabase
-      .from('planning_jour')
-      .insert({
-        date, machine_id: machineId, personnel_id: personnelIds[0] || null, // 1re personne = référente (compatibilité)
-        of_id: gamme.of_id,
-        operation_id: gamme.operation_id,
-        gamme_operatoire_id: gamme.id,
-        statut: 'planifié',
-      })
-      .select('id')
-      .single();
-    if (insertError) throw insertError;
-
-    if (personnelIds.length > 0) {
-      const { error: linkError } = await supabase
-        .from('planning_jour_personnel')
-        .insert(personnelIds.map((pid) => ({ planning_jour_id: creneau.id, personnel_id: pid })));
-      if (linkError) throw linkError;
+    const ids = [];
+    for (const m of morceaux) {
+      const { data: creneau, error: insertError } = await supabase
+        .from('planning_jour')
+        .insert({
+          date: m.date, heure_debut: m.heure_debut, heure_fin: m.heure_fin, phase: m.phase,
+          machine_id: machineId, personnel_id: personnelIds[0] || null, // 1re personne = référente (compatibilité)
+          of_id: gamme.of_id,
+          operation_id: gamme.operation_id,
+          gamme_operatoire_id: gamme.id,
+          statut: 'planifié',
+        })
+        .select('id')
+        .single();
+      if (insertError) throw insertError;
+      ids.push(creneau.id);
+      if (personnelIds.length > 0) {
+        const { error: linkError } = await supabase
+          .from('planning_jour_personnel')
+          .insert(personnelIds.map((pid) => ({ planning_jour_id: creneau.id, personnel_id: pid })));
+        if (linkError) throw linkError;
+      }
     }
 
     const { error: updateError } = await supabase
@@ -197,7 +242,7 @@ const handlerProtege = async (event) => {
       .eq('id', gamme.id);
     if (updateError) throw updateError;
 
-    return { statusCode: 200, body: JSON.stringify({ planning_jour_id: creneau.id, personnel_ids: personnelIds, date }) };
+    return { statusCode: 200, body: JSON.stringify({ planning_jour_id: ids[0], planning_jour_ids: ids, personnel_ids: personnelIds, date, creneaux: morceaux }) };
   } catch (err) {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }
