@@ -225,7 +225,10 @@ async function calculerEtapes(supabase, ofId) {
   });
 
   // Opérations en ligne : la production de l'étape suit celle de son prédécesseur.
-  EL.appliquerEnLigne(etapes, await EL.chargerRegles(supabase));
+  const reglesEL = await EL.chargerRegles(supabase);
+  EL.appliquerEnLigne(etapes, reglesEL);
+  // Couples « en ligne » connus (ex. contrôle couvertures / montage) : l'écran propose « en ligne » par défaut pour ces liens.
+  etapes.forEach((e) => { e.regle_en_ligne = etapes.filter((x) => x.sequence !== e.sequence && reglesEL.has(`${e.operation_code}|${x.operation_code}`)).map((x) => x.sequence); });
 
   const calendrier = calRes.data.map((c) => {
     const utiles = heures(c.heure_fin) - heures(c.heure_debut) - c.pause_minutes / 60;
