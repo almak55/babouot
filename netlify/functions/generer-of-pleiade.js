@@ -59,7 +59,8 @@ const handlerProtege = async (event) => {
     if (!valeurs.couleur_tete && valeurs.categorie !== 'ALBUM') avertissements.push('Couleur de tête non définie pour cette catégorie.');
     if (valeurs.categorie === 'ALBUM') avertissements.push('Album : tranchefile et signets « à définir » dans le tableau de référence.');
 
-    const reponse = { valeurs, gamme, avertissements, etapes_possibles: P.etapesPossibles(ref, opts, valeurs.pave) };
+    const { data: catalogue } = await supabase.from('operations').select('code, nom').order('nom');
+    const reponse = { valeurs, gamme, avertissements, operations_catalogue: catalogue || [], etapes_possibles: P.etapesPossibles(ref, opts, valeurs.pave) };
     if (action === 'apercu') return { statusCode: 200, body: JSON.stringify(reponse) };
 
     if (!opts.titre || !opts.quantite) {

@@ -148,7 +148,7 @@ const handlerProtege = async (event) => {
         if (!l.quantite) { resultats.push({ id: l.id, titre: l.titre, erreur: 'Quantité manquante.' }); continue; }
         const livraison = l.date_livraison || (l.mois ? dernierJourOuvre(l.mois) : null);
         const res = await generer.handler({ httpMethod: 'POST', body: JSON.stringify({
-          action: 'creer', categorie, etapes: Array.isArray(b.etapes) ? b.etapes : undefined, titre: l.titre, quantite: l.quantite, delai: livraison,
+          action: 'creer', categorie, etapes: Array.isArray(b.etapes) ? b.etapes : undefined, operations_extra: Array.isArray(b.operations_extra) ? b.operations_extra : undefined, titre: l.titre, quantite: l.quantite, delai: livraison,
           date_reception: dateReception(l.reception, livraison), couleur_tete: l.tete, couleur_peau: l.peau,
           carte_dos: l.carte_dos, nb_cahiers: l.mp, rang_priorite: (b.rang_depart || 1) + i, priorite: l.a_verifier ? 'haute' : 'normale',
         }) });
@@ -167,7 +167,7 @@ const handlerProtege = async (event) => {
       const res = await generer.handler({ httpMethod: 'POST', body: JSON.stringify({ action: 'apercu', categorie, titre: l.titre, quantite: l.quantite, couleur_tete: l.tete, couleur_peau: l.peau }) });
       const d = JSON.parse(res.body);
       if (res.statusCode !== 200) return rep(res.statusCode, { error: d.error || 'Aperçu impossible.' });
-      return rep(200, { etapes: d.etapes_possibles });
+      return rep(200, { etapes: d.etapes_possibles, catalogue: d.operations_catalogue || [] });
     }
     return rep(400, { error: 'action inconnue.' });
   } catch (err) {
