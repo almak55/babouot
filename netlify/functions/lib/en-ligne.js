@@ -19,13 +19,27 @@ function typePhase(nom) {
   return 'production';
 }
 
+// Code « de base » d'une opération : accents/casse neutralisés, suffixes _PLEIADE / _CARTONNES retirés,
+// pour que « MONTAGE_COUVERTURE_PLEIADE » soit reconnu comme « MONTAGE_COUVERTURE ».
+const baseCode = (c) => String(c || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/_(PLEIADE|CARTONNES?)(?=_|$)/g, '');
+
+class Regles extends Set {
+  has(cle) {
+    if (super.has(cle)) return true;
+    const [a, b] = String(cle).split('|');
+    return super.has(`${baseCode(a)}|${baseCode(b)}`);
+  }
+}
+
 // Ensemble des couples "OPERATION|PREDECESSEUR". Table absente (migration 34 pas encore exécutée) : aucun couple.
 async function chargerRegles(supabase) {
   try {
     const { data, error } = await supabase.from('liaisons_en_ligne').select('operation_code, avec_operation_code');
-    if (error) return new Set();
-    return new Set((data || []).map((r) => `${r.operation_code}|${r.avec_operation_code}`));
-  } catch (_) { return new Set(); }
+    if (error) return new Regles();
+    const r = new Regles();
+    (data || []).forEach((x) => { r.add(`${x.operation_code}|${x.avec_operation_code}`); r.add(`${baseCode(x.operation_code)}|${baseCode(x.avec_operation_code)}`); });
+    return r;
+  } catch (_) { return new Regles(); }
 }
 
 function estEnLigne(regles, opCode, opPredCode, lien) {
@@ -68,4 +82,4 @@ function appliquerEnLigne(etapes, regles) {
   });
 }
 
-module.exports = { typePhase, chargerRegles, estEnLigne, appliquerEnLigne };
+module.exports = { typePhase, chargerRegles, estEnLigne, appliquerEnLigne, baseCode };

@@ -1,18 +1,21 @@
 // lib/ordre-gamme.js
 //
-// Ordre logique d'une gamme et dépendances implicites.
+// Ordre logique d'une gamme et dépendances automatiques.
 //
-// Les numéros de séquence d'un OF reflètent l'ordre dans lequel les opérations ont été saisies, pas
-// forcément l'ordre de fabrication. Une étape SANS prédécesseur déclaré (predecesseurs = null) était
-// jusqu'ici rattachée à « l'étape de numéro précédent », ce qui donne des dates incohérentes.
-// normaliserGamme() rend ces dépendances explicites, une fois pour toutes :
-//   - si l'opération fonctionne en ligne avec une autre opération de l'OF (table liaisons_en_ligne :
-//     contrôle couvertures avec montage, coloris tête avec massicot…), elle dépend de celle-ci ;
-//   - sinon elle dépend de l'étape qui la précède dans l'ordre logique (ordre standard des opérations,
-//     operations.ordre_defaut), en respectant les dépendances déjà déclarées.
-// Seules les étapes dont predecesseurs est null sont modifiées ; l'opération est idempotente.
+// Les numéros de séquence d'un OF reflètent l'ordre de saisie, pas l'ordre de fabrication. Pour qu'une
+// étape sans dépendance déclarée (predecesseurs null ou vide) soit correctement reliée, normaliserGamme()
+// lui déduit ses prédécesseurs :
+//   1) du modèle de gamme (table pleiade_gamme_modele : « Applats après Montage », « Contrôle couvertures
+//      en simultané avec Montage »…), en sautant les opérations absentes de l'OF ;
+//   2) sinon d'un partenaire « en ligne » (table liaisons_en_ligne) placé avant dans l'ordre logique ;
+//   3) sinon (predecesseurs null seulement) de l'étape qui précède dans l'ordre standard des opérations
+//      (operations.ordre_defaut).
+// Une étape ajoutée plus tard (ex. montage) relie aussi les étapes déjà présentes qui en dépendent.
+// Seules les étapes sans dépendance sont modifiées, sauf { tout: true } (bouton « Recalculer »).
+// L'opération est idempotente et ne bloque jamais la planification.
 
 const EL = require('./en-ligne');
+const { baseCode } = EL;
 
 // Tri topologique stable : prédécesseurs déclarés d'abord, puis ordre standard, puis séquence.
 // Une étape qui dépend de celle qui vient d'être placée la suit immédiatement.
@@ -34,7 +37,7 @@ function ordreLogique(gammes) {
   return triees;
 }
 
-// Le prédécesseur Y peut-il être ajouté à X sans créer de boucle ? (X ne doit pas être un ancêtre de Y.)
+// Y est-il déjà un descendant de X (ajouter Y comme prédécesseur de X créerait une boucle) ?
 function creeUneBoucle(predsDe, x, y) {
   const vus = new Set(); const pile = [y];
   while (pile.length) {
@@ -46,49 +49,104 @@ function creeUneBoucle(predsDe, x, y) {
   return false;
 }
 
-async function normaliserGamme(supabase, ofId) {
+async function chargerModele(supabase) {
+  try {
+    const { data, error } = await supabase.from('pleiade_gamme_modele').select('code, operation_code, predecesseurs, simultane, seuil_pct');
+    if (error || !data) return new Map();
+    return new Map(data.map((r) => [r.code, r]));
+  } catch (_) { return new Map(); }
+}
+
+async function normaliserGamme(supabase, ofId, options) {
+  const tout = !!(options && options.tout);
   try {
     const { data, error } = await supabase.from('gammes_operatoires')
-      .select('id, sequence, statut, predecesseurs, operations(id, code, nom, ordre_defaut)').eq('of_id', ofId);
-    if (error || !data || !data.some((g) => !Array.isArray(g.predecesseurs))) return false;
-    const regles = await EL.chargerRegles(supabase);
-    const ordre = ordreLogique(data);
+      .select('id, sequence, statut, predecesseurs, dependances, operations(id, code, nom, ordre_defaut)').eq('of_id', ofId);
+    if (error || !data || !data.length) return false;
+    const aTraiter = (g) => tout || !Array.isArray(g.predecesseurs) || g.predecesseurs.length === 0;
+    if (!data.some(aTraiter)) return false;
+    const [regles, modele] = await Promise.all([EL.chargerRegles(supabase), chargerModele(supabase)]);
+    const code = (g) => baseCode(g.operations && g.operations.code);
+    const parBase = new Map();                       // code de base -> étapes de l'OF
+    data.forEach((g) => { const c = code(g); if (!parBase.has(c)) parBase.set(c, []); parBase.get(c).push(g); });
+    const ligneModele = (c) => Array.from(modele.values()).find((r) => baseCode(r.operation_code) === c);
+
+    // Prédécesseurs d'une étape d'après le modèle, en sautant les opérations absentes de l'OF.
+    const depuisModele = (g) => {
+      const ligne = ligneModele(code(g));
+      if (!ligne) return { seqs: [], simultanes: new Map() };
+      const seqs = new Set(); const simultanes = new Map();
+      const explorer = (codesModele, vus, direct) => {
+        for (const cm of codesModele || []) {
+          if (vus.has(cm)) continue; vus.add(cm);
+          const r = modele.get(cm); if (!r) continue;
+          const presentes = (parBase.get(baseCode(r.operation_code)) || []).filter((x) => x.sequence !== g.sequence);
+          if (presentes.length) {
+            presentes.forEach((x) => { seqs.add(x.sequence); if (direct && (ligne.simultane || []).includes(cm)) simultanes.set(x.sequence, ligne.seuil_pct || 10); });
+          } else explorer(r.predecesseurs, vus, false);
+        }
+      };
+      explorer(ligne.predecesseurs, new Set(), true);
+      return { seqs: Array.from(seqs), simultanes };
+    };
+
+    // Dans l'ordre logique les étapes sont résolues du début vers la fin.
+    const base0 = data.map((g) => ({ ...g, predecesseurs: aTraiter(g) ? null : g.predecesseurs }));
+    const ordre = ordreLogique(base0);
     const rang = new Map(ordre.map((g, i) => [g.sequence, i]));
-    const predsDe = new Map(data.map((g) => [g.sequence, Array.isArray(g.predecesseurs) ? g.predecesseurs.slice() : null]));
-    // Étapes sans prédécesseur déclaré, dans l'ordre logique : un prédécesseur est toujours résolu avant son successeur.
+    const predsDe = new Map(data.map((g) => [g.sequence, aTraiter(g) ? null : g.predecesseurs.slice()]));
+    const depsDe = new Map();
+    const codeParSeq = new Map(data.map((g) => [g.sequence, code(g)]));
+    const resolu = () => new Map([...predsDe].map(([s, v]) => [s, v || []]));
+    const parSeq = new Map(data.map((g) => [g.sequence, g]));
+
+    // 1re passe : modèle et partenaires « en ligne », toutes étapes à traiter
     for (const g of ordre) {
       if (predsDe.get(g.sequence)) continue;
       const i = rang.get(g.sequence);
-      const code = g.operations && g.operations.code;
-      let choisi = null;
-      // 1) partenaire « en ligne » placé avant dans l'ordre logique
-      for (let k = i - 1; k >= 0 && choisi === null; k--) {
-        const y = ordre[k]; const cy = y.operations && y.operations.code;
-        if (code && cy && regles.has(`${code}|${cy}`) && !creeUneBoucle(new Map([...predsDe].map(([s, v]) => [s, v || []])), g.sequence, y.sequence)) choisi = y.sequence;
+      const m = depuisModele(g);
+      let choisis = m.seqs.filter((s) => !creeUneBoucle(resolu(), g.sequence, s));
+      if (choisis.length) {
+        const dep = {};
+        m.simultanes.forEach((seuil, s) => { if (choisis.includes(s) && !regles.has(`${code(g)}|${codeParSeq.get(s)}`)) dep[s] = { mode: 'progressif', seuil_pct: seuil }; });
+        if (Object.keys(dep).length) depsDe.set(g.sequence, dep);
+        predsDe.set(g.sequence, choisis); continue;
       }
-      // 2) sinon l'étape précédente dans l'ordre logique
-      //    (une étape « en ligne » tourne en parallèle de son partenaire : on se rattache alors à ce partenaire,
-      //    pour ne pas dépendre d'une étape annexe qui n'est peut-être pas encore planifiée)
-      if (choisi === null && i > 0) {
+      // partenaire « en ligne » placé avant dans l'ordre logique
+      let partenaire = null;
+      for (let k = i - 1; k >= 0 && partenaire === null; k--) {
+        const y = ordre[k];
+        if (regles.has(`${code(g)}|${code(y)}`) && !creeUneBoucle(resolu(), g.sequence, y.sequence)) partenaire = y.sequence;
+      }
+      if (partenaire !== null) { predsDe.set(g.sequence, [partenaire]); continue; }
+      // étapes dont predecesseurs vaut null seulement : étape précédente dans l'ordre logique (hors étapes « en ligne » annexes)
+      if ((tout || !Array.isArray(parSeq.get(g.sequence).predecesseurs)) && i > 0) {
         let c = ordre[i - 1].sequence;
-        const parSeqOp = new Map(data.map((x) => [x.sequence, x.operations && x.operations.code]));
         for (let garde = 0; garde < 10; garde++) {
           const ps = predsDe.get(c) || [];
-          const cote = ps.find((p) => parSeqOp.get(c) && parSeqOp.get(p) && regles.has(`${parSeqOp.get(c)}|${parSeqOp.get(p)}`));
+          const cote = ps.find((p) => codeParSeq.get(c) && codeParSeq.get(p) && regles.has(`${codeParSeq.get(c)}|${codeParSeq.get(p)}`));
           if (cote === undefined) break;
           c = cote;
         }
-        choisi = c;
-      }
-      predsDe.set(g.sequence, choisi === null ? [] : [choisi]);
+        predsDe.set(g.sequence, [c]);
+      } else predsDe.set(g.sequence, []);
     }
+
+    let modifiees = 0;
     for (const g of data) {
-      if (Array.isArray(g.predecesseurs)) continue;
-      const { error: e2 } = await supabase.from('gammes_operatoires').update({ predecesseurs: predsDe.get(g.sequence) }).eq('id', g.id);
+      if (!aTraiter(g)) continue;
+      const nouveaux = predsDe.get(g.sequence) || [];
+      const dep = depsDe.get(g.sequence);
+      const memePreds = Array.isArray(g.predecesseurs) && g.predecesseurs.length === nouveaux.length && g.predecesseurs.every((p) => nouveaux.includes(p));
+      if (memePreds && !dep) continue;
+      const maj = { predecesseurs: nouveaux };
+      if (dep) maj.dependances = { ...(g.dependances || {}), ...dep };
+      const { error: e2 } = await supabase.from('gammes_operatoires').update(maj).eq('id', g.id);
       if (e2) return false;
+      modifiees++;
     }
-    return true;
-  } catch (_) { return false; }   // la normalisation ne doit jamais bloquer la planification
+    return modifiees > 0;
+  } catch (_) { return false; }   // ne jamais bloquer la planification
 }
 
 module.exports = { ordreLogique, normaliserGamme };
