@@ -19,7 +19,8 @@ const hm = (t) => { const [h, m] = String(t).slice(0, 5).split(':'); return Numb
 const dureeCreneau = (c) => {
   if (!c.heure_debut || !c.heure_fin) return 480;
   const d = hm(c.heure_debut), f = hm(c.heure_fin);
-  return Math.max(0, f - d - (d < 720 && f > 750 ? MIN_PAUSE : 0));
+  // pause 12h00-12h30 : seule la part qui chevauche la plage est déduite
+  return Math.max(0, f - d - Math.max(0, Math.min(f, 720 + MIN_PAUSE) - Math.max(d, 720)));
 };
 const jourSuivant = (dateStr) => {
   const d = new Date(dateStr + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10);
