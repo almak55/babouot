@@ -16,10 +16,27 @@ const handlerProtege = async (event) => {
     const supabase = getSupabase();
     const { data, error } = await supabase
       .from('gammes_operatoires')
-      .select('id, sequence, statut, predecesseurs, dependances, operations(id, code, nom)')
+      .select('id, sequence, statut, predecesseurs, dependances, operations(id, code, nom, ordre_defaut)')
       .eq('of_id', ofId)
       .order('sequence');
     if (error) throw error;
+
+    // Ordre d'affichage logique : on respecte d'abord les prédécesseurs déclarés (tri topologique), puis,
+    // à égalité, l'ordre de déroulement standard des opérations (operations.ordre_defaut), puis la séquence.
+    const parSeq = new Map(data.map((g) => [g.sequence, g]));
+    const predsExpl = (g) => (Array.isArray(g.predecesseurs) ? g.predecesseurs.filter((s) => parSeq.has(s) && s !== g.sequence) : []);
+    const cle = (g) => [g.operations && g.operations.ordre_defaut != null ? g.operations.ordre_defaut : 1e9, g.sequence];
+    const avant = (a, b) => { const x = cle(a), y = cle(b); return x[0] - y[0] || x[1] - y[1]; };
+    const restants = new Set(data.map((g) => g.sequence));
+    const triees = [];
+    while (restants.size) {
+      const dispo = Array.from(restants).map((s) => parSeq.get(s)).filter((g) => predsExpl(g).every((s) => !restants.has(s)));
+      const pool = dispo.length ? dispo : Array.from(restants).map((s) => parSeq.get(s)); // cycle : on retombe sur l'ordre standard
+      pool.sort(avant);
+      triees.push(pool[0]); restants.delete(pool[0].sequence);
+    }
+    data.splice(0, data.length, ...triees);
+    data.forEach((g, i) => { g.rang = i + 1; });
 
     // Opérations pouvant tourner en ligne avec leur précédente : possible (règle) et actif (règle non annulée sur ce lien).
     const regles = await EL.chargerRegles(supabase);
@@ -36,7 +53,7 @@ const handlerProtege = async (event) => {
     // Opération sans machine ? Oui si toutes ses phases standard sont manuelles,
     // ou si elle n'a aucune phase et aucune machine compatible.
     const opIds = Array.from(new Set(data.map((g) => g.operations && g.operations.id).filter(Boolean)));
-    if (!opIds.length) return { statusCode: 200, body: JSON.stringify(data.map((g, i) => ({ id: g.id, sequence: g.sequence, statut: g.statut, operation: g.operations, sans_machine: false, en_ligne: enLigneDe(g, i) }))) };
+    if (!opIds.length) return { statusCode: 200, body: JSON.stringify(data.map((g, i) => ({ id: g.id, sequence: g.sequence, rang: g.rang, statut: g.statut, operation: g.operations, sans_machine: false, en_ligne: enLigneDe(g, i) }))) };
     const [phasesRes, machRes, liaisonRes] = await Promise.all([
       supabase.from('phases_standard').select('operation_id, occupe_machine').in('operation_id', opIds),
       supabase.from('machines').select('operation_id').in('operation_id', opIds).eq('actif', true),
@@ -52,7 +69,7 @@ const handlerProtege = async (event) => {
     return {
       statusCode: 200,
       body: JSON.stringify(data.map((g, i) => ({
-        id: g.id, sequence: g.sequence, statut: g.statut, operation: g.operations, en_ligne: enLigneDe(g, i),
+        id: g.id, sequence: g.sequence, rang: g.rang, statut: g.statut, operation: g.operations, en_ligne: enLigneDe(g, i),
         sans_machine: !!(g.operations && sansMachine(g.operations.id)),
       }))),
     };
