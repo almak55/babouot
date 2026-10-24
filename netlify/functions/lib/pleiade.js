@@ -66,7 +66,9 @@ function actif(etape, opts, pave) {
 function construireGamme(ref, opts, pave) {
   const modele = ref.modele;
   const parCode = Object.fromEntries(modele.map((e) => [e.code, e]));
-  const actives = modele.filter((e) => actif(e, opts, pave)).sort((a, b) => a.ordre - b.ordre);
+  // opts.etapes (liste de codes d'étapes du modèle) : choix explicite de l'utilisateur, prioritaire sur les variantes.
+  const choix = Array.isArray(opts.etapes) ? new Set(opts.etapes) : null;
+  const actives = modele.filter((e) => (choix ? choix.has(e.code) : actif(e, opts, pave))).sort((a, b) => a.ordre - b.ordre);
   const estActive = new Set(actives.map((e) => e.code));
   const seq = {};
   actives.forEach((e, i) => { seq[e.code] = i + 1; });
@@ -121,4 +123,11 @@ function caracteristiquesOf(valeurs, opts) {
   return Object.fromEntries(Object.entries(c).filter(([, v]) => !vide(v)));
 }
 
-module.exports = { CONDITIONS, chargerReferentiel, valeursFiche, construireGamme, caracteristiquesOf, vide };
+// Toutes les étapes du modèle, avec indication de celles retenues par défaut (pour la liste à cocher).
+function etapesPossibles(ref, opts, pave) {
+  return ref.modele.slice().sort((a, b) => a.ordre - b.ordre).map((e) => ({
+    code: e.code, libelle: e.libelle || e.operation_code, condition: e.condition, par_defaut: actif(e, opts, pave),
+  }));
+}
+
+module.exports = { etapesPossibles, CONDITIONS, chargerReferentiel, valeursFiche, construireGamme, caracteristiquesOf, vide };
