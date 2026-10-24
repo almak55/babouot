@@ -2049,6 +2049,32 @@
             <span style="display:flex; gap:6px; justify-content:flex-end; flex-wrap:wrap;">${actions}</span>
           </div>`;
       }).join('') || '<div class="empty">Aucune étape.</div>';
+      // Ajout d'une opération manquante au catalogue de l'OF
+      try {
+        const refs = await getReferentiels();
+        const optOps = refs.operations.slice().sort((a, b) => a.nom.localeCompare(b.nom, 'fr')).map(o => `<option value="${esc(o.code)}">${esc(o.nom)}</option>`).join('');
+        const optApres = gammes.map(g => `<option value="${g.sequence}">${g.sequence}. ${esc(g.operation ? g.operation.nom : '(supprimée)')}</option>`).join('');
+        list.insertAdjacentHTML('beforeend', `<div style="margin-top:14px; padding:14px; border:2px dashed var(--teal-2,#16B8A6); border-radius:12px; background:#F7FCFB;">
+          <div style="font-size:14px; font-weight:700; color:#161C2C; margin-bottom:8px;">＋ Ajouter une opération manquante</div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <div class="field" style="margin:0;"><label>Opération</label><select id="ga-op"><option value="">— choisir —</option>${optOps}</select></div>
+            <div class="field" style="margin:0;"><label>Démarre après</label><select id="ga-apres"><option value="">— dès le début (aucune) —</option>${optApres}</select></div>
+          </div>
+          <div style="margin-top:10px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+            <span class="plan-note">L'opération est ajoutée « à planifier ». Absente de la liste ? Créez-la dans Temps standards &gt; Gérer les opérations.</span>
+            <button class="btn primary" id="ga-add">Ajouter à la gamme</button></div></div>`);
+        document.getElementById('ga-add').addEventListener('click', async (ev) => {
+          const code = document.getElementById('ga-op').value;
+          if (!code) { zoneMsg().innerHTML = '<div class="msg error">Choisissez l\'opération à ajouter.</div>'; return; }
+          const ap = document.getElementById('ga-apres').value;
+          ev.target.disabled = true; zoneMsg().innerHTML = '<div class="msg">Ajout…</div>';
+          try {
+            const r = await fetch(`${API}/modifier-gamme`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: ofUuid, ajouter: [code], apres_sequence: ap ? Number(ap) : null }) });
+            const d = await lireJson(r); if (!r.ok) throw new Error(d.error || 'Erreur serveur (HTTP ' + r.status + ')');
+            toast('Opération ajoutée à la gamme.'); chargerDonneesReelles(); ouvrirModaleGamme(ofUuid, ofNumero);
+          } catch (e) { zoneMsg().innerHTML = `<div class="msg error">${esc(e.message)}</div>`; ev.target.disabled = false; }
+        });
+      } catch (_) { /* catalogue indisponible : l'ajout n'est pas proposé */ }
       const possibles = gammes.filter(g => g.en_ligne && g.en_ligne.possible && g.statut === 'à planifier');
       if (possibles.length) {
         list.insertAdjacentHTML('afterbegin', `<div style="padding:8px 10px; margin-bottom:6px; border-radius:10px; background:var(--teal-50,#E6F6F3); font-size:12.5px; color:#161C2C;">
