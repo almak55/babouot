@@ -404,6 +404,8 @@
   .modal .field label { margin-bottom: 4px; }
   .modal .field input, .modal .field select { width: 100%; }
   .modal .op-list input[type=checkbox] { width: auto; margin: 0; flex: 0 0 auto; }
+  .modal .field > label:has(> input[type=checkbox]) { display: flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; }
+  .modal .field > label > input[type=checkbox] { width: auto; margin: 0; flex: 0 0 auto; }
   .modal .op-list { display: flex; flex-direction: column; gap: 7px; max-height: 160px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 9px; background: var(--field-bg); }
 
   .modal.large { max-width: 780px; }
@@ -2533,6 +2535,28 @@
     }
     statutSelect.addEventListener('change', majAffichageHoraires);
     majAffichageHoraires();
+    const heureD = document.getElementById('d-heure-debut'), heureF = document.getElementById('d-heure-fin');
+    const majHeures = () => { heureD.disabled = heureF.disabled = !partielCheckbox.checked; };
+    partielCheckbox.addEventListener('change', majHeures);
+    // modifier une heure coche automatiquement « plage horaire »
+    [heureD, heureF].forEach(i => i.addEventListener('input', () => { partielCheckbox.checked = true; majHeures(); }));
+    majHeures();
+    // pré-remplit avec l'état déjà enregistré pour le jour choisi
+    async function chargerJour() {
+      const j = document.getElementById('d-date').value; if (!j) return;
+      try {
+        const res = await fetch(`${API}/gerer-disponibilite?personnel_id=${personne.id}&date_debut=${j}&date_fin=${j}`);
+        const lignes = res.ok ? await res.json() : [];
+        const l = lignes[0];
+        statutSelect.value = l ? l.statut : 'disponible'; majAffichageHoraires();
+        const partiel = !!(l && l.statut === 'disponible' && l.heure_debut && l.heure_fin);
+        partielCheckbox.checked = partiel;
+        heureD.value = partiel ? l.heure_debut.slice(0, 5) : '09:00'; heureF.value = partiel ? l.heure_fin.slice(0, 5) : '17:00';
+        majHeures();
+      } catch (_) { /* pré-remplissage facultatif */ }
+    }
+    document.getElementById('d-date').addEventListener('change', chargerJour);
+    chargerJour();
     const dDebut = document.getElementById('d-date'), dFin = document.getElementById('d-date-fin'), dInconnue = document.getElementById('d-fin-inconnue');
     dDebut.addEventListener('change', () => { if (!dFin.value || dFin.value < dDebut.value) dFin.value = dDebut.value; });
     dInconnue.addEventListener('change', () => { dFin.disabled = dInconnue.checked; });
