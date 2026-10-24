@@ -3305,8 +3305,8 @@
         <div class="field"><label>Nouvelle opération</label><input id="op-nom" placeholder="ex : Contrecollage des gardes"></div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
           <div class="field"><label>Famille (facultatif)</label><input id="op-fam" list="op-fam-list" placeholder="ex : finition"><datalist id="op-fam-list">${familles.map(f => `<option value="${esc(f)}">`).join('')}</datalist></div>
-          <div class="field"><label>Placer après</label><select id="op-apres"><option value="">— À la fin —</option>${ops.map(o => `<option value="${esc(o.code)}">${esc(o.nom)}</option>`).join('')}</select></div>
-        </div>
+          </div>
+        <div class="field"><label>Placer après (une ou plusieurs opérations — vide : à la fin)</label>${listeCases('op-apres')}</div>
         <div id="m-msg"></div>
         <div style="text-align:right;"><button class="btn primary" id="op-add">Ajouter l'opération</button></div>
       </div>
@@ -3317,6 +3317,9 @@
       </div>
       <div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`, 'xlarge');
     const rafraichir = () => { referentielsCache = null; ouvrirModaleOperations(); };
+    const listeCases = (id, exclure) => `<div class="op-list" id="${id}" style="max-height:150px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));">${ops.filter(o => o.code !== exclure).map(o => `<label><input type="checkbox" value="${esc(o.code)}"> ${esc(o.nom)}</label>`).join('')}</div>`;
+    // plusieurs cases cochées : l'opération se place après la dernière (dans l'ordre des gammes) ; aucune : inchangé
+    const derniereCochee = (id) => { const cochees = Array.from(document.querySelectorAll(`#${id} input:checked`)).map(i => i.value); let r = ''; ops.forEach(o => { if (cochees.includes(o.code)) r = o.code; }); return r; };
     const appeler = async (methode, url, corps) => {
       const res = await fetch(url, { method: methode, headers: { 'Content-Type': 'application/json' }, body: corps ? JSON.stringify(corps) : undefined });
       const d = await lireJson(res);
@@ -3330,19 +3333,17 @@
       if (!nom) { msg.innerHTML = '<div class="msg error">Indiquez le nom de l\'opération.</div>'; return; }
       msg.innerHTML = '<div class="msg">Ajout…</div>';
       try {
-        await appeler('POST', `${API}/gerer-operations`, { nom, famille: document.getElementById('op-fam').value, apres_code: document.getElementById('op-apres').value });
+        await appeler('POST', `${API}/gerer-operations`, { nom, famille: document.getElementById('op-fam').value, apres_code: derniereCochee('op-apres') });
         toast(`Opération « ${nom} » ajoutée.`); rafraichir();
       } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
     });
     document.querySelectorAll('.op-ren').forEach(b => b.addEventListener('click', () => {
       const op = ops.find(o => o.code === b.dataset.code); if (!op) return;
-      const idx = ops.indexOf(op);
-      const precedent = idx > 0 ? ops[idx - 1].code : '__debut';
       afficherModale(`
         <h3>Modifier l'opération</h3>
         <div class="field"><label>Nom</label><input id="oe-nom" value="${esc(op.nom)}"></div>
         <div class="field"><label>Famille (facultatif)</label><input id="oe-fam" list="oe-fam-list" value="${esc(op.famille || '')}"><datalist id="oe-fam-list">${familles.map(f => `<option value="${esc(f)}">`).join('')}</datalist></div>
-        <div class="field"><label>Position dans l'ordre par défaut des gammes</label><select id="oe-apres"><option value="__debut" ${precedent === '__debut' ? 'selected' : ''}>— En première position —</option>${ops.filter(o => o.code !== op.code).map(o => `<option value="${esc(o.code)}" ${o.code === precedent ? 'selected' : ''}>Après : ${esc(o.nom)}</option>`).join('')}</select></div>
+        <div class="field"><label>Placer après (une ou plusieurs opérations — vide : position inchangée)</label>${listeCases('oe-apres', op.code)}</div>
         <small style="color:var(--ink-500); font-size:11px;">Code technique : <span class="mono">${esc(op.code)}</span> (non modifiable). Les durées se règlent dans « Temps standards ».</small>
         <div id="m-msg"></div>
         <div class="actions"><button class="btn" id="oe-cancel">Annuler</button><button class="btn primary" id="oe-save">Enregistrer</button></div>`);
@@ -3351,10 +3352,10 @@
         const msg = document.getElementById('m-msg');
         const nom = document.getElementById('oe-nom').value.trim();
         if (!nom) { msg.innerHTML = '<div class="msg error">Le nom est requis.</div>'; return; }
-        const apres = document.getElementById('oe-apres').value;
+        const apres = derniereCochee('oe-apres');
         msg.innerHTML = '<div class="msg">Enregistrement…</div>';
         try {
-          await appeler('PUT', `${API}/gerer-operations`, { code: op.code, nom, famille: document.getElementById('oe-fam').value, apres_code: apres === precedent ? '__garder' : apres });
+          await appeler('PUT', `${API}/gerer-operations`, { code: op.code, nom, famille: document.getElementById('oe-fam').value, apres_code: apres || '__garder' });
           toast('Opération mise à jour.'); rafraichir();
         } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
       });
