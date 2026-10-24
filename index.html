@@ -2186,7 +2186,21 @@
       } catch (_) { /* catalogue indisponible : l'ajout n'est pas proposé */ }
       list.insertAdjacentHTML('afterbegin', `<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:6px 10px; margin-bottom:6px; border-radius:10px; background:var(--paper-raised-2,#F3F5FA); font-size:12.5px;">
         <span style="flex:1; min-width:200px;">Les opérations sont classées selon leurs dépendances (modèle de gamme et opérations en ligne).</span>
-        <button class="btn" id="gamme-relier" style="padding:3px 10px;font-size:12px;" title="Refait toutes les dépendances de cet OF d'après le modèle de gamme et les couples en ligne">Recalculer les dépendances</button></div>`);
+        <button class="btn" id="gamme-relier" style="padding:3px 10px;font-size:12px;" title="Refait toutes les dépendances de cet OF d'après le modèle de gamme et les couples en ligne">Recalculer les dépendances</button>
+        <button class="btn" id="gamme-recaler" style="padding:3px 10px;font-size:12px;" title="Les créneaux « Journée » des étapes chiffrées sont ramenés à leur durée réelle (libère les personnes et machines)">Recaler les durées</button>
+        <button class="btn" id="gamme-recaler-tout" style="padding:3px 10px;font-size:12px;" title="Même opération sur tous les OF">Recaler tous les OF</button></div>`);
+      [['gamme-recaler', { of_id: ofUuid }, 'cet OF'], ['gamme-recaler-tout', {}, 'tous les OF']].forEach(([idb, corps, qui]) => {
+        document.getElementById(idb).addEventListener('click', async (ev) => {
+          if (!confirm(`Ramener les créneaux « Journée » de ${qui} à la durée réelle du chiffrage ?\nSeuls les créneaux planifiés à venir, sans heures, d'étapes chiffrées sont modifiés (machine et personnes conservées).`)) return;
+          ev.target.disabled = true;
+          try {
+            const r = await fetch(`${API}/recaler-durees`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+            const d = await lireJson(r); if (!r.ok) throw new Error(d.error || 'Erreur serveur (HTTP ' + r.status + ')');
+            toast(d.etapes_concernees ? `${d.etapes_concernees} étape(s) recalée(s) sur leur durée réelle.` : 'Rien à recaler (étapes non chiffrées ou déjà à leurs heures).');
+            chargerDonneesReelles(); ouvrirModaleGamme(ofUuid, ofNumero);
+          } catch (e) { zoneMsg().innerHTML = `<div class="msg error">${esc(e.message)}</div>`; ev.target.disabled = false; }
+        });
+      });
       document.getElementById('gamme-relier').addEventListener('click', async (ev) => {
         if (!confirm('Recalculer toutes les dépendances de cet OF d\u2019après le modèle de gamme ?\nLes liens saisis à la main seront remplacés. Les créneaux déjà planifiés ne bougent pas.')) return;
         ev.target.disabled = true;
