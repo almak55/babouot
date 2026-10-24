@@ -151,6 +151,8 @@ async function replanifier(supabase, c, option, appliquer) {
     ok: true, option, appliquee: !!data.applique,
     tache: { debut: t.debut || null, fin: t.fin || null, personnes: gens.map((id) => (c.equipe.find((p) => p.id === id) || {}).nom).filter(Boolean) },
     of: { fin: data.resume.fin, delai: data.resume.delai, respecte_delai: data.resume.respecte_delai, retard_min: data.resume.retard_min },
+    bloquants: data.bloquants || [],
+    complet: data.resume.complet !== false,
   };
 }
 
