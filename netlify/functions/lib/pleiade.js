@@ -83,7 +83,7 @@ function construireGamme(ref, opts, pave) {
     return (e.predecesseurs || []).flatMap((p) => resoudre(p, vus));
   };
 
-  return actives.map((e) => {
+  const principales = actives.map((e) => {
     const preds = Array.from(new Set((e.predecesseurs || []).flatMap((p) => resoudre(p))));
     const simult = new Set((e.simultane || []).flatMap((p) => resoudre(p)));
     const dependances = {};
@@ -100,6 +100,14 @@ function construireGamme(ref, opts, pave) {
       notes: e.notes || null,
     };
   });
+  // Opérations ajoutées à la main (hors modèle) : en fin de gamme, sans lien imposé.
+  const deja = new Set(principales.map((g) => g.operation_code));
+  const extras = (Array.isArray(opts.operations_extra) ? opts.operations_extra : []).filter((c) => !deja.has(c));
+  extras.forEach((c, k) => principales.push({
+    code: `extra:${c}`, sequence: principales.length + 1, operation_code: c, libelle: c,
+    predecesseurs: [], predecesseurs_libelles: [], dependances: {}, machine_code: null, notes: null,
+  }));
+  return principales;
 }
 
 // Caractéristiques enregistrées sur l'OF (uniquement celles du catalogue).
@@ -126,7 +134,7 @@ function caracteristiquesOf(valeurs, opts) {
 // Toutes les étapes du modèle, avec indication de celles retenues par défaut (pour la liste à cocher).
 function etapesPossibles(ref, opts, pave) {
   return ref.modele.slice().sort((a, b) => a.ordre - b.ordre).map((e) => ({
-    code: e.code, libelle: e.libelle || e.operation_code, condition: e.condition, par_defaut: actif(e, opts, pave),
+    code: e.code, operation_code: e.operation_code, libelle: e.libelle || e.operation_code, condition: e.condition, par_defaut: actif(e, opts, pave),
   }));
 }
 
