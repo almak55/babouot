@@ -73,7 +73,7 @@ function sequencer(lignes, ecart, parJour) {
     const ct = !!p && norm(p.l.tete) !== norm(x.l.tete);
     if (cr) reglages++;
     if (ct) nettoyages++;
-    return { id: x.l.id, titre: x.l.titre, quantite: x.l.quantite, carte_dos: x.l.carte_dos, tete: x.l.tete, peau: x.l.peau, serie: x.serie, jour_bdm: Math.floor(i / parJour) + 1, change_reglage: cr, change_tete: ct, flags: x.l.flags, a_verifier: x.l.a_verifier };
+    return { id: x.l.id, titre: x.l.titre, quantite: x.l.quantite, mp: x.l.mp, carte_dos: x.l.carte_dos, tete: x.l.tete, peau: x.l.peau, serie: x.serie, jour_bdm: Math.floor(i / parJour) + 1, change_reglage: cr, change_tete: ct, flags: x.l.flags, a_verifier: x.l.a_verifier };
   });
   return { sequence, jours_bdm: Math.ceil(sequence.length / parJour), reglages, nettoyages, series: series.length };
 }
@@ -145,7 +145,7 @@ const handlerProtege = async (event) => {
         const res = await generer.handler({ httpMethod: 'POST', body: JSON.stringify({
           action: 'creer', categorie, titre: l.titre, quantite: l.quantite, delai: livraison,
           date_reception: dateReception(l.reception, livraison), couleur_tete: l.tete, couleur_peau: l.peau,
-          carte_dos: l.carte_dos, rang_priorite: (b.rang_depart || 1) + i, priorite: l.a_verifier ? 'haute' : 'normale',
+          carte_dos: l.carte_dos, nb_cahiers: l.mp, rang_priorite: (b.rang_depart || 1) + i, priorite: l.a_verifier ? 'haute' : 'normale',
         }) });
         const d = JSON.parse(res.body);
         if (res.statusCode !== 200) { resultats.push({ id: l.id, titre: l.titre, erreur: d.error || `HTTP ${res.statusCode}` }); continue; }
