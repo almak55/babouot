@@ -1210,7 +1210,7 @@
   function renderOrdres(){
     const wrap = el(`
       <div class="panel">
-        <div class="panel-head" style="flex-wrap:wrap;gap:10px 14px;"><h2>Ordres de fabrication</h2><div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto;"><button class="btn" id="of-pleiade-btn" style="padding:12px 26px;font-size:15px;font-weight:700;min-width:180px;border:none;color:#fff;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.18);background:#4338ca;"></button><button class="btn" id="of-cartonnes-btn" style="padding:12px 26px;font-size:15px;font-weight:700;min-width:180px;border:none;color:#fff;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.18);background:#b45309;"></button></div><div class="of-actions" style="flex:1 1 100%;display:flex;gap:5px;flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;padding-top:2px;"><button class="btn" id="couts-btn">Coûts & tarifs</button><button class="btn" id="import-lot">Importer des fiches (PDF)</button><button class="btn" id="pleiade-btn">Fiche Pléiade</button><button class="btn" id="coffret-btn">Coffrets</button><button class="btn" id="annuel-btn">Planning annuel Pléiade</button><button class="btn" id="reorg-btn">Réorganiser par priorité</button><button class="btn primary" id="new-of"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvel OF</button></div></div>
+        <div class="panel-head" style="flex-wrap:wrap;gap:10px 14px;"><h2>Ordres de fabrication</h2><div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto;"><button class="btn" id="of-pleiade-btn" style="padding:12px 26px;font-size:15px;font-weight:700;min-width:180px;border:none;color:#fff;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.18);background:#4338ca;"></button><button class="btn" id="of-cartonnes-btn" style="padding:12px 26px;font-size:15px;font-weight:700;min-width:180px;border:none;color:#fff;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.18);background:#b45309;"></button></div><div class="of-actions" style="flex:1 1 100%;display:flex;gap:5px;flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;padding-top:2px;"><button class="btn" id="couts-btn">Coûts & tarifs</button><button class="btn" id="import-lot">Importer des fiches (PDF)</button><button class="btn" id="pleiade-btn">Fiche Pléiade</button><button class="btn" id="coffret-btn">Coffrets</button><button class="btn" id="annuel-btn">Planning annuel Pléiade</button><button class="btn" id="reorg-btn">Réorganiser par priorité</button><button class="btn" id="report-btn" title="Reporter à aujourd'hui les tâches passées et non terminées">Reporter les tâches non terminées</button><button class="btn primary" id="new-of"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvel OF</button></div></div>
         <table class="row-table">
           <thead><tr><th></th><th>Production</th><th>Client</th><th>Qté</th><th>Délai</th><th>État</th><th>Avancement</th><th></th></tr></thead>
           <tbody id="of-tbody"></tbody>
@@ -6566,6 +6566,25 @@
       }
     });
   }
+
+  // Report automatique des tâches non terminées : une fois par jour à l'ouverture, ou à la demande (bouton).
+  async function reporterTachesNonTerminees(manuel) {
+    try {
+      const res = await fetch(`${API}/reporter-retards`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await res.json(); if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+      try { localStorage.setItem('report_auto_date', new Date().toLocaleDateString('sv-SE')); } catch (e) { /* stockage indisponible */ }
+      const faits = (d.ofs || []).filter(o => o.applique);
+      const echecs = (d.ofs || []).filter(o => o.retard && !o.applique);
+      if (faits.length) { toast(`${faits.length} OF replanifié(s) : tâches non terminées reportées (${faits.map(o => o.numero).join(', ')}).`); chargerDonneesReelles(); }
+      if (echecs.length) toast(`Report impossible pour ${echecs.map(o => o.numero + ' (' + (o.raison || '?') + ')').join(' ; ')}`, 'error');
+      if (manuel && !faits.length && !echecs.length) toast('Aucune tâche non terminée à reporter.');
+    } catch (e) { if (manuel) toast(`Report impossible : ${e.message}`, 'error'); }
+  }
+  document.addEventListener('click', (ev) => { if (ev.target.closest && ev.target.closest('#report-btn')) reporterTachesNonTerminees(true); });
+  setTimeout(() => {
+    let deja = null; try { deja = localStorage.getItem('report_auto_date'); } catch (e) { /* ignoré */ }
+    if (deja !== new Date().toLocaleDateString('sv-SE')) reporterTachesNonTerminees(false);
+  }, 4000);
 
   chargerDonneesReelles();
 })();
