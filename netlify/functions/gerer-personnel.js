@@ -14,7 +14,7 @@
 const { getSupabase } = require('./lib/supabaseclient');
 
 const rep = (code, o) => ({ statusCode: code, body: JSON.stringify(o) });
-const TEXTE = ['prenom', 'nom_famille', 'nom', 'poste', 'equipe', 'type_contrat', 'matricule', 'email', 'telephone', 'habilitations', 'notes'];
+const TEXTE = ['prenom', 'nom_famille', 'nom', 'poste', 'equipe', 'type_contrat', 'matricule', 'numero_badge', 'email', 'telephone', 'habilitations', 'notes'];
 const NOMBRE = ['heures_semaine', 'cout_horaire'];
 const DATES = ['date_entree', 'date_sortie'];
 const ROLES = ['opérateur', 'encadrement'];
@@ -50,6 +50,8 @@ async function remplacerCompetences(supabase, id, b) {
 
 const messageErreur = (e) => {
   const m = String(e.message || e);
+  if (/badge/i.test(m) && /duplicate key|unique/i.test(m)) return 'Ce numéro de badge est déjà attribué à une autre personne.';
+  if (/numero_badge/i.test(m) && /column|schema cache/i.test(m)) return `Colonne numero_badge introuvable : exécutez la migration 45 (migration_45_badge.sql) dans Supabase. (${m})`;
   if (/duplicate key|unique/i.test(m)) return 'Une personne porte déjà ce nom affiché : modifiez le « nom affiché » (ex. ajoutez l\'initiale du nom).';
   if (/column .* does not exist|schema cache/i.test(m)) return `Colonne introuvable (${m}). Exécutez la migration 33 (migration_33_personnel.sql) dans Supabase, puis lancez : notify pgrst, 'reload schema';`;
   return m;

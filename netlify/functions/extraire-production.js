@@ -16,6 +16,8 @@ const { getSupabase } = require('./lib/supabaseclient');
 
 const FORMATS_IMAGE = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+const lev = (a, b) => { const m = a.length, n = b.length; const d = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]); for (let j = 1; j <= n; j++) d[0][j] = j; for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); return d[m][n]; };
+const chiffres = (v) => String(v === null || v === undefined ? '' : v).replace(/\D/g, '').replace(/^0+(?=\d)/, '');
 const nombre = (v) => { if (v === null || v === undefined || v === '') return null; const n = Number(String(v).replace(/\s/g, '').replace(',', '.')); return Number.isFinite(n) ? n : null; };
 
 const handlerProtege = async (event) => {
@@ -59,13 +61,29 @@ const handlerProtege = async (event) => {
     const { data: planJour, error: pErr } = await supabase.from('planning_jour').select('gamme_operatoire_id').eq('date', jour).neq('statut', 'annulé').in('gamme_operatoire_id', ids);
     if (pErr) throw pErr;
     const ceJour = new Set(planJour.map((l) => l.gamme_operatoire_id));
+    // Personnel (badge de pointage) et affectations du jour : identifient l'auteur de la fiche et orientent le rapprochement.
+    let personnel = [];
+    { const r = await supabase.from('personnel').select('id, nom, prenom, nom_famille, numero_badge, actif');
+      if (r.error && /numero_badge|prenom|nom_famille/.test(r.error.message || '')) { const r2 = await supabase.from('personnel').select('id, nom, actif'); if (r2.error) throw r2.error; personnel = r2.data; }
+      else if (r.error) throw r.error; else personnel = r.data; }
+    personnel = personnel.filter((p) => p.actif !== false);
+    const nomPers = Object.fromEntries(personnel.map((p) => [p.id, p.nom]));
+    const equipeDe = {};   // gamme_id -> noms
+    { const { data: pj } = await supabase.from('planning_jour').select('id, gamme_operatoire_id, personnel_id').eq('date', jour).neq('statut', 'annulé').in('gamme_operatoire_id', ids);
+      const pjIds = (pj || []).map((l) => l.id);
+      const { data: liens } = pjIds.length ? await supabase.from('planning_jour_personnel').select('planning_jour_id, personnel_id').in('planning_jour_id', pjIds) : { data: [] };
+      (pj || []).forEach((l) => {
+        const noms = new Set([l.personnel_id, ...(liens || []).filter((x) => x.planning_jour_id === l.id).map((x) => x.personnel_id)].filter(Boolean).map((id) => nomPers[id]).filter(Boolean));
+        equipeDe[l.gamme_operatoire_id] = Array.from(new Set([...(equipeDe[l.gamme_operatoire_id] || []), ...noms]));
+      }); }
     const { data: dejaSaisi, error: sErr } = await supabase.from('production_jour').select('gamme_operatoire_id, date, quantite').in('gamme_operatoire_id', ids);
     if (sErr) throw sErr;
 
-    const liste = actives.map((g) => `${g.id} | ${g.ordres_fabrication.numero} | ${(g.ordres_fabrication.titres && g.ordres_fabrication.titres.nom) || ''} | ${(g.ordres_fabrication.titres && g.ordres_fabrication.titres.client) || ''} | ${g.operations ? g.operations.nom : ''} | ${g.machines ? g.machines.nom : 'sans machine'} | ${ceJour.has(g.id) ? 'planifiée ce jour' : '-'}`).join('\n');
+    const liste = actives.map((g) => `${g.id} | ${g.ordres_fabrication.numero} | ${(g.ordres_fabrication.titres && g.ordres_fabrication.titres.nom) || ''} | ${(g.ordres_fabrication.titres && g.ordres_fabrication.titres.client) || ''} | ${g.operations ? g.operations.nom : ''} | ${g.machines ? g.machines.nom : 'sans machine'} | ${ceJour.has(g.id) ? 'planifiée ce jour' : '-'}${(equipeDe[g.id] || []).length ? ' (équipe : ' + equipeDe[g.id].join(', ') + ')' : ''}`).join('\n');
 
     const systemPrompt = `Tu lis un relevé de production d'un atelier de reliure industrielle (tableau Excel, PDF, photo) et tu le rapproches des tâches connues de l'atelier. Réponds UNIQUEMENT avec un objet JSON valide, sans texte autour, sans balises markdown :
 {
+  "personne": { "badge": string | null, "nom": string | null },   // auteur de la fiche : numéro de badge de pointage (souvent écrit à côté de « Acompte » ou « Badge ») et nom/prénom écrits en tête
   "date": string | null,            // date de production lue dans le document (AAAA-MM-JJ, année ${new Date().getFullYear()} par défaut), null si absente
   "lignes": [ {
     "gamme_id": string | null,      // identifiant EXACT pris dans la liste ci-dessous, null si aucune tâche ne correspond
@@ -86,6 +104,7 @@ Règles :
 - Ne crée jamais d'identifiant. N'invente aucune quantité : null si absente.
 - Si la quantité est exprimée dans une autre unité que des exemplaires (cahiers, feuilles, mètres...), ne la convertis pas : quantite = null et explique-le dans commentaire.
 - Ignore les lignes de total, d'en-tête et les lignes vides.
+- Fiche individuelle (une personne, une journée) : « personne.badge » = le numéro de badge écrit en tête (chiffres uniquement), « personne.nom » = le nom ou prénom écrit. Un titre peut avoir deux lignes (réglage puis production/couture) : mets les heures de chaque ligne dans heures_reelles de la ligne concernée, la quantité sur la ligne de production, et précise « réglage » ou « production » dans commentaire. Les temps sont des heures décimales (0,50 = 30 min). Si une tâche de la liste est planifiée ce jour pour la personne de la fiche, privilégie-la.
 
 Tâches de l'atelier (gamme_id | OF | titre | client | opération | machine | planning) :
 ${liste}`;
@@ -141,7 +160,29 @@ ${liste}`;
       propositions.set(g.id, p);
     });
 
-    return { statusCode: 200, body: JSON.stringify({ date: dateDoc, propositions: Array.from(propositions.values()), non_rapprochees: nonRapprochees, notes: lu.notes || '' }) };
+    // ---- 4. Auteur de la fiche (badge en priorité, sinon nom) ----
+    const nomsDe = (p) => [p.nom, p.prenom, p.nom_famille, [p.prenom, p.nom_famille].filter(Boolean).join(' ')].filter(Boolean).map(norm);
+    const tol = (a, b) => (Math.min(a.length, b.length) >= 6 ? 2 : 1);   // écriture manuscrite : une ou deux lettres de différence tolérées
+    const pareil = (a, b) => a.length > 3 && b.length > 3 && lev(a, b) <= tol(a, b);
+    const proche = (lu, p) => { const x = norm(lu); if (!x) return false; return nomsDe(p).some((n) => n === x || pareil(n, x) || n.split(' ').some((t) => pareil(t, x)) || x.split(' ').some((t) => pareil(t, n) || n.split(' ').some((u) => pareil(t, u)))); };
+    const lue = lu.personne && typeof lu.personne === 'object' ? lu.personne : {};
+    const badgeLu = chiffres(lue.badge), nomLu = lue.nom ? String(lue.nom).trim() : '';
+    let personne = null; const alertes = [];
+    if (badgeLu || nomLu) {
+      const parBadge = badgeLu ? personnel.find((p) => chiffres(p.numero_badge) === badgeLu) : null;
+      if (parBadge) {
+        personne = { id: parBadge.id, nom: parBadge.nom, badge: badgeLu, methode: 'badge' };
+        if (nomLu && !proche(nomLu, parBadge)) alertes.push(`Le badge ${badgeLu} correspond à ${parBadge.nom}, mais la fiche porte le nom « ${nomLu} » : vérifiez la fiche.`);
+      } else {
+        const candidats = nomLu ? personnel.filter((p) => proche(nomLu, p)) : [];
+        if (badgeLu) alertes.push(`Badge ${badgeLu} inconnu : renseignez-le dans la fiche personnel de la bonne personne.`);
+        if (candidats.length === 1) { personne = { id: candidats[0].id, nom: candidats[0].nom, badge: badgeLu || null, methode: 'nom' }; alertes.push(`Personne reconnue par son nom (« ${nomLu} » → ${candidats[0].nom}), sans badge de confirmation.`); }
+        else if (candidats.length > 1) { personne = { id: null, nom: nomLu, badge: badgeLu || null, methode: 'ambigu', candidats: candidats.map((c) => c.nom) }; alertes.push(`« ${nomLu} » peut désigner plusieurs personnes (${candidats.map((c) => c.nom).join(', ')}) : le numéro de badge est nécessaire.`); }
+        else alertes.push(nomLu ? `Aucune personne ne correspond à « ${nomLu} ».` : 'Auteur de la fiche non identifié.');
+      }
+    }
+
+    return { statusCode: 200, body: JSON.stringify({ personne, alertes_personne: alertes, date: dateDoc, propositions: Array.from(propositions.values()), non_rapprochees: nonRapprochees, notes: lu.notes || '' }) };
   } catch (e) {
     console.error('extraire-production error:', e);
     return { statusCode: 500, body: JSON.stringify({ error: e.message || String(e) }) };
