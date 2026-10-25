@@ -3421,6 +3421,10 @@
       <div class="field"><label>Code</label><input id="m-code" value="${machine ? machine.code : ''}" placeholder="ex: SIGLOCH"></div>
       <div class="field"><label>Nom</label><input id="m-nom" value="${machine ? machine.nom : ''}" placeholder="ex: Sigloch"></div>
       <div class="field"><label>Opérations (cocher toutes celles que cette machine peut faire)</label><div class="op-list">${opsHtml}</div></div>
+      <div class="field"><label>Personnes mobilisées par cette machine <span class="plan-note">— conducteur + aides (ex. 3 = un conducteur et deux aides)</span></label><input id="m-nbpers" type="number" min="1" step="1" value="${machine && machine.nb_personnes ? machine.nb_personnes : 1}" style="max-width:120px;"></div>
+      ${estEdition ? `<div class="field"><label>Conducteurs de la machine <span class="plan-note">— le 1er est le titulaire ; les suivants sont proposés dans l'ordre s'il n'est pas libre</span></label>
+        <div id="m-cond"></div>
+        <div style="display:flex;gap:8px;margin-top:6px;"><select id="m-cond-add" style="flex:1;"></select><button class="btn" type="button" id="m-cond-btn">Ajouter</button></div></div>` : ''}
       ${estEdition ? `<div class="field"><label><input type="checkbox" id="m-actif" ${machine.actif ? 'checked' : ''}> Machine active</label></div>
       <div class="field"><label>Temps de production de cette machine <span class="plan-note">— mise en route, réglage, cadence, nettoyage (par type de production)</span></label><button class="btn" type="button" id="m-profils">Configurer les temps de production…</button></div>` : ''}
       <div class="field"><label>Notes</label><input id="m-notes" value="${machine && machine.notes ? machine.notes : ''}" placeholder="optionnel"></div>
@@ -3429,6 +3433,30 @@
     `);
 
     if (estEdition) document.getElementById('m-profils').addEventListener('click', () => ouvrirProfilsMachine(machine, refs));
+    // Conducteurs : liste ordonnée (titulaire en premier)
+    let conds = estEdition ? (machine.conducteurs || []).map(c => ({ id: c.personnel_id, nom: c.nom })) : [];
+    const condsAvant = conds.map(c => c.id).join(',');
+    const dessinerConds = () => {
+      const zone = document.getElementById('m-cond'); if (!zone) return;
+      zone.innerHTML = conds.length ? conds.map((c, i) => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px solid var(--line);">
+          <span style="width:84px;font-size:12px;color:var(--muted);">${i === 0 ? 'Titulaire' : 'Suppléant ' + i}</span><span style="flex:1;">${esc(c.nom)}</span>
+          <button class="btn" type="button" data-cond-haut="${i}" ${i === 0 ? 'disabled' : ''} style="padding:1px 8px;">▲</button>
+          <button class="btn" type="button" data-cond-bas="${i}" ${i === conds.length - 1 ? 'disabled' : ''} style="padding:1px 8px;">▼</button>
+          <button class="btn" type="button" data-cond-ret="${i}" style="padding:1px 8px;color:var(--danger,#c0392b);">✕</button></div>`).join('')
+        : '<div class="plan-note">Aucun conducteur défini : l\'affectation automatique ne pourra pas proposer de conducteur.</div>';
+      zone.querySelectorAll('[data-cond-haut]').forEach(b => b.addEventListener('click', () => { const i = +b.dataset.condHaut; [conds[i - 1], conds[i]] = [conds[i], conds[i - 1]]; dessinerConds(); }));
+      zone.querySelectorAll('[data-cond-bas]').forEach(b => b.addEventListener('click', () => { const i = +b.dataset.condBas; [conds[i + 1], conds[i]] = [conds[i], conds[i + 1]]; dessinerConds(); }));
+      zone.querySelectorAll('[data-cond-ret]').forEach(b => b.addEventListener('click', () => { conds.splice(+b.dataset.condRet, 1); dessinerConds(); }));
+      const sel = document.getElementById('m-cond-add');
+      sel.innerHTML = '<option value="">— choisir une personne —</option>' + refs.personnel.filter(p => !conds.some(c => c.id === p.id)).map(p => `<option value="${p.id}">${esc(p.nom)}${p.poste ? ' — ' + esc(p.poste) : ''}</option>`).join('');
+    };
+    if (estEdition) {
+      dessinerConds();
+      document.getElementById('m-cond-btn').addEventListener('click', () => {
+        const sel = document.getElementById('m-cond-add'); if (!sel.value) return;
+        const p = refs.personnel.find(x => x.id === sel.value); if (p) conds.push({ id: p.id, nom: p.nom }); dessinerConds();
+      });
+    }
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
     document.getElementById('m-submit').addEventListener('click', async () => {
       const code = document.getElementById('m-code').value.trim();
@@ -3443,9 +3471,12 @@
       }
       msg.innerHTML = `<div class="msg">Enregistrement en cours…</div>`;
       try {
+        const nbPers = Math.max(1, parseInt(document.getElementById('m-nbpers').value, 10) || 1);
         const payload = estEdition
           ? { id: machine.id, code, nom, operation_codes, notes, actif: document.getElementById('m-actif').checked }
           : { code, nom, operation_codes, notes };
+        if (nbPers !== (estEdition ? (machine.nb_personnes || 1) : 1)) payload.nb_personnes = nbPers;
+        if (estEdition && conds.map(c => c.id).join(',') !== condsAvant) payload.conducteurs = conds.map(c => c.id);
         const res = await fetch(`${API}/gerer-machines`, {
           method: estEdition ? 'PUT' : 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -6178,7 +6209,10 @@
       <div id="m-etape-note"></div>
       <div class="field"><label>Machine <span class="plan-note">— laissez « Aucune machine » pour un travail manuel</span></label><select id="m-machine">${machineOptions}</select><div id="m-dispo" class="dispo-strip"></div></div>
       <div class="field"><label>Jour de début <span class="plan-note">— proposé automatiquement selon les dépendances</span></label><input id="m-date" type="date" value="${dateIso}"><div id="m-date-note" class="plan-note" style="margin-top:4px;"></div></div>
-      <div class="field"><label>Personnel (optionnel — cocher une ou plusieurs personnes)</label><div class="op-list" id="m-personnel-list">${persCases}</div></div>
+      <div class="field"><label>Personnel <span class="plan-note">— cocher une ou plusieurs personnes</span></label>
+        <div style="margin-bottom:6px;"><button class="btn" type="button" id="m-prop-btn">Proposer le personnel</button></div>
+        <div id="m-prop" class="plan-note" style="margin-bottom:6px;"></div>
+        <div class="op-list" id="m-personnel-list">${persCases}</div></div>
       <div id="m-msg"></div>
       <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">Affecter</button></div>
     `);
@@ -6290,7 +6324,8 @@
         if (num !== suggestionNum) return;   // une autre étape a été choisie entre-temps
         if (!res.ok) throw new Error(r.error || 'Erreur inconnue');
         document.getElementById('m-date').value = r.date;
-        majDispo(true);
+        await majDispo(true);
+        proposerPersonnel(true);
         if (r.bloques && r.bloques.length) {
           note.innerHTML = `<span style="color:var(--danger);">À planifier d'abord : ${r.bloques.map(esc).join(', ')}.</span>`;
         } else {
@@ -6298,6 +6333,46 @@
         }
       } catch (e) { if (num === suggestionNum) note.textContent = ''; }
     }
+    // Proposition automatique du personnel (conducteur de la machine + aides disponibles).
+    let heureDebutProposee = null, persTouche = false, propNum = 0;
+    document.getElementById('m-personnel-list').addEventListener('change', () => { persTouche = true; });
+    async function proposerPersonnel(auto) {
+      const zone = document.getElementById('m-prop');
+      const id = etapeSelect.value, date = document.getElementById('m-date').value;
+      if (!id || !date || statutChoisi() === 'planifié') { zone.innerHTML = ''; return; }
+      if (auto && persTouche) return;   // ne pas écraser une sélection faite à la main
+      const num = ++propNum;
+      zone.textContent = 'Recherche du personnel disponible…';
+      try {
+        const machine = document.getElementById('m-machine').value;
+        const res = await fetch(`${API}/proposer-affectation?gamme_id=${id}&date=${date}${machine ? '&machine_id=' + machine : ''}`);
+        const r = await res.json();
+        if (num !== propNum) return;
+        if (!res.ok) throw new Error(r.error || 'Erreur inconnue');
+        const cases = Array.from(document.querySelectorAll('#m-personnel-list input'));
+        cases.forEach(c => { c.checked = false; });
+        const ids = [r.conducteur && r.conducteur.id, ...r.aides.map(a => a.id)].filter(Boolean);
+        ids.forEach(pid => { const c = cases.find(x => x.value === pid); if (c) c.checked = true; });
+        persTouche = false;
+        heureDebutProposee = r.debut_suggere && r.debut_suggere.date === date ? r.debut_suggere.heure : null;
+        let h = `<div>Équipe requise : <strong>${r.equipe_requise}</strong> personne(s)${r.prioritaire ? ' — OF prioritaire' : ''}.</div>`;
+        if (r.conducteur) {
+          h += `<div>🧑‍🏭 Conducteur : <strong>${esc(r.conducteur.nom)}</strong> (${r.conducteur.rang === 1 ? 'titulaire' : 'suppléant ' + (r.conducteur.rang - 1)}) — ${esc(r.conducteur.raison || '')}</div>`;
+        } else if (machine) {
+          h += `<div style="color:var(--danger);">Aucun conducteur disponible pour cette machine sur ce créneau.</div>`;
+        }
+        if (r.debut_suggere) {
+          if (heureDebutProposee) h += `<div>⏱ Début ajusté à <strong>${esc(r.debut_suggere.heure)}</strong> (fin de la tâche en cours du conducteur).</div>`;
+          else h += `<div style="color:var(--danger);">Le conducteur n'est libre que le ${esc(r.debut_suggere.date)} à ${esc(r.debut_suggere.heure)} : changez le jour de début pour en tenir compte.</div>`;
+        }
+        if (r.aides.length) h += `<div>Aides : ${r.aides.map(a => esc(a.nom) + (a.competent ? '' : ' (sans compétence enregistrée)')).join(', ')}.</div>`;
+        (r.avertissements || []).forEach(w => { h += `<div style="color:var(--danger);">⚠ ${esc(w)}</div>`; });
+        zone.innerHTML = h;
+      } catch (e) { if (num === propNum) zone.innerHTML = `<span style="color:var(--danger);">Proposition indisponible (${esc(e.message)}).</span>`; }
+    }
+    document.getElementById('m-prop-btn').addEventListener('click', () => { persTouche = false; proposerPersonnel(false); });
+    document.getElementById('m-machine').addEventListener('change', () => proposerPersonnel(true));
+    document.getElementById('m-date').addEventListener('change', () => proposerPersonnel(true));
     // Opération manuelle : pas de machine à choisir.
     function ajusterMachine() {
       const opt = etapeSelect.selectedOptions && etapeSelect.selectedOptions[0];
@@ -6329,7 +6404,7 @@
         const res = await fetch(`${API}/affecter-planning`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gamme_operatoire_id, machine_id: machine_id || null, date, personnel_ids }),
+          body: JSON.stringify({ gamme_operatoire_id, machine_id: machine_id || null, date, personnel_ids, ...(heureDebutProposee ? { heure_debut: heureDebutProposee } : {}) }),
         });
         let data = await res.json();
         if (res.status === 409 && data.conflit === 'dependance') {
@@ -6340,7 +6415,7 @@
           }
           const res2 = await fetch(`${API}/affecter-planning`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ gamme_operatoire_id, machine_id: machine_id || null, date, personnel_ids, forcer: true }),
+            body: JSON.stringify({ gamme_operatoire_id, machine_id: machine_id || null, date, personnel_ids, forcer: true, ...(heureDebutProposee ? { heure_debut: heureDebutProposee } : {}) }),
           });
           data = await res2.json();
           if (!res2.ok) throw new Error(data.error || 'Erreur inconnue');
