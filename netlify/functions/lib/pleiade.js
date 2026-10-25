@@ -64,7 +64,11 @@ function actif(etape, opts, pave) {
 
 // Gamme du modèle : étapes actives, avec prédécesseurs recalculés (les étapes inactives sont sautées).
 function construireGamme(ref, opts, pave) {
-  const modele = ref.modele;
+  // opts.liens { code: { predecesseurs: [codes], simultane: [codes] } } : liens modifiés à la main pour cet OF (prioritaires sur le modèle).
+  const liens = opts.liens && typeof opts.liens === 'object' ? opts.liens : {};
+  const modele = ref.modele.map((e) => (liens[e.code] && Array.isArray(liens[e.code].predecesseurs)
+    ? { ...e, predecesseurs: liens[e.code].predecesseurs.filter((q) => typeof q === 'string'), simultane: (Array.isArray(liens[e.code].simultane) ? liens[e.code].simultane : []).filter((q) => typeof q === 'string') }
+    : e));
   const parCode = Object.fromEntries(modele.map((e) => [e.code, e]));
   // opts.etapes (liste de codes d'étapes du modèle) : choix explicite de l'utilisateur, prioritaire sur les variantes.
   const choix = Array.isArray(opts.etapes) ? new Set(opts.etapes) : null;
