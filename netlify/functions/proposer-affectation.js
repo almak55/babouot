@@ -66,15 +66,14 @@ const handlerProtege = async (event) => {
       : (etape.phases || []).map((p) => ({ nom: p.nom, duree_h: Number(p.duree_h), nb_personnes: Number(p.nb_personnes) || 1 })));
     const chiffree = phases.some((p) => p.duree_h > 0);
     const date = q.date || (await jourDebutSuggere(supabase, gamme.id, aujourdhuiParis())).date;
-    const faireCreneaux = (d) => (chiffree ? decouper(d, phases, cal) : [{ date: d, heure_debut: null, heure_fin: null, phase: null }]);
+    const faireCreneaux = (d, debutMin) => (chiffree ? decouper(d, phases, cal, debutMin) : [{ date: d, heure_debut: null, heure_fin: null, phase: null }]);
     let creneaux = faireCreneaux(date);
     const chercherJour = q.chercher_jour === '1';
     if (!chiffree) avertissements.push('Étape non chiffrée : elle est comptée sur la journée entière.');
-    let dates = Array.from(new Set(creneaux.map((c) => c.date)));
-    if (chercherJour) {   // fenêtre de recherche : 90 jours calendaires à partir du jour demandé
-      dates = [];
-      for (let k = 0; k < 90; k++) { const mn = PL.enMinutes(date, '00:00') + k * PL.MIN_JOUR; if (PL.estOuvre(mn)) dates.push(PL.dateDe(mn)); }
-    }
+    // Fenêtre de données : 90 jours si on cherche un jour libre, sinon ~3 semaines (pour pouvoir enchaîner après une tâche en cours).
+    const dates = [];
+    for (let k = 0; k < (chercherJour ? 90 : 21); k++) { const mn = PL.enMinutes(date, '00:00') + k * PL.MIN_JOUR; if (PL.estOuvre(mn)) dates.push(PL.dateDe(mn)); }
+    creneaux.forEach((c) => { if (!dates.includes(c.date)) dates.push(c.date); });
 
     // Équipe requise : réglage de la machine, sinon le plus grand effectif des phases chiffrées
     let machine = null;
@@ -138,6 +137,25 @@ const handlerProtege = async (event) => {
       return { statut: 'occupe', motif: libelle };
     };
 
+    // « Libre après sa tâche » : on décale réellement l'étape à cette heure-là et on revérifie (autre tâche plus tard,
+    // machine prise…). Résultat : soit libre à une heure confirmée, soit occupé.
+    const evaluerEnchaine = (pid) => {
+      let res = evaluer(pid);
+      if (res.statut !== 'libre_apres') return res;
+      const base = creneaux;
+      try {
+        for (let i = 0; i < 8; i++) {
+          const { date: d, heure } = res.libre_des;
+          creneaux = faireCreneaux(d, PL.hhmm(heure));
+          if (machineOccupee()) return { statut: 'occupe', motif: `la machine est déjà prise à partir de ${jjmm(d)} ${heure}` };
+          const r2 = evaluer(pid);
+          if (r2.statut === 'libre') return { ...res, libre_des: { date: d, heure } };
+          if (r2.statut !== 'libre_apres') return r2;
+          res = r2;
+        }
+        return { statut: 'occupe', motif: 'pas de plage assez longue ce jour-là' };
+      } finally { creneaux = base; }
+    };
     // Conducteurs de la machine : titulaire puis suppléants (uniquement les personnes avec un rang).
     // Les autres personnes liées à la machine sont seulement « habilitées » : elles sont proposées comme aides.
     const lienMachine = machineId ? pmRes.data.filter((x) => x.machine_id === machineId) : [];
@@ -145,7 +163,7 @@ const handlerProtege = async (event) => {
     const habilitesIds = new Set(lienMachine.filter((x) => x.rang === null || x.rang === undefined).map((x) => x.personnel_id));
     const nomDe = (pid) => (persRes.data.find((p) => p.id === pid) || {}).nom || '?';
     const calcConducteurs = () => ordreC.filter((x) => persRes.data.some((p) => p.id === x.personnel_id)).map((x) => ({
-      id: x.personnel_id, nom: nomDe(x.personnel_id), rang: x.rang, titulaire: x.rang === 1, ...evaluer(x.personnel_id),
+      id: x.personnel_id, nom: nomDe(x.personnel_id), rang: x.rang, titulaire: x.rang === 1, ...evaluerEnchaine(x.personnel_id),
     }));
     const machineOccupee = () => !!machineId && (
       lignes.some((l) => l.machine_id === machineId && creneaux.some((m) => m.date === l.date && chevauche(bornes(m), bornes(l))))
@@ -170,6 +188,7 @@ const handlerProtege = async (event) => {
         .sort((a, b) => (a.libre_des.date + a.libre_des.heure).localeCompare(b.libre_des.date + b.libre_des.heure));
       conducteur = apres[0] || null;
     }
+    if (conducteur && conducteur.statut === 'libre_apres') creneaux = faireCreneaux(conducteur.libre_des.date, PL.hhmm(conducteur.libre_des.heure));   // aides évaluées sur le créneau réellement décalé
     if (machineId && !conducteurs.length) avertissements.push('Aucun conducteur défini pour cette machine : renseignez-les dans la fiche de la machine.');
     if (machineId && conducteurs.length && !conducteur) avertissements.push('Aucun conducteur de cette machine n\'est disponible sur ces créneaux.');
     if (conducteur) conducteur.raison = conducteur.statut === 'libre'
