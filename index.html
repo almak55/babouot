@@ -715,7 +715,7 @@
     if (!renouvellement) {
       renouvellement = (async () => {
         try {
-          const r = await original('/.netlify/functions/connexion', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: sess.refresh_token }) });
+          const r = await original('/.netlify/functions/connexion', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: ((lireSession() || sess).refresh_token) }) });   // toujours le jeton le plus récent (autre onglet, requêtes simultanées)
           if (!r.ok) return null;
           const d = await r.json(); ecrireSession(d); return d;
         } catch (e) { return null; } finally { setTimeout(() => { renouvellement = null; }, 0); }
@@ -863,6 +863,16 @@
     const a = document.getElementById('avatar'); if (a) a.addEventListener('click', () => ouvrirProfil(false));
     chargerProfil();
   }
+  // Garde la session ouverte tant que la page est utilisée : renouvellement discret avant l'expiration du jeton,
+  // et à chaque retour sur l'onglet (ordinateur en veille, onglet resté en arrière-plan…).
+  const entretenirSession = async () => {
+    const sess = lireSession();
+    if (!sess || !sess.refresh_token) return;
+    if (sess.expires_at && sess.expires_at - Date.now() / 1000 < 20 * 60) await renouveler(sess);
+  };
+  setInterval(entretenirSession, 5 * 60 * 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) entretenirSession(); });
+  window.addEventListener('online', entretenirSession);
   let lance = false; const unefois = () => { if (!lance) { lance = true; demarrer(); } };
   document.addEventListener('DOMContentLoaded', unefois);
   if (document.readyState !== 'loading') unefois();
