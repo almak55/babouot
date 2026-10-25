@@ -2,7 +2,8 @@
 //
 // GET  /.netlify/functions/gerer-machines
 //   -> liste toutes les machines (actives et inactives) avec la liste
-//      de leurs opérations (une machine peut en faire plusieurs).
+//      de leurs opérations (une machine peut en faire plusieurs), leur équipe requise (nb_personnes)
+//      et leurs conducteurs : [{ personnel_id, nom, rang }] (rang 1 = titulaire, puis suppléants).
 //
 // POST /.netlify/functions/gerer-machines
 //   body : { code, nom, operation_codes?: string[], notes? }
@@ -10,7 +11,8 @@
 //      opérations existantes (ex: ['DORURE', 'FINITION']).
 //
 // PUT  /.netlify/functions/gerer-machines
-//   body : { id, code?, nom?, operation_codes?: string[], actif?, notes? }
+//   body : { id, code?, nom?, operation_codes?: string[], actif?, notes?, nb_personnes?: n,
+//            conducteurs?: [personnel_id, ...] (dans l'ordre : titulaire d'abord ; remplace la liste) }
 //   -> modifie une machine existante. Si operation_codes est fourni,
 //      remplace entièrement l'ensemble de ses opérations (liste vide
 //      = plus aucune opération rattachée).
@@ -49,13 +51,24 @@ const handlerProtege = async (event) => {
     if (event.httpMethod === 'GET') {
       const { data, error } = await supabase
         .from('machines')
-        .select('id, code, nom, actif, notes, machines_operations(operations(code, nom))')
+        .select('*, machines_operations(operations(code, nom))')
         .order('code');
       if (error) throw error;
+      // Conducteurs (migration 42 : colonne rang ; sans elle, la liste est simplement non ordonnée).
+      const [pmRes, persRes] = await Promise.all([
+        supabase.from('personnel_machines').select('*'),
+        supabase.from('personnel').select('id, nom'),
+      ]);
+      const nomDe = Object.fromEntries((persRes.data || []).map((p) => [p.id, p.nom]));
+      const conducteursDe = (mid) => (pmRes.data || []).filter((x) => x.machine_id === mid)
+        .map((x) => ({ personnel_id: x.personnel_id, nom: nomDe[x.personnel_id] || '?', rang: x.rang ?? null }))
+        .sort((a, b) => (a.rang ?? 1e9) - (b.rang ?? 1e9) || a.nom.localeCompare(b.nom, 'fr'));
       return {
         statusCode: 200,
         body: JSON.stringify(data.map((m) => ({
           id: m.id, code: m.code, nom: m.nom, actif: m.actif, notes: m.notes,
+          nb_personnes: m.nb_personnes || 1,
+          conducteurs: conducteursDe(m.id),
           operations: m.machines_operations.map((mo) => mo.operations),
         }))),
       };
@@ -63,7 +76,7 @@ const handlerProtege = async (event) => {
 
     if (event.httpMethod === 'POST') {
       const body = JSON.parse(event.body || '{}');
-      const { code, nom, operation_codes, notes } = body;
+      const { code, nom, operation_codes, notes, nb_personnes: nbPers } = body;
       if (!code || !nom) {
         return { statusCode: 400, body: JSON.stringify({ error: 'code et nom sont requis.' }) };
       }
@@ -77,7 +90,7 @@ const handlerProtege = async (event) => {
 
       const { data: machine, error } = await supabase
         .from('machines')
-        .insert({ code, nom, notes: notes || null })
+        .insert({ code, nom, notes: notes || null, ...(Number(nbPers) > 1 ? { nb_personnes: Math.round(Number(nbPers)) } : {}) })
         .select('id, code, nom')
         .single();
       if (error) {
@@ -99,7 +112,7 @@ const handlerProtege = async (event) => {
 
     if (event.httpMethod === 'PUT') {
       const body = JSON.parse(event.body || '{}');
-      const { id, code, nom, operation_codes, actif, notes } = body;
+      const { id, code, nom, operation_codes, actif, notes, nb_personnes, conducteurs } = body;
       if (!id) {
         return { statusCode: 400, body: JSON.stringify({ error: 'id requis.' }) };
       }
@@ -109,6 +122,11 @@ const handlerProtege = async (event) => {
       if (nom !== undefined) updates.nom = nom;
       if (actif !== undefined) updates.actif = actif;
       if (notes !== undefined) updates.notes = notes;
+      if (nb_personnes !== undefined) {
+        const n = Math.round(Number(nb_personnes));
+        if (!Number.isFinite(n) || n < 1) return { statusCode: 400, body: JSON.stringify({ error: 'nb_personnes : entier ≥ 1 attendu.' }) };
+        updates.nb_personnes = n;
+      }
 
       if (Object.keys(updates).length > 0) {
         const { error } = await supabase.from('machines').update(updates).eq('id', id);
@@ -117,6 +135,25 @@ const handlerProtege = async (event) => {
             return { statusCode: 409, body: JSON.stringify({ error: `Le code "${code}" est déjà utilisé par une autre machine.` }) };
           }
           throw error;
+        }
+      }
+
+      if (Array.isArray(conducteurs)) {
+        // Liste ordonnée : titulaire d'abord. On conserve le niveau déjà saisi des personnes maintenues.
+        const ids = Array.from(new Set(conducteurs.filter(Boolean)));
+        const { data: existants, error: eEx } = await supabase.from('personnel_machines').select('*').eq('machine_id', id);
+        if (eEx) throw eEx;
+        const aRetirer = existants.filter((x) => !ids.includes(x.personnel_id)).map((x) => x.personnel_id);
+        if (aRetirer.length) {
+          const { error: eDel } = await supabase.from('personnel_machines').delete().eq('machine_id', id).in('personnel_id', aRetirer);
+          if (eDel) throw eDel;
+        }
+        for (let i = 0; i < ids.length; i++) {
+          const existe = existants.some((x) => x.personnel_id === ids[i]);
+          const r = existe
+            ? await supabase.from('personnel_machines').update({ rang: i + 1 }).eq('machine_id', id).eq('personnel_id', ids[i])
+            : await supabase.from('personnel_machines').insert({ machine_id: id, personnel_id: ids[i], rang: i + 1 });
+          if (r.error) throw r.error;
         }
       }
 

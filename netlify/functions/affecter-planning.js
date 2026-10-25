@@ -8,6 +8,7 @@
 //   machine_id: "uuid",
 //   personnel_ids: ["uuid", ...]   // une ou plusieurs personnes (optionnel)
 //   personnel_id: "uuid"           // ancien format, toujours accepté
+//   heure_debut?: "HH:MM"          // démarrer le 1er jour à cette heure (étape chiffrée)
 // }
 //
 // Affecte une étape de gamme opératoire à une machine, à UNE ou
@@ -22,6 +23,7 @@ const { getSupabase } = require('./lib/supabaseclient');
 const { jourDebutSuggere, aujourdhuiParis } = require('./lib/debut-etape');
 const PL = require('./lib/planification');
 const { calculerEtapes } = require('./lib/durees');
+const { decouper: decouperCommun } = require('./lib/decoupe');
 
 const handlerProtege = async (event) => {
   try {
@@ -118,31 +120,11 @@ const handlerProtege = async (event) => {
       : (etapeCalc.phases || []).map((p) => ({ nom: p.nom, duree_h: Number(p.duree_h) })));
     const avecDuree = phasesEtape.some((p) => p.duree_h > 0);
 
-    // Découpe la durée en créneaux horaires à partir de `jourDebut`, en sautant la pause et les jours non ouvrés.
-    const decouper = (jourDebut) => {
-      const dMin = PL.hhmm(cal.heure_debut), fMin = PL.hhmm(cal.heure_fin);
-      const pD = PL.hhmm(cal.pause_debut), pF = pD + Number(cal.pause_minutes);
-      const fenetres = [[dMin, pD], [pF, fMin]];
-      const hh = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-      let jour = PL.debutDeJour(PL.enMinutes(jourDebut, '00:00'));
-      while (!PL.estOuvre(jour)) jour += PL.MIN_JOUR;
-      let f = 0, curseur = fenetres[0][0];
-      const morceaux = [];
-      for (const ph of phasesEtape) {
-        let reste = Math.round(ph.duree_h * 60);
-        let garde = 0;
-        while (reste > 0 && garde++ < 2000) {
-          if (f >= fenetres.length) { f = 0; jour += PL.MIN_JOUR; while (!PL.estOuvre(jour)) jour += PL.MIN_JOUR; curseur = fenetres[0][0]; }
-          const [wd, wf] = fenetres[f];
-          if (curseur < wd) curseur = wd;
-          if (curseur >= wf) { f++; if (f < fenetres.length) curseur = fenetres[f][0]; continue; }
-          const pris = Math.min(reste, wf - curseur);
-          morceaux.push({ date: PL.dateDe(jour), heure_debut: hh(curseur), heure_fin: hh(curseur + pris), phase: ph.nom });
-          curseur += pris; reste -= pris;
-        }
-      }
-      return morceaux;
-    };
+    // Découpe la durée en créneaux horaires à partir de `jourDebut` (pause et jours non ouvrés sautés).
+    // heure_debut (facultatif, « HH:MM ») : le 1er jour, on commence à cette heure (ex. dès la fin de la tâche précédente du conducteur).
+    const dateDemandee = date;
+    const heureDebutMin = /^\d{1,2}:\d{2}/.test(String(body.heure_debut || '')) ? PL.hhmm(String(body.heure_debut).slice(0, 5)) : undefined;
+    const decouper = (jourDebut) => decouperCommun(jourDebut, phasesEtape, cal, jourDebut === dateDemandee ? heureDebutMin : undefined);
     const chevauche = (m, ligne) => !ligne.heure_debut || !ligne.heure_fin
       || (PL.hhmm(String(ligne.heure_debut).slice(0, 5)) < PL.hhmm(m.heure_fin) && PL.hhmm(m.heure_debut) < PL.hhmm(String(ligne.heure_fin).slice(0, 5)));
 
