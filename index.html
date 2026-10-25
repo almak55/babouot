@@ -3865,7 +3865,7 @@
     const dessiner = () => {
       const lignes = donnees.profils.map((p, i) => `
         <div class="profil-ligne"><div><strong>${esc(p.operation)}</strong> · ${esc(nomType(p.type_production))}<br>
-          <span class="plan-note">mise en route ${nbm(p.mise_en_route_min)} · réglage ${nbm(p.reglage_min)}${p.reglage_fer_min ? ' + ' + nbm(p.reglage_fer_min) + '/fer' : ''} · roulage ${p.cadence_par_h ? p.cadence_par_h + ' ' + (p.unite_cadence || 'ex.') + '/h' : '—'}${p.quantite_formule ? ' (sur ' + esc(p.quantite_formule) + ')' : ''} · nettoyage ${nbm(p.nettoyage_min)}</span></div>
+          ${p.mutualiser ? '<span class="tag ok" title="Une seule mise en route et un seul nettoyage par journée">1 MER / 1 nettoyage par jour</span> ' : ''}<span class="plan-note">mise en route ${nbm(p.mise_en_route_min)} · réglage ${nbm(p.reglage_min)}${p.reglage_fer_min ? ' + ' + nbm(p.reglage_fer_min) + '/fer' : ''} · roulage ${p.cadence_par_h ? p.cadence_par_h + ' ' + (p.unite_cadence || 'ex.') + '/h' : '—'}${p.quantite_formule ? ' (sur ' + esc(p.quantite_formule) + ')' : ''} · nettoyage ${nbm(p.nettoyage_min)}</span></div>
           <span><button class="btn" data-modif="${i}">Modifier</button> <button class="btn" data-suppr="${i}">Supprimer</button></span></div>`).join('');
       $('pf-liste').innerHTML = lignes || '<div class="empty">Aucun profil enregistré pour cette machine.</div>';
       $('pf-liste').querySelectorAll('[data-modif]').forEach(b => b.addEventListener('click', () => {
@@ -3873,7 +3873,7 @@
         $('pf-op').value = p.operation_id; $('pf-type').value = p.type_production || '';
         $('pf-mer').value = p.mise_en_route_min ?? ''; $('pf-reg').value = p.reglage_min ?? ''; $('pf-regfer').value = p.reglage_fer_min ?? '';
         $('pf-cad').value = p.cadence_par_h ?? ''; $('pf-net').value = p.nettoyage_min ?? ''; $('pf-pers').value = p.nb_personnes || 1; $('pf-pp').value = p.par_passage || 1;
-        $('pf-unite').value = p.unite_cadence || ''; $('pf-formule').value = p.quantite_formule || ''; majUnite();
+        $('pf-unite').value = p.unite_cadence || ''; $('pf-formule').value = p.quantite_formule || ''; $('pf-mut').checked = !!p.mutualiser; $('pf-mut').dataset.touche = ''; majUnite();
         calcul();
       }));
       $('pf-liste').querySelectorAll('[data-suppr]').forEach(b => b.addEventListener('click', async () => {
@@ -3910,6 +3910,7 @@
           <div class="field" style="grid-column: 1 / -1;"><label>Quantité à traiter <span class="plan-note">— formule d'après la fiche ; vide = quantité de l'OF</span></label><input id="pf-formule" class="mono" placeholder="quantite"></div>
           <div class="field"><label id="pf-cad-label">Roulage : cadence moyenne (exemplaires / h)</label><input id="pf-cad" type="number" min="0" step="any"></div>
           <div class="field"><label>Nettoyage (min)</label><input id="pf-net" type="number" min="0" step="any"></div>
+          <label style="grid-column: 1 / -1;display:flex;gap:8px;align-items:flex-start;font-size:13px;"><input type="checkbox" id="pf-mut" style="margin-top:3px;"><span><strong>Une seule mise en route et un seul nettoyage par journée</strong> — quand plusieurs travaux de cette opération se suivent sur la même machine, seul le premier garde sa mise en route et seul le dernier garde son nettoyage ; chaque travail garde son réglage et sa production. <span class="plan-note">(réglage propre à l'opération : valable pour toutes ses machines)</span></span></label>
           <div class="field"><label>Personnes au roulage</label><input id="pf-pers" type="number" min="1" step="1" value="1"></div>
           <div class="field"><label>Exemplaires par passage <span class="plan-note">— 1 = un à la fois ; 2 = deux en même temps (la cadence compte alors des passages/h)</span></label><input id="pf-pp" type="number" min="1" step="1" value="1"></div>
           <div class="field"><label>Aperçu : nombre de fers</label><input id="pf-fers" type="number" min="0" step="1" value="3"></div>
@@ -3949,6 +3950,9 @@
     }
     ['pf-mer', 'pf-reg', 'pf-regfer', 'pf-fers', 'pf-cad', 'pf-net', 'pf-qte'].forEach(id => $(id).addEventListener('input', calcul));
     $('pf-pp').addEventListener('input', majUnite);
+    // Le réglage « une seule mise en route / un seul nettoyage » est propre à l'opération : on ne l'envoie que si vous l'avez modifié.
+    $('pf-mut').addEventListener('change', () => { $('pf-mut').dataset.touche = '1'; });
+    $('pf-op').addEventListener('change', () => { const q = donnees.profils.find(x => x.operation_id === $('pf-op').value); $('pf-mut').checked = !!(q && q.mutualiser); $('pf-mut').dataset.touche = ''; });
     $('pf-newtype').addEventListener('click', async () => {
       const libelle = prompt('Nom du nouveau type de production (ex. Brochure) :');
       if (!libelle || !libelle.trim()) return;
@@ -3970,7 +3974,7 @@
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             machine_id: machine.id, operation_id: $('pf-op').value, type_production: $('pf-type').value || null,
-            mise_en_route_min: nv('pf-mer'), reglage_min: nv('pf-reg'), reglage_fer_min: nv('pf-regfer'), cadence_par_h: nv('pf-cad'), nettoyage_min: nv('pf-net'), nb_personnes: nv('pf-pers') || 1, exemplaires_par_passage: nv('pf-pp') || 1,
+            mise_en_route_min: nv('pf-mer'), reglage_min: nv('pf-reg'), reglage_fer_min: nv('pf-regfer'), cadence_par_h: nv('pf-cad'), nettoyage_min: nv('pf-net'), nb_personnes: nv('pf-pers') || 1, exemplaires_par_passage: nv('pf-pp') || 1, ...($('pf-mut').dataset.touche ? { mutualiser: $('pf-mut').checked } : {}),
             unite_cadence: $('pf-unite').value.trim() || null, quantite_formule: $('pf-formule').value.trim() || null,
           }),
         });
