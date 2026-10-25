@@ -1389,51 +1389,225 @@
     }
   }
 
+  // ---------- Saisie de production : une seule page, une fiche papier = un bloc (une personne, plusieurs OF possibles) ----------
   async function ouvrirModaleSaisieProduction(dateInit) {
     afficherModale(`
-      <h3>Saisie de production — fin de journée</h3>
-      <div class="field" style="max-width:220px;"><label>Journée</label><input id="sp-date" type="date" value="${dateInit || dateLocaleIso()}"></div>
-      <div class="field" style="margin-top:6px;"><label>Importer un relevé de production (Excel, CSV, PDF ou photo)</label>
-        <input type="file" id="sp-file" accept=".xlsx,.xls,.csv,.pdf,image/*">
-        <div id="sp-import-msg" class="plan-note" style="margin-top:4px;">Les quantités lues sont rapprochées des tâches puis pré-remplies ci-dessous : vous vérifiez avant d'enregistrer.</div></div>
-      <div id="sp-liste"><div class="msg">Chargement…</div></div>
+      <h3>Saisie de production — fiches du jour</h3>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div class="field" style="margin:0;"><label>Journée</label>
+          <div style="display:flex;gap:4px;align-items:center;"><button class="btn" id="sp-prec" title="Jour précédent" type="button">◀</button><input id="sp-date" type="date" value="${dateInit || dateLocaleIso()}"><button class="btn" id="sp-suiv" title="Jour suivant" type="button">▶</button></div></div>
+        <div class="field" style="margin:0;flex:1;min-width:240px;"><label>Fiche suivante : n° de badge ou nom, puis Entrée</label>
+          <input id="sp-quick" type="text" list="sp-liste-pers" autocomplete="off" placeholder="ex. 210 ou Corinne"><datalist id="sp-liste-pers"></datalist></div>
+      </div>
+      <div id="sp-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 2px;"></div>
+      <div id="sp-quick-msg" class="plan-note" style="min-height:16px;"></div>
+      <div id="sp-blocs"><div class="msg">Chargement…</div></div>
+      <details style="margin-top:8px;"><summary class="plan-note" style="cursor:pointer;">Importer un relevé scanné ou un fichier Excel (aide par IA, à vérifier)</summary>
+        <div class="field" style="margin-top:6px;"><input type="file" id="sp-file" accept=".xlsx,.xls,.csv,.pdf,image/*">
+          <div id="sp-import-msg" class="plan-note" style="margin-top:4px;">Les chiffres lus sont placés dans le bloc de la personne reconnue : vous vérifiez avant d'enregistrer.</div></div></details>
       <label style="display:flex;gap:8px;align-items:center;margin:12px 0 4px;font-size:13px;"><input type="checkbox" id="sp-recaler" checked> Décaler automatiquement le planning si une tâche n'est pas terminée comme prévu</label>
       <div id="m-msg"></div>
-      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="sp-go" disabled>Enregistrer</button></div>
+      <div class="actions"><span id="sp-resume" class="plan-note" style="margin-right:auto;"></span><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="sp-go" disabled>Enregistrer</button></div>
     `, 'xlarge');
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
-    let taches = [];
-    let lus = {};   // gamme_id -> proposition issue d'un fichier importé
-    function rendreTable() {
-      const box = document.getElementById('sp-liste');
-      if (!taches.length) { box.innerHTML = `<div class="msg">Aucune tâche planifiée le ${dateCourte(document.getElementById('sp-date').value)}.</div>`; return; }
-      box.innerHTML = `<div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Tâche</th><th style="min-width:150px;">Avancement</th><th>Produit ce jour</th><th>Terminée</th><th></th></tr></thead><tbody>${taches.map((t, i) => {
-        const s = t.saisie || {};
-        const l = lus[t.gamme_id];
-        const qte = l && l.quantite !== null ? l.quantite : (s.quantite ? s.quantite : '');
-        const fini = l ? (l.termine || t.statut === 'terminé') : (s.termine || t.statut === 'terminé');
-        const pct = l && l.pct !== null ? l.pct : (s.pct_cumule ?? '');
-        const h = l && l.heures_reelles !== null ? l.heures_reelles : (s.heures_reelles ?? '');
-        const com = l && l.commentaire ? l.commentaire : (s.commentaire || '');
-        const source = l ? `<div class="plan-note" style="color:var(--accent-teal);margin-top:3px;">Lu dans le fichier (${l.confiance === 'haute' ? 'fiable' : l.confiance === 'moyenne' ? 'à vérifier' : 'douteux'}) : ${esc(l.texte_source)}</div>` : '';
-        return `<tr data-i="${i}" ${l ? 'style="background:var(--field-bg);"' : ''}>
-          <td><strong>${esc(t.operation)}</strong> <span class="plan-note">— ${esc(t.machine)}</span><br>
-            <span class="plan-note">${esc(t.of)} · ${esc(t.titre)}${t.client ? ' (' + esc(t.client) + ')' : ''}<br>${t.debut ? esc(t.debut) + '–' + esc(t.fin) + ' · ' : ''}${esc((t.personnel || []).join(', ') || (t.debut ? 'personnel à affecter' : 'non planifiée ce jour'))}</span>${source}</td>
-          <td>${jaugeAvancement(t.avancement_pct, null, false)}<div class="plan-note">${t.avancement_pct} % ${t.quantite_totale ? '· ' + nbFr(t.quantite_realisee) + ' / ' + nbFr(t.quantite_totale) : ''}</div></td>
-          <td><input class="sp-qte" type="number" min="0" step="any" value="${qte}" placeholder="quantité" style="width:110px;"></td>
-          <td style="text-align:center;">${(t.bloquee_par || []).length && t.statut !== 'terminé' ? `<input class="sp-fini" type="checkbox" disabled title="Attend la fin de : ${esc(t.bloquee_par.join(', '))}"><div class="plan-note">attend ${esc(t.bloquee_par.join(', '))}</div>` : `<input class="sp-fini" type="checkbox" ${fini ? 'checked' : ''}>`}</td>
-          <td><details ${l && (pct !== '' || h !== '' || com) ? 'open' : ''}><summary class="plan-note" style="cursor:pointer;">+</summary>
-            <div class="field"><label>Avancement cumulé (%) — si pas de quantité</label><input class="sp-pct" type="number" min="0" max="100" step="any" value="${pct}"></div>
-            <div class="field"><label>Heures réelles</label><input class="sp-h" type="number" min="0" step="0.25" value="${h}"></div>
-            <div class="field"><label>Remarque</label><input class="sp-com" type="text" value="${esc(com)}"></div></details></td>
-        </tr>`; }).join('')}</tbody></table></div>
-        <div class="plan-note" style="margin-top:6px;">Saisissez la quantité réellement produite aujourd'hui (en exemplaires). Les lignes laissées vides sont ignorées. Pour une tâche sans quantité (travail manuel), utilisez « + » pour indiquer l'avancement en %.</div>`;
+    const normN = (x) => String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+    let taches = [], personnes = [], blocs = [];   // blocs : { pid, nom, badge, rows: [{ gid, hr, hp, qte, pct, com, fini, exist, supprimer, src }] }
+    const tacheDe = (gid) => taches.find(t => t.gamme_id === gid);
+    const blocDe = (pid) => blocs.find(b => (b.pid || null) === (pid || null));
+    const vide = (r) => r.hr === '' && r.hp === '' && r.qte === '' && r.pct === '' && !r.fini;
+    // Une ligne n'est envoyée que si elle est nouvelle ou modifiée (les saisies déjà enregistrées et inchangées restent telles quelles).
+    const aEnvoyer = (r) => (r.exist || r.migre) ? !!r.touche : (!r.supprimer && !vide(r));
+
+    // ----- Reste à produire d'une tâche, compte tenu de tout ce qui est tapé sur la page
+    function resteDe(gid, sauf) {
+      const t = tacheDe(gid); if (!t || !t.quantite_totale) return null;
+      const jourDeja = Number((t.saisie || {}).quantite) || 0;
+      const avant = Math.max(0, (Number(t.quantite_realisee) || 0) - jourDeja);
+      const autres = blocs.flatMap(b => b.rows).filter(r => r.gid === gid && r !== sauf && !r.supprimer).reduce((s, r) => s + (Number(String(r.qte).replace(',', '.')) || 0), 0);
+      return Math.round((Number(t.quantite_totale) - avant - autres) * 100) / 100;
     }
-    // Import d'un relevé : lecture, rapprochement avec les tâches, pré-remplissage à relire.
+
+    function ligneHtml(b, bi, r, ri) {
+      const t = tacheDe(r.gid) || {};
+      const planifiee = (t.personnel_ids || []).includes(b.pid);
+      const clos = t.statut === 'terminé' && !r.fini;
+      const bloque = (t.bloquee_par || []).length && !r.fini;
+      const sansQte = !t.quantite_totale;
+      const dis = r.supprimer ? 'disabled' : '';
+      return `<tr data-b="${bi}" data-r="${ri}" ${r.supprimer ? 'style="opacity:.4;"' : ''}>
+        <td style="min-width:230px;"><strong>${esc(t.of || '')}</strong> · ${esc(t.titre || '')}${t.client ? ' <span class="plan-note">(' + esc(t.client) + ')</span>' : ''}<br>
+          <span class="plan-note">${esc(t.operation || '')} — ${esc(t.machine || '')}${t.debut ? ' · prévu ' + esc(t.debut) + '–' + esc(t.fin) : ''}${planifiee ? '' : ' · <span style="color:var(--accent-amber-text,#b45309);">non prévu pour cette personne ce jour</span>'}</span>
+          ${r.src ? `<div class="plan-note" style="color:var(--accent-teal);">Lu : ${esc(r.src)}</div>` : ''}<span class="sp-warn plan-note" style="color:var(--danger-text);display:block;"></span></td>
+        <td><input class="sp-in sp-hr" data-k="hr" type="number" min="0" step="0.25" value="${esc(r.hr)}" style="width:72px;" ${dis}></td>
+        <td><input class="sp-in sp-hp" data-k="hp" type="number" min="0" step="0.25" value="${esc(r.hp)}" style="width:72px;" ${dis}></td>
+        <td><input class="sp-in sp-qte" data-k="qte" type="number" min="0" step="any" value="${esc(r.qte)}" style="width:96px;" ${dis}>
+          ${sansQte ? `<div class="plan-note">% cumulé</div><input class="sp-in sp-pct" data-k="pct" type="number" min="0" max="100" step="any" value="${esc(r.pct)}" style="width:72px;" ${dis}>` : (t.quantite_totale ? `<div class="plan-note sp-reste"></div>` : '')}</td>
+        <td style="text-align:center;">${clos ? '<span class="plan-note">déjà<br>terminée</span>' : (bloque ? `<input class="sp-fini" type="checkbox" disabled title="Attend la fin de : ${esc(t.bloquee_par.join(', '))}"><div class="plan-note">attend ${esc(t.bloquee_par.join(', '))}</div>` : `<input class="sp-fini" type="checkbox" ${r.fini ? 'checked' : ''} ${dis}>`)}</td>
+        <td><input class="sp-com" data-k="com" type="text" value="${esc(r.com)}" placeholder="remarque" style="width:130px;" ${dis}></td>
+        <td><button class="btn sp-del" type="button" title="${r.exist ? 'Supprimer cette saisie' : 'Retirer cette ligne'}" style="padding:2px 8px;">${r.supprimer ? '↺' : '✕'}</button></td></tr>`;
+    }
+    function blocHtml(b, bi) {
+      const aucune = !b.rows.length;
+      return `<div class="panel" data-bloc="${bi}" style="margin:0 0 10px;padding:10px 12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <strong>${b.pid ? '👤 ' + esc(b.nom) + (b.badge ? ' <span class="plan-note">(badge ' + esc(b.badge) + ')</span>' : '') : 'Saisie globale (sans personne)'}</strong>
+          <button class="btn sp-bloc-x" type="button" style="padding:2px 10px;font-size:12px;" title="Retirer cette fiche de la page (sans effacer ce qui est enregistré)">Retirer la fiche</button></div>
+        ${aucune ? '<div class="plan-note" style="margin:6px 0;">Aucune tâche planifiée pour cette personne ce jour-là : ajoutez l\'opération ci-dessous.</div>' : `<div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Tâche</th><th>Réglage (h)</th><th>Production (h)</th><th>Qté produite</th><th>Terminée</th><th>Remarque</th><th></th></tr></thead><tbody>${b.rows.map((r, ri) => ligneHtml(b, bi, r, ri)).join('')}</tbody></table></div>`}
+        <div style="margin-top:6px;position:relative;"><input class="sp-add" type="text" placeholder="+ Autre opération (autre OF) : n° d'OF ou titre" style="width:100%;max-width:420px;"><div class="sp-res"></div></div></div>`;
+    }
+    function rendre(focus) {
+      const box = document.getElementById('sp-blocs');
+      box.innerHTML = blocs.length ? blocs.map(blocHtml).join('') : '<div class="msg">Tapez un numéro de badge ou un nom ci-dessus (ou cliquez un nom), puis recopiez la fiche papier.</div>';
+      majAlertes(); majPuces();
+      if (focus) { const f = box.querySelector(`[data-bloc="${focus.bi}"] tbody tr:nth-child(${(focus.ri || 0) + 1}) .sp-hr`) || box.querySelector(`[data-bloc="${focus.bi}"] .sp-add`); if (f) { f.focus(); f.select && f.select(); } }
+    }
+    // Alertes sur place (sans re-rendre, pour ne pas perdre le curseur) : dépassement du reste, reste affiché, résumé.
+    function majAlertes() {
+      let n = 0;
+      document.querySelectorAll('#sp-blocs tbody tr').forEach(tr => {
+        const r = blocs[Number(tr.dataset.b)].rows[Number(tr.dataset.r)]; const w = tr.querySelector('.sp-warn'); const rs = tr.querySelector('.sp-reste');
+        if (aEnvoyer(r)) n++;
+        const reste = resteDe(r.gid, null);
+        if (rs && reste !== null) rs.textContent = 'reste ' + nbFr(Math.max(0, reste));
+        const trop = reste !== null && reste < -0.5 && Number(String(r.qte).replace(',', '.')) > 0;
+        w.textContent = trop ? `⚠ ${nbFr(-reste)} de plus que ce qui restait à produire (${nbFr((tacheDe(r.gid).quantite_totale))} au total) : vérifiez la quantité.` : '';
+        tr.style.background = trop ? 'var(--accent-amber-bg,#fffbeb)' : '';
+      });
+      const nb = blocs.length;
+      document.getElementById('sp-resume').textContent = n ? `${n} ligne(s) · ${nb} fiche(s)` : '';
+      document.getElementById('sp-go').disabled = !n;
+    }
+    function majPuces() {
+      const vus = new Map();
+      taches.forEach(t => (t.personnel_ids || []).forEach((id, i) => vus.set(id, (t.personnel || [])[i] || '')));
+      const noms = Object.fromEntries(personnes.map(p => [p.id, p.nom]));
+      const ids = [...vus.keys()].sort((a, b) => String(noms[a] || '').localeCompare(String(noms[b] || ''), 'fr'));
+      document.getElementById('sp-chips').innerHTML = ids.length ? '<span class="plan-note" style="align-self:center;">Affectés ce jour :</span>' + ids.map(id => {
+        const b = blocDe(id); const saisi = b && b.rows.some(r => r.exist);
+        return `<button type="button" class="btn sp-chip" data-pid="${id}" style="padding:3px 10px;font-size:12px;${b ? 'background:var(--field-bg);' : ''}">${esc(noms[id] || vus.get(id))}${saisi ? ' ✔' : ''}</button>`; }).join('') : '';
+    }
+
+    // ----- Création des blocs
+    function ligneExistante(gid, pid) { return (lignesExist || []).find(l => l.gamme_id === gid && (l.personnel_id || null) === (pid || null)); }
+    let lignesExist = [];
+    function nouvelleLigne(gid, pid) {
+      const l = ligneExistante(gid, pid);
+      if (!l) return { gid, hr: '', hp: '', qte: '', pct: '', com: '', fini: false, exist: false };
+      return { gid, hr: l.heures_reglage ?? '', hp: l.heures_production ?? '', qte: l.quantite ? l.quantite : '', pct: l.pct_cumule ?? '', com: l.commentaire || '', fini: !!l.termine, exist: true };
+    }
+    function creerBloc(pid) {
+      const p = personnes.find(x => x.id === pid);
+      const b = { pid: pid || null, nom: p ? p.nom : '', badge: p ? p.badge : '', rows: [] };
+      const gids = [];
+      taches.filter(t => pid && (t.personnel_ids || []).includes(pid)).forEach(t => gids.push(t.gamme_id));
+      (lignesExist || []).filter(l => (l.personnel_id || null) === (pid || null)).forEach(l => { if (!gids.includes(l.gamme_id)) gids.push(l.gamme_id); });
+      b.rows = gids.map(g => nouvelleLigne(g, pid));
+      blocs.push(b); return b;
+    }
+    function ajouterPersonne(pid) {
+      let b = blocDe(pid); if (!b) b = creerBloc(pid);
+      rendre({ bi: blocs.indexOf(b), ri: 0 });
+    }
+    // Reconnaissance d'une saisie rapide : badge exact, sinon nom (un seul candidat).
+    function resoudre(txt) {
+      let x = String(txt || '').trim(); if (!x) return { aucun: true };
+      const m = x.match(/^(\d+)\s*[·\-—]/); if (m) x = m[1];
+      if (/^\d+$/.test(x)) { const p = personnes.find(q => String(q.badge).replace(/\D/g, '') === x); return p ? { p } : { msg: `Aucune personne n'a le badge ${x}. Renseignez-le dans sa fiche personnel.` }; }
+      const n = normN(x); const c = personnes.filter(q => normN(q.nom).includes(n));
+      if (c.length === 1) return { p: c[0] };
+      if (c.length > 1) { const exact = c.filter(q => normN(q.nom) === n); if (exact.length === 1) return { p: exact[0] }; return { msg: `Plusieurs personnes : ${c.slice(0, 6).map(q => q.nom + (q.badge ? ' (' + q.badge + ')' : '')).join(' ; ')}. Tapez le numéro de badge.` }; }
+      return { msg: `Aucune personne ne correspond à « ${x} ».` };
+    }
+    const quick = document.getElementById('sp-quick'), quickMsg = document.getElementById('sp-quick-msg');
+    quick.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Enter') return; ev.preventDefault();
+      const r = resoudre(quick.value); if (r.aucun) return;
+      if (r.msg) { quickMsg.innerHTML = `<span style="color:var(--danger-text);">${esc(r.msg)}</span>`; return; }
+      quickMsg.textContent = ''; quick.value = ''; ajouterPersonne(r.p.id);
+    });
+    document.getElementById('sp-chips').addEventListener('click', (ev) => { const c = ev.target.closest('.sp-chip'); if (c) ajouterPersonne(c.dataset.pid); });
+
+    // ----- Édition (délégation) : l'état est tenu à jour à chaque frappe
+    const box = document.getElementById('sp-blocs');
+    const ligneDe = (el) => { const tr = el.closest('tr'); return tr ? blocs[Number(tr.dataset.b)].rows[Number(tr.dataset.r)] : null; };
+    box.addEventListener('input', (ev) => {
+      const el = ev.target; if (el.classList.contains('sp-add')) { rechercher(el); return; }
+      const r = ligneDe(el); if (!r || !el.dataset.k) return; r[el.dataset.k] = el.value; r.touche = true; majAlertes();
+    });
+    box.addEventListener('change', (ev) => {
+      const el = ev.target; if (!el.classList.contains('sp-fini')) return;
+      const r = ligneDe(el); if (!r) return; r.fini = el.checked; r.touche = true;
+      if (el.checked && r.qte === '') { const reste = resteDe(r.gid, r); if (reste !== null && reste > 0) { r.qte = reste; el.closest('tr').querySelector('.sp-qte').value = reste; } }
+      majAlertes();
+    });
+    box.addEventListener('click', (ev) => {
+      const del = ev.target.closest('.sp-del');
+      if (del) { const tr = del.closest('tr'); const b = blocs[Number(tr.dataset.b)]; const r = b.rows[Number(tr.dataset.r)];
+        if (r.exist) { r.supprimer = !r.supprimer; r.touche = true; rendre(); } else { b.rows.splice(Number(tr.dataset.r), 1); rendre({ bi: Number(tr.dataset.b), ri: 0 }); } return; }
+      const x = ev.target.closest('.sp-bloc-x');
+      if (x) { blocs.splice(Number(x.closest('[data-bloc]').dataset.bloc), 1); rendre(); return; }
+      const res = ev.target.closest('.sp-res-item');
+      if (res) { const bi = Number(res.closest('[data-bloc]').dataset.bloc); const t = JSON.parse(res.dataset.t);
+        if (!tacheDe(t.gamme_id)) taches.push(t);
+        const b = blocs[bi]; if (!b.rows.some(r => r.gid === t.gamme_id)) b.rows.push(nouvelleLigne(t.gamme_id, b.pid));
+        rendre({ bi, ri: b.rows.findIndex(r => r.gid === t.gamme_id) }); }
+    });
+    // Entrée = champ suivant (réglage → production → quantité → ligne suivante → fiche suivante)
+    box.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Enter' || !ev.target.classList.contains('sp-in')) return; ev.preventDefault();
+      const liste = Array.from(box.querySelectorAll(`[data-bloc="${ev.target.closest('[data-bloc]').dataset.bloc}"] .sp-in:not([disabled])`));
+      const i = liste.indexOf(ev.target);
+      const suivant = liste[i + 1]; if (suivant) { suivant.focus(); suivant.select(); } else { quick.focus(); quick.select(); }
+    });
+    let minuteur = null;
+    function rechercher(input) {
+      const zone = input.parentElement.querySelector('.sp-res'); const q = input.value.trim();
+      clearTimeout(minuteur);
+      if (q.length < 2) { zone.innerHTML = ''; return; }
+      minuteur = setTimeout(async () => {
+        try {
+          const res = await fetch(`${API}/lecture-production?chercher=${encodeURIComponent(q)}`); const d = await lireJson(res);
+          if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
+          zone.innerHTML = d.resultats.length ? `<div style="border:1px solid var(--line);border-radius:6px;background:var(--paper-raised,#fff);max-height:220px;overflow:auto;margin-top:2px;">${d.resultats.map(t => `<div class="sp-res-item" data-t='${esc(JSON.stringify(t))}' style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--line);font-size:13px;"><strong>${esc(t.of)}</strong> · ${esc(t.titre)} — ${esc(t.operation)} <span class="plan-note">(${esc(t.machine)} · ${t.avancement_pct} % fait)</span></div>`).join('')}</div>` : '<div class="plan-note">Aucune opération en cours pour cette recherche.</div>';
+        } catch (e) { zone.innerHTML = `<div class="plan-note" style="color:var(--danger-text);">${esc(e.message)}</div>`; }
+      }, 300);
+    }
+
+    // ----- Chargement d'un jour
+    async function charger() {
+      const date = document.getElementById('sp-date').value;
+      document.getElementById('sp-go').disabled = true; blocs = [];
+      if (!date) { box.innerHTML = ''; return; }
+      box.innerHTML = '<div class="msg">Chargement…</div>';
+      try {
+        const res = await fetch(`${API}/lecture-production?date=${date}`);
+        const d = await lireJson(res);
+        if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
+        taches = d.taches; personnes = d.personnes || []; lignesExist = d.lignes || [];
+        // Une saisie globale ancienne (sans personne) et celles déjà faites par personne réapparaissent pour être relues ou corrigées.
+        const dejaP = [...new Set(lignesExist.map(l => l.personnel_id || null))];
+        const globaux = taches.filter(t => t.saisie && !lignesExist.some(l => l.gamme_id === t.gamme_id));
+        dejaP.forEach(pid => { if (pid && personnes.some(p => p.id === pid)) creerBloc(pid); else if (!pid) creerBloc(null); });
+        if (globaux.length) { const b = blocDe(null) || creerBloc(null); globaux.forEach(t => { if (!b.rows.some(r => r.gid === t.gamme_id)) { const s = t.saisie; b.rows.push({ gid: t.gamme_id, hr: s.heures_reglage ?? '', hp: s.heures_production ?? s.heures_reelles ?? '', qte: Number(s.quantite) || '', pct: s.pct_cumule ?? '', com: s.commentaire || '', fini: !!s.termine, exist: false, migre: true }); } }); }
+        document.getElementById('sp-liste-pers').innerHTML = personnes.map(p => `<option value="${esc((p.badge ? p.badge + ' · ' : '') + p.nom)}"></option>`).join('');
+        rendre();
+        quick.focus();
+      } catch (e) { box.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    }
+    const aSaisie = () => blocs.some(b => b.rows.some(r => !r.exist && !vide(r)));
+    function decalerJour(sens) {
+      if (aSaisie() && !confirm('Des chiffres tapés ne sont pas enregistrés. Changer de jour et les perdre ?')) return;
+      const inp = document.getElementById('sp-date'); const d = new Date((inp.value || dateLocaleIso()) + 'T12:00:00Z');
+      do { d.setUTCDate(d.getUTCDate() + sens); } while ([0, 6].includes(d.getUTCDay()));
+      inp.value = d.toISOString().slice(0, 10); charger();
+    }
+    document.getElementById('sp-prec').addEventListener('click', () => decalerJour(-1));
+    document.getElementById('sp-suiv').addEventListener('click', () => decalerJour(1));
+    document.getElementById('sp-date').addEventListener('change', charger);
+
+    // ----- Import d'un relevé (aide) : placé dans le bloc de la personne reconnue
     document.getElementById('sp-file').addEventListener('change', async (ev) => {
-      const file = ev.target.files[0];
-      const info = document.getElementById('sp-import-msg');
-      if (!file) return;
+      const file = ev.target.files[0]; const info = document.getElementById('sp-import-msg'); if (!file) return;
       if (file.size > 4 * 1024 * 1024) { info.innerHTML = '<span style="color:var(--danger-text);">Fichier trop volumineux (4 Mo maximum).</span>'; return; }
       info.textContent = 'Lecture du relevé en cours…';
       try {
@@ -1443,56 +1617,38 @@
         const res = await fetch(`${API}/extraire-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file_base64: base64, file_name: file.name, mime_type: mime, date: document.getElementById('sp-date').value }) });
         const d = await lireJson(res);
         if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
-        // Le document porte sa propre date : on bascule sur cette journée.
-        if (d.date && d.date !== document.getElementById('sp-date').value) {
-          document.getElementById('sp-date').value = d.date;
-          await charger();
-        }
+        if (d.date && d.date !== document.getElementById('sp-date').value) { document.getElementById('sp-date').value = d.date; await charger(); }
+        const pid = d.personne && d.personne.id ? d.personne.id : null;
+        let b = blocDe(pid) || creerBloc(pid);
         d.propositions.forEach(p => {
-          lus[p.gamme_id] = p;
-          if (!taches.some(t => t.gamme_id === p.gamme_id)) taches.push(p.tache);   // tâche non planifiée ce jour-là mais citée par le relevé
+          if (!tacheDe(p.gamme_id)) taches.push(p.tache);
+          let r = b.rows.find(x => x.gid === p.gamme_id); if (!r) { r = nouvelleLigne(p.gamme_id, pid); b.rows.push(r); }
+          if (p.quantite !== null && p.quantite !== undefined) r.qte = p.quantite;
+          if (p.heures_reelles !== null && p.heures_reelles !== undefined) { if (/r[ée]glage/i.test(p.commentaire || '')) r.hr = p.heures_reelles; else r.hp = p.heures_reelles; }
+          if (p.pct !== null && p.pct !== undefined) r.pct = p.pct;
+          if (p.termine) r.fini = true; if (p.commentaire) r.com = p.commentaire;
+          r.touche = true;
+          r.src = `${p.texte_source} (${p.confiance === 'haute' ? 'fiable' : p.confiance === 'moyenne' ? 'à vérifier' : 'douteux'})`;
         });
-        rendreTable();
-        document.getElementById('sp-go').disabled = !taches.length;
-        const ko = d.non_rapprochees.length ? ` <strong style="color:var(--accent-amber-text);">${d.non_rapprochees.length} ligne(s) non rapprochée(s) :</strong> ${d.non_rapprochees.slice(0, 6).map(x => esc(x.texte_source)).join(' ; ')}${d.non_rapprochees.length > 6 ? '…' : ''}.` : '';
-        const pers = d.personne ? `<div style="margin-bottom:4px;">👤 Fiche de <strong>${esc(d.personne.nom || '?')}</strong>${d.personne.badge ? ` (badge ${esc(d.personne.badge)})` : ''}${d.personne.methode === 'badge' ? ' — identifiée par le badge ✔' : (d.personne.methode === 'nom' ? ' — identifiée par le nom' : '')}</div>` : '';
+        rendre({ bi: blocs.indexOf(b), ri: 0 });
+        const pers = d.personne ? `<div>👤 Fiche de <strong>${esc(d.personne.nom || '?')}</strong>${d.personne.badge ? ` (badge ${esc(d.personne.badge)})` : ''}${d.personne.methode === 'badge' ? ' — identifiée par le badge ✔' : (d.personne.methode === 'nom' ? ' — identifiée par le nom' : '')}</div>` : '';
         const alertesP = (d.alertes_personne || []).map(x => `<div style="color:var(--accent-amber-text,#b45309);">⚠ ${esc(x)}</div>`).join('');
-        info.innerHTML = pers + alertesP + `${d.propositions.length} tâche(s) pré-remplie(s)${d.date ? ' pour le ' + dateCourte(d.date) : ''}. Vérifiez les quantités avant d'enregistrer.${ko} ${d.notes ? '<br>' + esc(d.notes) : ''}`;
+        const ko = d.non_rapprochees.length ? ` <strong style="color:var(--accent-amber-text);">${d.non_rapprochees.length} ligne(s) non rapprochée(s) :</strong> ${d.non_rapprochees.slice(0, 6).map(x => esc(x.texte_source)).join(' ; ')}.` : '';
+        info.innerHTML = pers + alertesP + `${d.propositions.length} ligne(s) placée(s)${ko}${d.notes ? '<br>' + esc(d.notes) : ''}`;
       } catch (e) { info.innerHTML = `<span style="color:var(--danger-text);">${esc(e.message)}</span>`; }
       ev.target.value = '';
     });
-    async function charger() {
-      const date = document.getElementById('sp-date').value;
-      const box = document.getElementById('sp-liste');
-      document.getElementById('sp-go').disabled = true;
-      if (!date) { box.innerHTML = ''; return; }
-      box.innerHTML = '<div class="msg">Chargement…</div>';
-      try {
-        const res = await fetch(`${API}/lecture-production?date=${date}`);
-        const d = await lireJson(res);
-        if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
-        taches = d.taches;
-        lus = {};
-        rendreTable();
-        document.getElementById('sp-go').disabled = !taches.length;
-      } catch (e) { box.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
-    }
-    document.getElementById('sp-date').addEventListener('change', charger);
-    document.getElementById('sp-liste').addEventListener('change', (ev) => {
-      if (!ev.target.classList.contains('sp-fini')) return;
-      const tr = ev.target.closest('tr'); if (!tr) return;
-      remplirTerminee(tr, taches[Number(tr.dataset.i)], ev.target.checked, { qte: '.sp-qte', pct: '.sp-pct', h: '.sp-h' });
-    });
-    charger();
 
+    // ----- Enregistrement : tout ce qui est sur la page, d'un coup
     document.getElementById('sp-go').addEventListener('click', async () => {
-      const date = document.getElementById('sp-date').value;
-      const msg = document.getElementById('m-msg');
-      const saisies = Array.from(document.querySelectorAll('.sp-table tbody tr')).map(tr => {
-        const t = taches[Number(tr.dataset.i)];
-        const val = (c) => tr.querySelector(c).value;
-        return { gamme_id: t.gamme_id, quantite: val('.sp-qte'), pct: val('.sp-pct'), termine: tr.querySelector('.sp-fini').checked && t.statut !== 'terminé', heures_reelles: val('.sp-h'), commentaire: val('.sp-com') };
-      }).filter(s => s.quantite !== '' || s.pct !== '' || s.termine);
+      const date = document.getElementById('sp-date').value; const msg = document.getElementById('m-msg');
+      const saisies = [];
+      blocs.forEach(b => b.rows.forEach(r => {
+        if (!aEnvoyer(r)) return;
+        if (r.exist && (r.supprimer || vide(r))) { saisies.push({ gamme_id: r.gid, personnel_id: b.pid, supprimer: true }); return; }
+        if (r.supprimer || vide(r)) return;
+        saisies.push({ gamme_id: r.gid, personnel_id: b.pid, quantite: r.qte, pct: r.pct, termine: !!r.fini, heures_reglage: r.hr, heures_production: r.hp, commentaire: r.com });
+      }));
       if (!saisies.length) { msg.innerHTML = '<div class="msg error">Aucune saisie à enregistrer.</div>'; return; }
       msg.innerHTML = '<div class="msg">Enregistrement et recalage du planning…</div>';
       document.getElementById('sp-go').disabled = true;
@@ -1504,6 +1660,7 @@
         chargerDonneesReelles();
       } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; document.getElementById('sp-go').disabled = false; }
     });
+    charger();
   }
 
   // Saisie d'avancement d'une seule tâche, depuis un clic sur son bloc dans le planning.
@@ -2934,6 +3091,71 @@
     doc.save(`placement-personnel-${date}.pdf`);
   }
 
+
+  // ---------- Fiches de production individuelles : une page par personne, tâches du jour déjà inscrites ----------
+  async function genererFichesProduction(date) {
+    const res = await fetch(`${API}/feuille-journaliere?date=${date}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+    const gens = data.personnes.filter(p => p.creneaux.length);
+    if (!gens.length) throw new Error('Aucune personne affectée ce jour-là.');
+    await chargerLibsPdf();
+    const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const W = doc.internal.pageSize.getWidth();
+    const maj = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+    gens.forEach((p, idx) => {
+      if (idx) doc.addPage();
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+      doc.text(pdfTxt(`Fiche de production - ${p.nom}`), 10, 14);
+      doc.setFontSize(12);
+      doc.text(pdfTxt(maj(dateFr(date))), W - 10, 14, { align: 'right' });
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+      doc.text(pdfTxt(`Badge n° : ${p.badge || '________'}${p.poste ? '     Poste : ' + p.poste : ''}`), 10, 21);
+      doc.setFontSize(8); doc.setTextColor(100);
+      doc.text(pdfTxt('Ecrire uniquement des chiffres (heures en decimal : 1h30 = 1,5). Cocher "Termine" seulement si l\'operation est entierement finie.'), 10, 26);
+      doc.setTextColor(0);
+      // Un même travail coupé en deux créneaux (matin / après-midi) = une seule ligne.
+      const lignes = [];
+      p.creneaux.forEach(c => {
+        const cle = [c.of, c.operation, c.machine].join('|');
+        let l = lignes.find(x => x.cle === cle);
+        if (!l) { l = { cle, c, horaires: [] }; lignes.push(l); }
+        l.horaires.push(c.debut && c.fin ? `${c.debut}-${c.fin}` : 'Journee');
+      });
+      const corps = lignes.map(l => {
+        const c = l.c;
+        const equipe = c.equipe.filter(n => n !== p.nom);
+        return [
+          pdfTxt(l.horaires.join('\n')),
+          pdfTxt(`${c.of}\n${[c.titre, c.client].filter(Boolean).join(' - ')}`),
+          pdfTxt(`${c.operation}\n${c.machine}${equipe.length ? '\navec ' + equipe.join(', ') : ''}`),
+          c.quantite != null ? pdfTxt(Number(c.quantite).toLocaleString('fr-FR')) : '',
+          '', '', '', '', '',
+        ];
+      });
+      for (let i = 0; i < 2; i++) corps.push(['', { content: 'Autre travail (preciser) :', styles: { textColor: 120, fontStyle: 'italic' } }, '', '', '', '', '', '', '']);
+      doc.autoTable({
+        startY: 30, margin: { left: 10, right: 10 }, theme: 'grid',
+        head: [['Horaire', 'OF / Titre', 'Operation / Machine', 'Qte OF', 'Reglage\n(h)', 'Production\n(h)', 'Qte produite\naujourd\'hui', 'Termine', 'Remarque']],
+        body: corps,
+        styles: { fontSize: 9, cellPadding: 2, valign: 'middle', lineColor: [150, 150, 150], minCellHeight: 17 },
+        headStyles: { fillColor: [30, 90, 100], textColor: 255, fontStyle: 'bold', halign: 'center', minCellHeight: 10 },
+        columnStyles: { 0: { cellWidth: 30, fontStyle: 'bold' }, 1: { cellWidth: 50 }, 2: { cellWidth: 52 }, 3: { cellWidth: 16, halign: 'right' }, 4: { cellWidth: 20 }, 5: { cellWidth: 22 }, 6: { cellWidth: 28 }, 7: { cellWidth: 16 }, 8: { cellWidth: 'auto' } },
+        didDrawCell: (h) => {   // case à cocher dans la colonne « Terminé »
+          if (h.section === 'body' && h.column.index === 7) {
+            const x = h.cell.x + h.cell.width / 2 - 3, y = h.cell.y + h.cell.height / 2 - 3;
+            doc.setDrawColor(60); doc.rect(x, y, 6, 6);
+          }
+        },
+      });
+      doc.setFontSize(8); doc.setTextColor(110);
+      doc.text(pdfTxt('Signature : ____________________'), 10, 205);
+      doc.text(`Fiche ${idx + 1} / ${gens.length}`, W - 10, 205, { align: 'right' });
+      doc.setTextColor(0);
+    });
+    doc.save(`fiches-production-${date}.pdf`);
+  }
+
   // ---------- Affichage collectif : tout le personnel sur une page, en grille horaire ----------
   async function genererAffichageCollectif(date) {
     const res = await fetch(`${API}/feuille-journaliere?date=${date}`);
@@ -3085,11 +3307,12 @@
       ? `Jours planifiés cette semaine : ${joursPlanifies.map(iso => DAYS[DAYS_ISO.indexOf(iso)]).join(', ')}`
       : 'Aucun créneau planifié sur la semaine affichée.';
     afficherModale(`
-      <h3>Feuille de placement du personnel</h3>
+      <h3>Feuilles du jour (placement et fiches de production)</h3>
       <div class="field"><label>Modèle</label>
         <select id="fj-modele">
           <option value="collectif">Affichage collectif — tout le personnel sur une page (grille horaire)</option>
           <option value="detail">Feuille détaillée — une section par personne (observations, visa)</option>
+          <option value="production">Fiches de production à remplir — une page par personne, tâches du jour déjà inscrites</option>
         </select>
       </div>
       <div class="field"><label>Jour</label><input id="fj-date" type="date" value="${defaut}"><div style="font-size:12px;color:var(--ink-500);margin-top:4px;">${indice}</div></div>
@@ -3106,7 +3329,9 @@
       if (!date) { msg.innerHTML = `<div class="msg error">Choisissez un jour.</div>`; return; }
       msg.innerHTML = `<div class="msg">Génération du PDF…</div>`;
       try {
-        if (document.getElementById('fj-modele').value === 'collectif') await genererAffichageCollectif(date);
+        const modele = document.getElementById('fj-modele').value;
+        if (modele === 'collectif') await genererAffichageCollectif(date);
+        else if (modele === 'production') await genererFichesProduction(date);
         else await genererFeuilleJournaliere(date);
         toast('Feuille de placement téléchargée.');
         fermerModale();
