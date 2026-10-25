@@ -29,6 +29,8 @@
 //      en base.
 
 const { getSupabase } = require('./lib/supabaseclient');
+const INT = require('./lib/interventions');
+const { aujourdhuiParis } = require('./lib/debut-etape');
 
 async function resoudreOperationIds(supabase, codes) {
   if (!codes || codes.length === 0) return [];
@@ -65,10 +67,12 @@ const handlerProtege = async (event) => {
       const conducteursDe = (mid) => (pmRes.data || []).filter((x) => x.machine_id === mid && x.rang !== null && x.rang !== undefined)
         .map((x) => ({ personnel_id: x.personnel_id, nom: nomDe[x.personnel_id] || '?', rang: x.rang ?? null }))
         .sort((a, b) => (a.rang ?? 1e9) - (b.rang ?? 1e9) || a.nom.localeCompare(b.nom, 'fr'));
+      const etats = await INT.etatsMachines(supabase, aujourdhuiParis());
       return {
         statusCode: 200,
         body: JSON.stringify(data.map((m) => ({
           id: m.id, code: m.code, nom: m.nom, actif: m.actif, notes: m.notes,
+          etat: etats[m.id] || { etat: 'ok', libelle: 'Opérationnelle' },
           nb_personnes: m.nb_personnes || 1,
           conducteurs: conducteursDe(m.id),
           aides: aidesDe(m.id),

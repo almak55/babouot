@@ -139,7 +139,7 @@ const handlerProtege = async (event) => {
       supabase.from('personnel_planning_jour')
         .select('personnel_id, date, statut, heure_debut, heure_fin')
         .gte('date', dateDepart).lte('date', dateFinHorizon),
-      supabase.from('maintenance_machine').select('machine_id, statut, date_debut, date_fin').neq('statut', 'terminé'),
+      supabase.from('maintenance_machine').select('*').neq('statut', 'terminé'),
       supabase.from('personnel').select('id, nom').eq('actif', true),
       supabase.from('personnel_competences').select('personnel_id, operation_id'),
       supabase.from('personnel_machines').select('personnel_id, machine_id'),
@@ -157,9 +157,10 @@ const handlerProtege = async (event) => {
       if (l.personnel_id) personnes.add(l.personnel_id);
       personnes.forEach((p) => ajouter('personnes', p, iv));
     });
-    maintRes.data.forEach((m) => {
-      const d = enMinutes(m.date_debut, '00:00');
-      const f = m.date_fin ? enMinutes(m.date_fin, '00:00') + MIN_JOUR : d + HORIZON_JOURS * MIN_JOUR;
+    maintRes.data.filter((m) => m.bloquant !== false).forEach((m) => {   // marche dégradée (bloquant = false) : la machine reste utilisable
+      const hm = (t) => (t ? String(t).slice(0, 5) : null);
+      const d = enMinutes(m.date_debut, hm(m.heure_debut) || '00:00');
+      const f = m.date_fin ? enMinutes(m.date_fin, hm(m.heure_fin) || '00:00') + (hm(m.heure_fin) ? 0 : MIN_JOUR) : d + HORIZON_JOURS * MIN_JOUR;
       ajouter('machines', m.machine_id, { d, f });
     });
     absRes.data.forEach((a) => {

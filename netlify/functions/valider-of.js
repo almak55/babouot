@@ -69,7 +69,7 @@ const handlerProtege = async (event) => {
            absencesRes, personnelRes, matieresRes] = await Promise.all([
       supabase.from('machines').select('id, nom, operation_id, actif'),
       supabase.from('machines_operations').select('machine_id, operation_id'),
-      supabase.from('maintenance_machine').select('machine_id, statut, date_debut, date_fin').eq('statut', 'en cours'),
+      supabase.from('maintenance_machine').select('*').eq('statut', 'en cours'),
       supabase.from('personnel_competences').select('personnel_id, operation_id'),
       supabase.from('personnel_machines').select('personnel_id, machine_id'),
       supabase.from('personnel_planning_jour').select('personnel_id, statut').eq('date', aujourdHui),
@@ -81,7 +81,7 @@ const handlerProtege = async (event) => {
     }
 
     const machineEnMaintenance = (machineId) => maintenanceRes.data.some((m) =>
-      m.machine_id === machineId && m.date_debut <= aujourdHui && (!m.date_fin || m.date_fin >= aujourdHui)
+      m.machine_id === machineId && m.bloquant !== false && m.date_debut <= aujourdHui && (!m.date_fin || m.date_fin >= aujourdHui)
     );
     const machineOperationnelle = (m) => m.actif && !machineEnMaintenance(m.id);
 

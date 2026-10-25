@@ -20,6 +20,7 @@
 //           { error, conflit: 'machine'|'personnel'|'absence' }
 
 const { getSupabase } = require('./lib/supabaseclient');
+const INT = require('./lib/interventions');
 const { jourDebutSuggere, aujourdhuiParis } = require('./lib/debut-etape');
 const PL = require('./lib/planification');
 const { calculerEtapes } = require('./lib/durees');
@@ -129,8 +130,16 @@ const handlerProtege = async (event) => {
       || (PL.hhmm(String(ligne.heure_debut).slice(0, 5)) < PL.hhmm(m.heure_fin) && PL.hhmm(m.heure_debut) < PL.hhmm(String(ligne.heure_fin).slice(0, 5)));
 
     // Machine déjà prise sur l'un des créneaux ? (heures prises en compte ; une ligne sans heures bloque toute la journée)
+    let intervsMachine = null, interventionBloquante = null;
     const machineBloquee = async (morceaux) => {
       if (!machineId) return null;
+      interventionBloquante = null;
+      // Machine en panne, en maintenance ou en retour constructeur sur ces créneaux (interventions bloquantes, en cours ou programmées).
+      if (intervsMachine === null) {
+        const { data: iv, error: ivE } = await supabase.from('maintenance_machine').select('*').eq('machine_id', machineId).neq('statut', 'terminé');
+        intervsMachine = ivE ? [] : (iv || []).filter(INT.bloque);   // table facultative
+      }
+      for (const m of morceaux) { const iv = intervsMachine.find((x) => INT.touche(x, m)); if (iv) { interventionBloquante = iv; return m; } }
       const dates = Array.from(new Set(morceaux.map((m) => m.date)));
       const { data: prises, error: e1 } = await supabase.from('planning_jour')
         .select('id, date, heure_debut, heure_fin').eq('machine_id', machineId).in('date', dates).neq('statut', 'annulé');
@@ -152,6 +161,10 @@ const handlerProtege = async (event) => {
     }
     const bloc = await machineBloquee(morceaux);
     if (bloc) {
+      if (interventionBloquante) {
+        const { data: mach } = await supabase.from('machines').select('nom').eq('id', machineId).maybeSingle();
+        return { statusCode: 409, body: JSON.stringify({ error: `${mach ? mach.nom : 'Cette machine'} n'est pas disponible le ${INT.fmtJour(bloc.date)} : ${INT.decrire(interventionBloquante)}. Choisissez un autre jour ou une autre machine.`, conflit: 'maintenance' }) };
+      }
       return {
         statusCode: 409,
         body: JSON.stringify({ error: 'Cette machine est déjà affectée sur ce créneau horaire.', conflit: 'machine' }),

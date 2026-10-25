@@ -9,6 +9,7 @@
 
 const { getSupabase } = require('./lib/supabaseclient');
 const PL = require('./lib/planification');
+const INT = require('./lib/interventions');
 const { libelleJour, aujourdhuiParis } = require('./lib/debut-etape');
 
 const handlerProtege = async (event) => {
@@ -27,7 +28,7 @@ const handlerProtege = async (event) => {
         .select('date, heure_debut, heure_fin, phase, statut, ordres_fabrication(numero)')
         .eq('machine_id', q.machine_id).gte('date', du).lte('date', dateFin).neq('statut', 'annulé'),
       supabase.from('maintenance_machine')
-        .select('date_debut, date_fin, type, statut')
+        .select('*')
         .eq('machine_id', q.machine_id).neq('statut', 'terminé'),
     ]);
     if (planRes.error) throw planRes.error;
@@ -38,16 +39,17 @@ const handlerProtege = async (event) => {
       if (!PL.estOuvre(j)) continue;
       const date = PL.dateDe(j);
       const lignes = planRes.data.filter((l) => l.date === date);
-      const maint = maintRes.data.find((m) => m.date_debut <= date && (!m.date_fin || m.date_fin >= date));
+      const maint = maintRes.data.find((m) => INT.bloque(m) && INT.touche(m, { date, heure_debut: null, heure_fin: null }));
       const details = lignes.map((l) => {
         const of = l.ordres_fabrication && l.ordres_fabrication.numero ? l.ordres_fabrication.numero : 'OF';
         const h = l.heure_debut ? ` ${String(l.heure_debut).slice(0, 5)}–${String(l.heure_fin).slice(0, 5)}` : ' (journée)';
         return `${of}${l.phase ? ' · ' + l.phase : ''}${h}`;
       });
-      if (maint) details.unshift(`Maintenance (${maint.type || 'machine indisponible'})`);
+      if (maint) details.unshift(INT.decrire(maint));
       jours.push({ date, libelle: libelleJour(date), etat: maint ? 'maintenance' : (lignes.length ? 'occupe' : 'libre'), details });
     }
-    return { statusCode: 200, body: JSON.stringify({ jours }) };
+    const interventions = maintRes.data.map((m) => ({ type: m.type, type_libelle: INT.TYPES[m.type] || m.type, du: m.date_debut, au: m.date_fin, bloquant: m.bloquant !== false, texte: INT.decrire(m), etat: INT.etatIntervention(m, aujourdhuiParis()) }));
+    return { statusCode: 200, body: JSON.stringify({ jours, interventions }) };
   } catch (err) {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };
   }

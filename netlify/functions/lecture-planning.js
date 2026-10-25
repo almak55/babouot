@@ -110,9 +110,23 @@ const handlerProtege = async (event) => {
       return { ...p, personnel_ids: ids.length ? ids : (p.personnel_id ? [p.personnel_id] : []) };
     });
 
+    // Interventions machines non terminées (panne, maintenance, retour constructeur...) et état courant de chaque machine.
+    let interventions = [], etatsMachines = {};
+    try {
+      const INT = require('./lib/interventions');
+      const aj = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' });
+      const { data: iv, error: ivE } = await supabase.from('maintenance_machine').select('*').neq('statut', 'terminé');
+      if (!ivE) {
+        interventions = (iv || []).map((m) => ({ id: m.id, machine_id: m.machine_id, type: m.type, type_libelle: INT.TYPES[m.type] || m.type, date_debut: m.date_debut, date_fin: m.date_fin,
+          heure_debut: INT.hh(m.heure_debut), heure_fin: INT.hh(m.heure_fin), bloquant: m.bloquant !== false, description: m.description || '', texte: INT.decrire(m) }));
+        etatsMachines = await INT.etatsMachines(supabase, aj);
+      }
+    } catch (e) { console.warn('interventions machines ignorées :', e.message); }
+
     return {
       statusCode: 200,
       body: JSON.stringify({
+        interventions, etats_machines: etatsMachines,
         machines: machinesRes.data,
         personnel: personnelAvecCompetences,
         ordres: ordresAvecAvancement,
