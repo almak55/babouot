@@ -8,7 +8,7 @@
 //        -> { types: [{code, libelle}], profils: [{ operation_id, operation, type_production,
 //             mise_en_route_min, reglage_min, cadence_par_h, nettoyage_min, nb_personnes }] }
 // POST   { machine_id, operation_id, type_production|null, mise_en_route_min?, reglage_min?,
-//          cadence_par_h?, nettoyage_min?, nb_personnes? }   -> crée ou remplace le profil
+//          cadence_par_h?, nettoyage_min?, nb_personnes?, exemplaires_par_passage? }   -> crée ou remplace le profil
 // POST   { action: 'ajouter_type', libelle }               -> ajoute un type de production
 // DELETE ?machine_id=&operation_id=&type_production=       -> supprime le profil
 //        (type_production vide ou « tous » = profil valable pour tous les types)
@@ -45,12 +45,12 @@ const handlerProtege = async (event) => {
       const profils = new Map();
       phases.filter((p) => NOMS_LISTE.includes(p.nom)).forEach((p) => {
         const cle = `${p.operation_id}|${p.type_production || ''}`;
-        if (!profils.has(cle)) profils.set(cle, { operation_id: p.operation_id, operation: p.operations.nom, type_production: p.type_production, mise_en_route_min: null, reglage_min: null, cadence_par_h: null, nettoyage_min: null, nb_personnes: 1, quantite_formule: null, unite_cadence: null });
+        if (!profils.has(cle)) profils.set(cle, { operation_id: p.operation_id, operation: p.operations.nom, type_production: p.type_production, mise_en_route_min: null, reglage_min: null, cadence_par_h: null, nettoyage_min: null, nb_personnes: 1, quantite_formule: null, unite_cadence: null, par_passage: 1 });
         const pr = profils.get(cle);
         if (p.nom === NOMS.mise_en_route) pr.mise_en_route_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
         if (p.nom === NOMS.reglage) pr.reglage_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
         if (p.nom === NOMS.nettoyage) pr.nettoyage_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
-        if (p.nom === NOMS.roulage) { pr.cadence_par_h = p.cadence_par_h === null ? null : Number(p.cadence_par_h); pr.nb_personnes = p.nb_personnes; pr.quantite_formule = p.quantite_formule || null; pr.unite_cadence = p.unite_cadence || null; }
+        if (p.nom === NOMS.roulage) { pr.cadence_par_h = p.cadence_par_h === null ? null : Number(p.cadence_par_h); pr.nb_personnes = p.nb_personnes; pr.quantite_formule = p.quantite_formule || null; pr.unite_cadence = p.unite_cadence || null; pr.par_passage = Number(p.par_passage) > 1 ? Number(p.par_passage) : 1; }
       });
       return { statusCode: 200, body: JSON.stringify({ types, profils: Array.from(profils.values()) }) };
     }
@@ -80,6 +80,7 @@ const handlerProtege = async (event) => {
       if (valeurs.cadence !== null && valeurs.cadence <= 0) return { statusCode: 400, body: JSON.stringify({ error: 'La cadence doit être supérieure à 0 (exemplaires par heure).' }) };
       if (Object.values(valeurs).every((v) => v === null)) return { statusCode: 400, body: JSON.stringify({ error: 'Renseignez au moins une valeur.' }) };
       const nbPers = Math.max(1, parseInt(b.nb_personnes, 10) || 1);
+      const parPassage = Math.max(1, parseInt(b.exemplaires_par_passage, 10) || 1);
 
       // Unité de la cadence (exemplaires, cahiers, coupes…) et quantité à traiter (formule sur la fiche).
       const unite = String(b.unite_cadence || '').trim() || null;
@@ -100,10 +101,10 @@ const handlerProtege = async (event) => {
       const ajout = (nom, ordre, champs) => lignes.push({ operation_id: b.operation_id, machine_id: b.machine_id, type_production: type, nom, ordre, occupe_machine: true, nb_personnes: 1, ...champs });
       if (valeurs.mise_en_route !== null) ajout(NOMS.mise_en_route, 1, { type_calcul: 'fixe', duree_h: valeurs.mise_en_route / 60 });
       if (valeurs.reglage !== null) ajout(NOMS.reglage, 2, { type_calcul: 'fixe', duree_h: valeurs.reglage / 60 });
-      if (valeurs.cadence !== null) ajout(NOMS.roulage, 3, { type_calcul: 'cadence', cadence_par_h: valeurs.cadence, nb_personnes: nbPers, ...(formule || unite ? { quantite_formule: formule, unite_cadence: unite } : {}) });
+      if (valeurs.cadence !== null) ajout(NOMS.roulage, 3, { type_calcul: 'cadence', cadence_par_h: valeurs.cadence, nb_personnes: nbPers, ...(formule || unite ? { quantite_formule: formule, unite_cadence: unite } : {}), ...(parPassage > 1 ? { par_passage: parPassage } : {}) });
       if (valeurs.nettoyage !== null) ajout(NOMS.nettoyage, 4, { type_calcul: 'fixe', duree_h: valeurs.nettoyage / 60 });
       const { error } = await supabase.from('phases_standard').insert(lignes);
-      if (error) throw new Error(/quantite_formule|unite_cadence/.test(error.message || '') ? `${error.message} — exécutez d'abord la migration 24 dans Supabase.` : error.message);
+      if (error) throw new Error(/par_passage/.test(error.message || '') ? `${error.message} — exécutez d'abord la migration 43 dans Supabase.` : /quantite_formule|unite_cadence/.test(error.message || '') ? `${error.message} — exécutez d'abord la migration 24 dans Supabase.` : error.message);
       return { statusCode: 200, body: JSON.stringify({ ok: true, phases: lignes.length }) };
     }
 
