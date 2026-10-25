@@ -3669,9 +3669,14 @@
       const phases = await res.json();
       etatTS.phases = phases;
 
-      const ops = Array.from(new Map(phases.map(p => [p.operation_id, p.operations.nom])).entries())
-        .sort((a, b) => a[1].localeCompare(b[1], 'fr'));
-      filtre.innerHTML = `<option value="">Toutes les opérations</option>` + ops.map(([id, nom]) => `<option value="${id}">${nom}</option>`).join('');
+      // Toutes les opérations du catalogue, y compris celles qui n'ont encore aucune phase (pour pouvoir les configurer).
+      const avecPhases = new Set(phases.map(p => p.operation_id));
+      const tousOps = new Map(phases.map(p => [p.operation_id, p.operations.nom]));
+      try { (await getReferentiels()).operations.forEach(o => { if (!tousOps.has(o.id)) tousOps.set(o.id, o.nom); }); } catch (_) { /* catalogue indisponible : seules les opérations déjà chiffrées sont listées */ }
+      const ops = Array.from(tousOps.entries()).sort((a, b) => a[1].localeCompare(b[1], 'fr'));
+      const valeurFiltre = filtre.value;
+      filtre.innerHTML = `<option value="">Toutes les opérations</option>` + ops.map(([id, nom]) => `<option value="${id}">${esc(nom)}${avecPhases.has(id) ? '' : ' — (aucune phase)'}</option>`).join('');
+      filtre.value = valeurFiltre;
 
       const afficher = () => {
         const sel = filtre.value;
@@ -3684,8 +3689,9 @@
           tous.checked = tot > 0 && cochees.length === tot;
         };
         if (lignes.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="8" class="empty">${phases.length ? 'Aucune phase pour cette opération.' : 'Aucune phase définie pour l\'instant. Cliquez sur « Nouvelle phase » pour saisir vos premiers temps standards.'}</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="8" class="empty">${phases.length ? `Aucune phase pour cette opération. <button class="btn primary" id="ts-def" type="button" style="margin-left:8px;">Définir ses temps standards</button>` : 'Aucune phase définie pour l\'instant. Cliquez sur « Nouvelle phase » pour saisir vos premiers temps standards.'}</td></tr>`;
           majSelection();
+          const bd = tbody.querySelector('#ts-def'); if (bd) bd.addEventListener('click', () => ouvrirModalePhase(null, sel));
           return;
         }
         tbody.innerHTML = '';
@@ -3755,7 +3761,7 @@
     }
   }
 
-  async function ouvrirModalePhase(phase) {
+  async function ouvrirModalePhase(phase, opPreset) {
     let refs; let catalogue = [];
     try {
       refs = await getReferentiels();
@@ -3764,7 +3770,7 @@
     } catch (e) { toast(`Backend indisponible : ${e.message}`, 'error'); return; }
 
     const estEdition = !!phase;
-    const opOptions = refs.operations.map(o => `<option value="${o.id}" ${phase && phase.operation_id === o.id ? 'selected' : ''}>${esc(o.nom)}</option>`).join('');
+    const opOptions = refs.operations.map(o => `<option value="${o.id}" ${(phase && phase.operation_id === o.id) || (!phase && opPreset === o.id) ? 'selected' : ''}>${esc(o.nom)}</option>`).join('');
     const machOptions = `<option value="">— Standard de l'opération (toutes machines) —</option>` +
       refs.machines.slice().sort((a, b) => a.nom.localeCompare(b.nom, 'fr'))
         .map(m => `<option value="${m.id}" ${phase && phase.machine_id === m.id ? 'selected' : ''}>${esc(m.nom)}</option>`).join('');
