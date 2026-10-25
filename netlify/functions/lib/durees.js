@@ -172,13 +172,24 @@ async function calculerEtapes(supabase, ofId) {
             r.manquantes.forEach((v) => { if (!manquants.includes(v)) manquants.push(v); });
             detail = `à renseigner : ${r.manquantes.join(', ')}`;
           } else {
-            d = r.valeur / Number(p.cadence_par_h);
-            detail = `${Math.round(r.valeur * 100) / 100} ${unite} ÷ ${p.cadence_par_h} ${unite}/h  [${p.quantite_formule}]`;
+            const n = Math.max(1, Number(p.par_passage) || 1);
+            const passages = n > 1 ? Math.ceil(r.valeur / n - 1e-9) : r.valeur;
+            d = passages / Number(p.cadence_par_h);
+            detail = n > 1
+              ? `${Math.round(r.valeur * 100) / 100} ${unite} ÷ ${n} par passage = ${passages} passages ÷ ${p.cadence_par_h} passages/h  [${p.quantite_formule}]`
+              : `${Math.round(r.valeur * 100) / 100} ${unite} ÷ ${p.cadence_par_h} ${unite}/h  [${p.quantite_formule}]`;
           }
         }
       } else {
-        d = quantite / Number(p.cadence_par_h);
-        detail = `${quantite} ÷ ${p.cadence_par_h}/h`;
+        const n = Math.max(1, Number(p.par_passage) || 1);
+        if (n > 1) {
+          const passages = Math.ceil(quantite / n - 1e-9);
+          d = passages / Number(p.cadence_par_h);
+          detail = `${quantite} ex. ÷ ${n} par passage = ${passages} passages ÷ ${p.cadence_par_h} passages/h`;
+        } else {
+          d = quantite / Number(p.cadence_par_h);
+          detail = `${quantite} ÷ ${p.cadence_par_h}/h`;
+        }
       }
       return { nom: p.nom, duree_h: arrondi(d), detail, occupe_machine: p.occupe_machine, nb_personnes: p.nb_personnes, type_calcul: p.type_calcul };
     });
