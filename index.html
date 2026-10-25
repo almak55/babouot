@@ -1936,12 +1936,11 @@
     document.querySelectorAll('.row-menu').forEach(m => m.remove());
     const menu = el(`
       <div class="row-menu">
-        <button data-action="gamme">1. Voir la gamme opératoire</button>
-        <button data-action="chiffrage">2. Chiffrage des temps</button>
-        <button data-action="devis">3. Devis</button>
-        <button data-action="valider">4. Valider l'OF</button>
-        <button data-action="planifier">5. Planifier à l'heure</button>
-        <button data-action="affecter">5. Affecter au planning</button>
+        <button data-action="chiffrage">1. Chiffrage des temps</button>
+        <button data-action="gamme">2. Gamme opératoire</button>
+        <button data-action="planifier">3. Planifier à l'heure</button>
+        <button data-action="affecter">4. Affecter au planning</button>
+        <button data-action="valider">5. Valider l'OF</button>
         <button data-action="avancement">6. Avancement / production</button>
         <button data-action="deplanifier">Déplanifier l'OF</button>
         <button data-action="supprimer" class="danger">Supprimer l'OF</button>
@@ -1960,7 +1959,7 @@
       menu.remove();
       ouvrirModaleAffectation({ ofUuid });
     });
-    menu.querySelector('[data-action="devis"]').addEventListener('click', () => {
+    menu.querySelector('[data-action="devis"]')?.addEventListener('click', () => {
       menu.remove();
       ouvrirModaleDevis(ofUuid, ofNumero);
     });
@@ -5865,13 +5864,28 @@
       return new Promise((resolve) => {
         const zone = $('m-msg');
         zone.innerHTML = `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;background:#fff;">
-          <strong>Opérations de la gamme${nbOf > 1 ? ` (appliquées aux ${nbOf} OF)` : ''}</strong>
-          <div style="font-size:12px;color:var(--muted);margin:2px 0 6px;">Cochez les opérations nécessaires. Les dépendances sont recalculées en sautant celles que vous décochez.</div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:2px 14px;max-height:240px;overflow:auto;">
-          ${etapes.map((e) => `<label style="display:flex;gap:6px;align-items:center;font-size:13px;"><input type="checkbox" class="pa-et" value="${esc(e.code)}" ${e.par_defaut ? 'checked' : ''}>${esc(e.libelle)}${e.condition && e.condition !== 'toujours' ? ` <em style="color:var(--muted);font-size:11px;">(${esc(e.condition)})</em>` : ''}</label>`).join('')}</div>
-          ${catalogue.length ? `<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:13px;font-weight:600;">Autres opérations du catalogue (${catalogue.length}) — ajoutées en fin de gamme</summary>
+          <strong>Gamme Pléiade${nbOf > 1 ? ` (appliquée aux ${nbOf} OF)` : ''}</strong>
+          <div style="font-size:12px;color:var(--muted);margin:2px 0 6px;">Ordre et dépendances du modèle Pléiade déjà en place. Décochez les opérations inutiles : l'ordre et les « après… » se recalculent.</div>
+          <div id="pa-et-liste" style="max-height:300px;overflow:auto;"></div>`+`          ${catalogue.length ? `<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:13px;font-weight:600;">Autres opérations du catalogue (${catalogue.length}) — ajoutées en fin de gamme</summary>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:2px 14px;max-height:200px;overflow:auto;margin-top:6px;">${catalogue.map((o) => `<label style="display:flex;gap:6px;align-items:center;font-size:13px;"><input type="checkbox" class="pa-ex" value="${esc(o.code)}">${esc(o.nom)}</label>`).join('')}</div></details>` : ''}
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;"><button class="btn" id="pa-et-non">Annuler</button><button class="btn primary" id="pa-et-ok">Créer ${nbOf > 1 ? `les ${nbOf} OF` : 'l\'OF'}</button></div></div>`;
+        const parCode = Object.fromEntries(etapes.map((e) => [e.code, e]));
+        const dessiner = () => {
+          const cochees = new Set(Array.from(zone.querySelectorAll('.pa-et:checked')).map((c) => c.value));
+          const resoudre = (code, vus = new Set()) => { if (vus.has(code)) return []; vus.add(code); if (cochees.has(code)) return [code]; const e = parCode[code]; return e ? (e.predecesseurs || []).flatMap((q) => resoudre(q, vus)) : []; };
+          let n = 0;
+          zone.querySelectorAll('.pa-et-ligne').forEach((ligne) => {
+            const code = ligne.dataset.code; const on = cochees.has(code);
+            ligne.querySelector('.pa-num').textContent = on ? ++n : '–';
+            const preds = on ? Array.from(new Set((parCode[code].predecesseurs || []).flatMap((q) => resoudre(q)))) : [];
+            const simult = new Set(((parCode[code].simultane) || []).flatMap((q) => resoudre(q)));
+            ligne.querySelector('.pa-apres').textContent = on ? (preds.length ? 'après : ' + preds.map((q) => parCode[q].libelle + (simult.has(q) ? ' (en parallèle)' : '')).join(', ') : 'peut démarrer dès le début') : '';
+            ligne.style.opacity = on ? '1' : '.5';
+          });
+        };
+        $('pa-et-liste').innerHTML = etapes.map((e) => `<label class="pa-et-ligne" data-code="${esc(e.code)}" style="display:grid;grid-template-columns:22px 24px minmax(0,1fr) minmax(0,1.4fr);gap:8px;align-items:center;font-size:13px;padding:2px 0;border-top:1px solid var(--line);"><input type="checkbox" class="pa-et" value="${esc(e.code)}" ${e.par_defaut ? 'checked' : ''}><span class="pa-num" style="color:var(--muted);text-align:right;"></span><span>${esc(e.libelle)}${e.condition && e.condition !== 'toujours' ? ` <em style="color:var(--muted);font-size:11px;">(${esc(e.condition)})</em>` : ''}</span><span class="pa-apres" style="font-size:12px;color:var(--muted);"></span></label>`).join('');
+        $('pa-et-liste').querySelectorAll('.pa-et').forEach((c) => c.addEventListener('change', dessiner));
+        dessiner();
         zone.scrollIntoView({ block: 'nearest' });
         $('pa-et-non').onclick = () => { zone.innerHTML = ''; resolve(null); };
         $('pa-et-ok').onclick = () => {
@@ -6016,7 +6030,7 @@
     }
 
     const opsHtml = refs.operations.map(o => `
-      <label><input type="checkbox" value="${o.code}"> ${o.nom}</label>
+      <label class="op-ligne" style="display:grid;grid-template-columns:22px 26px minmax(0,1fr) minmax(0,1.3fr);gap:8px;align-items:center;"><input type="checkbox" value="${o.code}" data-nom="${esc(o.nom)}"><span class="op-num" style="color:var(--muted);text-align:right;"></span><span>${o.nom}</span><span class="op-apres" style="font-size:12px;color:var(--muted);"></span></label>
     `).join('');
 
     afficherModale(`
@@ -6038,10 +6052,21 @@
       <div class="field"><label>Priorité</label>
         <select id="m-priorite"><option value="normale">Normale</option><option value="haute">Haute</option><option value="urgente">Urgente</option></select>
       </div>
-      <div class="field"><label>Gamme opératoire (cocher dans l'ordre voulu)</label><div class="op-list">${opsHtml}</div></div>
+      <div class="field"><label>Opérations de la gamme <span class="plan-note">— listées dans l'ordre de fabrication ; cochez celles dont l'OF a besoin, les « après… » se calculent</span></label><div class="op-list">${opsHtml}</div></div>
       <div id="m-msg"></div>
       <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">Créer l'OF</button></div>
     `);
+    const majOps = () => {
+      let n = 0, prec = null;
+      document.querySelectorAll('.op-list .op-ligne').forEach((l) => {
+        const cb = l.querySelector('input'); const on = cb.checked;
+        l.querySelector('.op-num').textContent = on ? ++n : '';
+        l.querySelector('.op-apres').textContent = on ? (prec ? `après : ${prec}` : 'démarre dès le début') : '';
+        if (on) prec = cb.dataset.nom;
+      });
+    };
+    document.querySelectorAll('.op-list input[type="checkbox"]').forEach((cb) => cb.addEventListener('change', majOps));
+    majOps();
 
     let caracteristiquesFiche = {};
     document.getElementById('m-import').addEventListener('change', async (e) => {
@@ -6073,6 +6098,7 @@
         document.querySelectorAll('.op-list input[type="checkbox"]').forEach(cb => {
           cb.checked = (data.operation_codes || []).includes(cb.value);
         });
+        majOps();
 
         const confianceClasse = data.confiance === 'haute' ? 'ok' : data.confiance === 'basse' ? 'error' : '';
         statusEl.innerHTML = `<div class="msg ${confianceClasse}">Extraction ${data.confiance || ''} — relisez les champs avant de créer l'OF.${data.notes ? ' ' + data.notes : ''}</div>`;
