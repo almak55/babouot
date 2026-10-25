@@ -6429,7 +6429,8 @@
           if (!res2.ok) throw new Error(data.error || 'Erreur inconnue');
         } else if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
         msg.innerHTML = `<div class="msg ok">Affecté.</div>`;
-        toast('Affectation enregistrée.');
+        const c0 = data.creneaux && data.creneaux[0];
+        toast(c0 && c0.heure_debut && !heureDebutProposee && c0.heure_debut.slice(0, 5) !== '08:00' ? `Affectation enregistrée — démarre à ${c0.heure_debut.slice(0, 5)} (après la tâche précédente).` : 'Affectation enregistrée.');
         chargerDonneesReelles(); if (retour) retour(); else fermerModale();
       } catch (e) {
         msg.innerHTML = `<div class="msg error">${e.message}</div>`;
