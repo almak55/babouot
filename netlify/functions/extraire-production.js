@@ -104,7 +104,7 @@ Règles :
 - Ne crée jamais d'identifiant. N'invente aucune quantité : null si absente.
 - Si la quantité est exprimée dans une autre unité que des exemplaires (cahiers, feuilles, mètres...), ne la convertis pas : quantite = null et explique-le dans commentaire.
 - Ignore les lignes de total, d'en-tête et les lignes vides.
-- Fiche individuelle (une personne, une journée) : « personne.badge » = le numéro de badge écrit en tête (chiffres uniquement), « personne.nom » = le nom ou prénom écrit. Un titre peut avoir deux lignes (réglage puis production/couture) : mets les heures de chaque ligne dans heures_reelles de la ligne concernée, la quantité sur la ligne de production, et précise « réglage » ou « production » dans commentaire. Les temps sont des heures décimales (0,50 = 30 min). Si une tâche de la liste est planifiée ce jour pour la personne de la fiche, privilégie-la.
+- Fiche individuelle (une personne, une journée) : « personne.badge » = le numéro de badge écrit en tête (chiffres uniquement ; recopie chaque chiffre avec soin, l'écriture manuscrite prête à confusion entre 1, 4 et 7), « personne.nom » = le nom ou prénom écrit. Un titre peut avoir deux lignes (réglage puis production/couture) : mets les heures de chaque ligne dans heures_reelles de la ligne concernée, la quantité sur la ligne de production, et précise « réglage » ou « production » dans commentaire. Les temps sont des heures décimales (0,50 = 30 min). Si une tâche de la liste est planifiée ce jour pour la personne de la fiche, privilégie-la.
 
 Tâches de l'atelier (gamme_id | OF | titre | client | opération | machine | planning) :
 ${liste}`;
@@ -175,8 +175,14 @@ ${liste}`;
         if (nomLu && !proche(nomLu, parBadge)) alertes.push(`Le badge ${badgeLu} correspond à ${parBadge.nom}, mais la fiche porte le nom « ${nomLu} » : vérifiez la fiche.`);
       } else {
         const candidats = nomLu ? personnel.filter((p) => proche(nomLu, p)) : [];
-        if (badgeLu) alertes.push(`Badge ${badgeLu} inconnu : renseignez-le dans la fiche personnel de la bonne personne.`);
-        if (candidats.length === 1) { personne = { id: candidats[0].id, nom: candidats[0].nom, badge: badgeLu || null, methode: 'nom' }; alertes.push(`Personne reconnue par son nom (« ${nomLu} » → ${candidats[0].nom}), sans badge de confirmation.`); }
+        const bc = candidats.length === 1 ? chiffres(candidats[0].numero_badge) : '';
+        if (candidats.length === 1 && bc && badgeLu) {
+          const presque = badgeLu.length === bc.length && lev(badgeLu, bc) <= 1;
+          alertes.push(presque
+            ? `Badge lu ${badgeLu}, mais ${candidats[0].nom} a le badge ${bc} : le chiffre manuscrit a sans doute été mal lu. Personne reconnue par son nom ; vérifiez la fiche.`
+            : `Badge lu ${badgeLu}, alors que ${candidats[0].nom} a le badge ${bc} : vérifiez que la fiche est bien la sienne.`);
+        } else if (badgeLu) alertes.push(`Badge ${badgeLu} inconnu : renseignez-le dans la fiche personnel de la bonne personne.`);
+        if (candidats.length === 1) { personne = { id: candidats[0].id, nom: candidats[0].nom, badge: bc || badgeLu || null, methode: 'nom' }; if (!(bc && badgeLu)) alertes.push(`Personne reconnue par son nom (« ${nomLu} » → ${candidats[0].nom}), sans badge de confirmation.`); }
         else if (candidats.length > 1) { personne = { id: null, nom: nomLu, badge: badgeLu || null, methode: 'ambigu', candidats: candidats.map((c) => c.nom) }; alertes.push(`« ${nomLu} » peut désigner plusieurs personnes (${candidats.map((c) => c.nom).join(', ')}) : le numéro de badge est nécessaire.`); }
         else alertes.push(nomLu ? `Aucune personne ne correspond à « ${nomLu} ».` : 'Auteur de la fiche non identifié.');
       }
