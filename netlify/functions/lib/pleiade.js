@@ -134,7 +134,7 @@ function caracteristiquesOf(valeurs, opts) {
 // Toutes les étapes du modèle, avec indication de celles retenues par défaut (pour la liste à cocher).
 function etapesPossibles(ref, opts, pave) {
   return ref.modele.slice().sort((a, b) => a.ordre - b.ordre).map((e) => ({
-    code: e.code, operation_code: e.operation_code, libelle: e.libelle || e.operation_code, condition: e.condition, par_defaut: actif(e, opts, pave),
+    code: e.code, ordre: e.ordre, predecesseurs: e.predecesseurs || [], simultane: e.simultane || [], operation_code: e.operation_code, libelle: e.libelle || e.operation_code, condition: e.condition, par_defaut: actif(e, opts, pave),
   }));
 }
 
