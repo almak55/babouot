@@ -3421,10 +3421,13 @@
       <div class="field"><label>Code</label><input id="m-code" value="${machine ? machine.code : ''}" placeholder="ex: SIGLOCH"></div>
       <div class="field"><label>Nom</label><input id="m-nom" value="${machine ? machine.nom : ''}" placeholder="ex: Sigloch"></div>
       <div class="field"><label>Opérations (cocher toutes celles que cette machine peut faire)</label><div class="op-list">${opsHtml}</div></div>
-      <div class="field"><label>Personnes mobilisées par cette machine <span class="plan-note">— conducteur + aides (ex. 3 = un conducteur et deux aides)</span></label><input id="m-nbpers" type="number" min="1" step="1" value="${machine && machine.nb_personnes ? machine.nb_personnes : 1}" style="max-width:120px;"></div>
-      ${estEdition ? `<div class="field"><label>Conducteurs de la machine <span class="plan-note">— le 1er est le titulaire ; les suivants sont proposés dans l'ordre s'il n'est pas libre</span></label>
+      <div class="field"><label>Personnes mobilisées par cette machine <span class="plan-note">— 1 conducteur + des aides (ex. 5 = un conducteur et quatre aides)</span></label><input id="m-nbpers" type="number" min="1" step="1" value="${machine && machine.nb_personnes ? machine.nb_personnes : 1}" style="max-width:120px;"></div>
+      ${estEdition ? `<div class="field" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;"><label><strong>1) Conducteurs de la machine</strong> <span class="plan-note">— le 1er est le conducteur principal ; les suivants (secondaires) le remplacent s'il n'est pas disponible</span></label>
         <div id="m-cond"></div>
-        <div style="display:flex;gap:8px;margin-top:6px;"><select id="m-cond-add" style="flex:1;"></select><button class="btn" type="button" id="m-cond-btn">Ajouter</button></div></div>` : ''}
+        <div style="display:flex;gap:8px;margin-top:6px;"><select id="m-cond-add" style="flex:1;"></select><button class="btn" type="button" id="m-cond-btn">Ajouter un conducteur</button></div></div>
+      <div class="field" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;"><label><strong>2) Aides potentiels</strong> <span class="plan-note">— personnes qui peuvent assister cette machine ; le planning en choisit parmi elles, selon leur disponibilité</span></label>
+        <div id="m-aides"></div>
+        <div style="display:flex;gap:8px;margin-top:6px;"><select id="m-aide-add" style="flex:1;"></select><button class="btn" type="button" id="m-aide-btn">Ajouter une aide</button></div></div>` : ''}
       ${estEdition ? `<div class="field"><label><input type="checkbox" id="m-actif" ${machine.actif ? 'checked' : ''}> Machine active</label></div>
       <div class="field"><label>Temps de production de cette machine <span class="plan-note">— mise en route, réglage, cadence, nettoyage (par type de production)</span></label><button class="btn" type="button" id="m-profils">Configurer les temps de production…</button></div>` : ''}
       <div class="field"><label>Notes</label><input id="m-notes" value="${machine && machine.notes ? machine.notes : ''}" placeholder="optionnel"></div>
@@ -3436,6 +3439,8 @@
     // Conducteurs : liste ordonnée (titulaire en premier)
     let conds = estEdition ? (machine.conducteurs || []).map(c => ({ id: c.personnel_id, nom: c.nom })) : [];
     const condsAvant = conds.map(c => c.id).join(',');
+    let aidesM = estEdition ? (machine.aides || []).map(c => ({ id: c.personnel_id, nom: c.nom })) : [];
+    const aidesAvant = aidesM.map(c => c.id).sort().join(',');
     const dessinerConds = () => {
       const zone = document.getElementById('m-cond'); if (!zone) return;
       zone.innerHTML = conds.length ? conds.map((c, i) => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px solid var(--line);">
@@ -3448,10 +3453,22 @@
       zone.querySelectorAll('[data-cond-bas]').forEach(b => b.addEventListener('click', () => { const i = +b.dataset.condBas; [conds[i + 1], conds[i]] = [conds[i], conds[i + 1]]; dessinerConds(); }));
       zone.querySelectorAll('[data-cond-ret]').forEach(b => b.addEventListener('click', () => { conds.splice(+b.dataset.condRet, 1); dessinerConds(); }));
       const sel = document.getElementById('m-cond-add');
-      sel.innerHTML = '<option value="">— choisir une personne —</option>' + refs.personnel.filter(p => !conds.some(c => c.id === p.id)).map(p => `<option value="${p.id}">${esc(p.nom)}${p.poste ? ' — ' + esc(p.poste) : ''}</option>`).join('');
+      const optionsPers = (exclus) => '<option value="">— choisir une personne —</option>' + refs.personnel.filter(p => !exclus.some(c => c.id === p.id)).map(p => `<option value="${p.id}">${esc(p.nom)}${p.poste ? ' — ' + esc(p.poste) : ''}</option>`).join('');
+      sel.innerHTML = optionsPers([...conds, ...aidesM]);
+      const za = document.getElementById('m-aides');
+      if (za) {
+        za.innerHTML = aidesM.length ? aidesM.map((c, i) => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px solid var(--line);"><span style="flex:1;">${esc(c.nom)}</span><button class="btn" type="button" data-aide-ret="${i}" style="padding:1px 8px;color:var(--danger,#c0392b);">✕</button></div>`).join('')
+          : '<div class="plan-note">Aucune aide définie : le planning ne pourra pas proposer d\'aides pour cette machine.</div>';
+        za.querySelectorAll('[data-aide-ret]').forEach(b => b.addEventListener('click', () => { aidesM.splice(+b.dataset.aideRet, 1); dessinerConds(); }));
+        document.getElementById('m-aide-add').innerHTML = optionsPers([...conds, ...aidesM]);
+      }
     };
     if (estEdition) {
       dessinerConds();
+      document.getElementById('m-aide-btn').addEventListener('click', () => {
+        const sel = document.getElementById('m-aide-add'); if (!sel.value) return;
+        const p = refs.personnel.find(x => x.id === sel.value); if (p) aidesM.push({ id: p.id, nom: p.nom }); dessinerConds();
+      });
       document.getElementById('m-cond-btn').addEventListener('click', () => {
         const sel = document.getElementById('m-cond-add'); if (!sel.value) return;
         const p = refs.personnel.find(x => x.id === sel.value); if (p) conds.push({ id: p.id, nom: p.nom }); dessinerConds();
@@ -3476,7 +3493,7 @@
           ? { id: machine.id, code, nom, operation_codes, notes, actif: document.getElementById('m-actif').checked }
           : { code, nom, operation_codes, notes };
         if (nbPers !== (estEdition ? (machine.nb_personnes || 1) : 1)) payload.nb_personnes = nbPers;
-        if (estEdition && conds.map(c => c.id).join(',') !== condsAvant) payload.conducteurs = conds.map(c => c.id);
+        if (estEdition && (conds.map(c => c.id).join(',') !== condsAvant || aidesM.map(c => c.id).sort().join(',') !== aidesAvant)) { payload.conducteurs = conds.map(c => c.id); payload.aides = aidesM.map(c => c.id); }
         const res = await fetch(`${API}/gerer-machines`, {
           method: estEdition ? 'PUT' : 'POST',
           headers: { 'Content-Type': 'application/json' },
