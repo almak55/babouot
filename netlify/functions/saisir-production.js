@@ -4,11 +4,11 @@
 // body : {
 //   date: 'AAAA-MM-JJ',                 // journée concernée (défaut : aujourd'hui)
 //   saisies: [ {
-//     gamme_id,
+//     gamme_id, personnel_id?,           // personnel_id présent (même null) = ligne de cette personne ; le total de la tâche est la somme des lignes
 //     quantite?: number,                // produite CE JOUR-LÀ (unité de l'OF : exemplaires)
 //     pct?: number,                     // OU avancement cumulé (0-100), pour les opérations sans quantité
 //     termine?: boolean,                // l'étape est terminée
-//     heures_reelles?, commentaire?
+//     heures_reelles?, heures_reglage?, heures_production?, commentaire?
 //   } ],
 //   recaler?: boolean                   // défaut true : décale automatiquement le planning en cas de retard
 // }
@@ -25,6 +25,47 @@ const { majAvancementOf, recalerSiRetard } = require('./lib/recalage');
 const planifier = require('./planifier-of');
 
 const nombre = (v) => { if (v === null || v === undefined || v === '') return null; const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : null; };
+
+// Production saisie PAR PERSONNE : on écrit la ligne de la personne, puis production_jour = somme des lignes de la tâche ce jour-là.
+async function ecrirePersonne(supabase, g, date, s, v) {
+  const T = 'production_jour_personne';
+  const pid = s.personnel_id || null;
+  const filtre = (q) => (pid ? q.eq('personnel_id', pid) : q.is('personnel_id', null));
+  // Saisie globale antérieure (avant la saisie par personne) : conservée comme ligne « sans personne ».
+  const { data: avant, error: aErr } = await supabase.from(T).select('id').eq('gamme_operatoire_id', g.id).eq('date', date).limit(1);
+  if (aErr) throw new Error(/production_jour_personne/.test(aErr.message || '') ? 'La table production_jour_personne n\'existe pas : exécutez la migration 47 dans Supabase.' : aErr.message);
+  if (!avant.length) {
+    const { data: ancien } = await supabase.from('production_jour').select('*').eq('gamme_operatoire_id', g.id).eq('date', date).maybeSingle();
+    if (ancien && (Number(ancien.quantite) || ancien.pct_cumule !== null || ancien.termine || ancien.heures_reelles)) {
+      const { error: mErr } = await supabase.from(T).insert({ gamme_operatoire_id: g.id, of_id: g.of_id, date, personnel_id: null, quantite: Number(ancien.quantite) || 0,
+        heures_reglage: ancien.heures_reglage ?? null, heures_production: ancien.heures_production ?? ancien.heures_reelles ?? null, pct_cumule: ancien.pct_cumule, termine: !!ancien.termine, commentaire: ancien.commentaire || null });
+      if (mErr) throw mErr;
+    }
+  }
+  if (s.supprimer) {
+    const { error } = await filtre(supabase.from(T).delete().eq('gamme_operatoire_id', g.id).eq('date', date)); if (error) throw error;
+  } else {
+    const ligne = { gamme_operatoire_id: g.id, of_id: g.of_id, date, personnel_id: pid, quantite: v.quantite ?? 0, heures_reglage: v.hReg, heures_production: v.hProd,
+      pct_cumule: v.pct, termine: !!s.termine, commentaire: s.commentaire || null, updated_at: new Date().toISOString() };
+    const { data: ex, error: eErr } = await filtre(supabase.from(T).select('id').eq('gamme_operatoire_id', g.id).eq('date', date)).limit(1);
+    if (eErr) throw eErr;
+    const { error } = ex.length ? await supabase.from(T).update(ligne).eq('id', ex[0].id) : await supabase.from(T).insert(ligne);
+    if (error) throw error;
+  }
+  const { data: toutes, error: tErr } = await supabase.from(T).select('*').eq('gamme_operatoire_id', g.id).eq('date', date);
+  if (tErr) throw tErr;
+  if (!toutes.length) return { vide: true };
+  const somme = (k) => toutes.reduce((t, l) => t + (Number(l[k]) || 0), 0);
+  const aucune = (k) => toutes.every((l) => l[k] === null || l[k] === undefined);
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const hr = aucune('heures_reglage') ? null : r2(somme('heures_reglage')), hp = aucune('heures_production') ? null : r2(somme('heures_production'));
+  const pcts = toutes.map((l) => l.pct_cumule).filter((x) => x !== null && x !== undefined).map(Number);
+  const coms = [...new Set(toutes.map((l) => (l.commentaire || '').trim()).filter(Boolean))];
+  return { vide: false, ligne: {
+    gamme_operatoire_id: g.id, of_id: g.of_id, date, quantite: r2(somme('quantite')), pct_cumule: pcts.length ? Math.max(...pcts) : null,
+    termine: toutes.some((l) => l.termine), heures_reelles: hr === null && hp === null ? null : r2((hr || 0) + (hp || 0)),
+    commentaire: coms.join(' | ') || null, updated_at: new Date().toISOString(), heures_reglage: hr, heures_production: hp } };
+}
 
 const handlerProtege = async (event) => {
   const t0 = Date.now();
@@ -58,7 +99,10 @@ const handlerProtege = async (event) => {
       if (!g) { resultats.push({ gamme_id: s.gamme_id, erreur: 'Étape introuvable.' }); continue; }
       const quantite = nombre(s.quantite);
       const pctSaisi = nombre(s.pct);
-      if (!s.supprimer && quantite === null && pctSaisi === null && !s.termine) continue;   // rien saisi pour cette ligne
+      const parPersonne = Object.prototype.hasOwnProperty.call(s, 'personnel_id');
+      const hReg = nombre(s.heures_reglage), hProd = nombre(s.heures_production);
+      const seulementHeures = parPersonne && (hReg !== null || hProd !== null);
+      if (!s.supprimer && quantite === null && pctSaisi === null && !s.termine && !seulementHeures) continue;   // rien saisi pour cette ligne
       if (quantite !== null && quantite < 0) { resultats.push({ gamme_id: s.gamme_id, erreur: 'Quantité négative.' }); continue; }
       if (pctSaisi !== null && (pctSaisi < 0 || pctSaisi > 100)) { resultats.push({ gamme_id: s.gamme_id, erreur: 'Avancement entre 0 et 100 %.' }); continue; }
 
@@ -70,16 +114,27 @@ const handlerProtege = async (event) => {
         if (bloq) { resultats.push({ gamme_id: g.id, operation: g.operations.nom, erreur: `${g.operations.nom} ne peut pas être terminée : elle attend la fin de ${bloq.join(', ')}.` }); continue; }
       }
 
-      const ligne = {
+      let ligne = {
         gamme_operatoire_id: g.id, of_id: g.of_id, date,
         quantite: quantite ?? 0, pct_cumule: pctSaisi, termine: !!s.termine,
         heures_reelles: nombre(s.heures_reelles), commentaire: s.commentaire || null, updated_at: new Date().toISOString(),
       };
-      if (s.supprimer) {
+      // Réglage et production comptés séparément (temps standards) ; heures_reelles = total si non fourni.
+      let ligneDetail = { ...ligne, heures_reglage: hReg, heures_production: hProd };
+      if (ligne.heures_reelles === null && (hReg !== null || hProd !== null)) { ligne.heures_reelles = Math.round(((hReg || 0) + (hProd || 0)) * 100) / 100; ligneDetail.heures_reelles = ligne.heures_reelles; }
+      let effacer = !!s.supprimer;
+      if (parPersonne) {   // une ligne par personne ; le total de la tâche est recalculé
+        const agr = await ecrirePersonne(supabase, g, date, s, { quantite, pct: pctSaisi, hReg, hProd });
+        if (agr.vide) effacer = true;
+        else { effacer = false; ligneDetail = agr.ligne; ligne = { ...agr.ligne }; delete ligne.heures_reglage; delete ligne.heures_production; }
+      }
+      if (effacer) {
         const { error: delErr } = await supabase.from('production_jour').delete().eq('gamme_operatoire_id', g.id).eq('date', date);
         if (delErr) throw delErr;
       } else {
-        const { error: upErr } = await supabase.from('production_jour').upsert(ligne, { onConflict: 'gamme_operatoire_id,date' });
+        let { error: upErr } = await supabase.from('production_jour').upsert(ligneDetail, { onConflict: 'gamme_operatoire_id,date' });
+        // Migration 46 pas encore exécutée : on enregistre sans le détail réglage / production.
+        if (upErr && /heures_reglage|heures_production/.test(upErr.message || '')) ({ error: upErr } = await supabase.from('production_jour').upsert(ligne, { onConflict: 'gamme_operatoire_id,date' }));
         if (upErr) throw upErr;
       }
 

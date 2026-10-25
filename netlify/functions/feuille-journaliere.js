@@ -22,7 +22,7 @@ const handlerProtege = async (event) => {
     const debug = (event.queryStringParameters || {}).debug === '1';
 
     const [persRes, planRes, dispoRes, catRes, compRes, persMachRes] = await Promise.all([
-      supabase.from('personnel').select('id, nom, poste').eq('actif', true).order('nom'),
+      supabase.from('personnel').select('id, nom, poste, numero_badge').eq('actif', true).order('nom').then((r) => (r.error && /numero_badge/.test(r.error.message || '') ? supabase.from('personnel').select('id, nom, poste').eq('actif', true).order('nom') : r)),
       supabase.from('planning_jour')
         .select('id, heure_debut, heure_fin, phase, statut, machine_id, personnel_id, of_id, operation_id, machines(code, nom), operations(nom), ordres_fabrication(numero, quantite, delai, priorite, caracteristiques, titres(nom, client)), planning_jour_personnel(personnel_id)')
         .eq('date', date).order('heure_debut', { nullsFirst: true }),
@@ -76,7 +76,7 @@ const handlerProtege = async (event) => {
       const d = dispo[p.id];
       const statut = d ? d.statut : 'présent';
       return {
-        id: p.id, nom: p.nom, poste: p.poste || '',
+        id: p.id, nom: p.nom, poste: p.poste || '', badge: p.numero_badge || '',
         statut, plage: d && d.heure_debut ? `${hhmm(d.heure_debut)}–${hhmm(d.heure_fin)}` : '',
         commentaire: (d && d.commentaire) || '',
         creneaux: creneaux.filter((c) => c.personnel_ids.includes(p.id)),

@@ -13,6 +13,13 @@ try { ({ etapesBloquees } = require('./lib/dependances')); } catch (e) { console
 const hhmm = (t) => (t ? String(t).slice(0, 5) : null);
 const nombre = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
 
+const SEL_GAMME = 'id, of_id, sequence, statut, avancement_pct, quantite_realisee, parametres, operations(nom), machines(nom), ordres_fabrication(numero, quantite, titres(nom, client))';
+const versTache = (g, saisie) => { const of = g.ordres_fabrication || {};
+  return { gamme_id: g.id, of_id: g.of_id, of: of.numero || '', titre: (of.titres && of.titres.nom) || '', client: (of.titres && of.titres.client) || '',
+    operation: g.operations ? g.operations.nom : '', machine: g.machines ? g.machines.nom : 'Travail manuel', statut: g.statut,
+    quantite_totale: nombre(g.parametres && g.parametres.quantite) || of.quantite || null, quantite_realisee: nombre(g.quantite_realisee) || 0,
+    avancement_pct: Math.round(Number(g.avancement_pct || 0) * 10) / 10, debut: null, fin: null, personnel: [], personnel_ids: [], saisie: saisie || null, bloquee_par: [] }; };
+
 const handlerProtege = async (event) => {
   try {
     const p = event.queryStringParameters || {};
@@ -73,17 +80,42 @@ const handlerProtege = async (event) => {
       return { statusCode: 200, body: JSON.stringify({ of: { id: p.of_id, ...(of || {}) }, avancement_global: av.tous_termines ? 100 : av.global, etapes }) };
     }
 
+    if (p.chercher !== undefined) {
+      // Recherche d'une opération à ajouter à une fiche : par n° d'OF ou titre ; seules les étapes non terminées sont proposées.
+      const q = String(p.chercher || '').trim().replace(/[%,()*]/g, ' ').trim();
+      if (q.length < 2) return { statusCode: 200, body: JSON.stringify({ resultats: [] }) };
+      const [tRes, oNum] = await Promise.all([
+        supabase.from('titres').select('id').ilike('nom', `%${q}%`).limit(30),
+        supabase.from('ordres_fabrication').select('id').ilike('numero', `%${q}%`).limit(30),
+      ]);
+      if (tRes.error) throw tRes.error; if (oNum.error) throw oNum.error;
+      let ofIds = oNum.data.map((x) => x.id);
+      if (tRes.data.length) {
+        const oT = await supabase.from('ordres_fabrication').select('id').in('titre_id', tRes.data.map((x) => x.id)).limit(60);
+        if (oT.error) throw oT.error;
+        ofIds = [...new Set([...ofIds, ...oT.data.map((x) => x.id)])];
+      }
+      if (!ofIds.length) return { statusCode: 200, body: JSON.stringify({ resultats: [] }) };
+      const { data: gs, error: gErr } = await supabase.from('gammes_operatoires').select(SEL_GAMME)
+        .in('of_id', ofIds.slice(0, 60)).neq('statut', 'terminé').order('sequence');
+      if (gErr) throw gErr;
+      const resultats = gs.slice(0, 40).map((g) => versTache(g));
+      return { statusCode: 200, body: JSON.stringify({ resultats }) };
+    }
+
     if (!/^\d{4}-\d{2}-\d{2}$/.test(p.date || '')) return { statusCode: 400, body: JSON.stringify({ error: 'Paramètre date ou of_id requis.' }) };
     const { data: creneaux, error } = await supabase.from('planning_jour')
       .select('id, heure_debut, heure_fin, phase, gamme_operatoire_id, of_id, personnel_id, machines(nom), operations(nom), ordres_fabrication(numero, quantite, titres(nom, client)), planning_jour_personnel(personnel_id)')
       .eq('date', p.date).neq('statut', 'annulé').not('gamme_operatoire_id', 'is', null).order('heure_debut', { nullsFirst: true });
     if (error) throw error;
     const gids = [...new Set(creneaux.map((c) => c.gamme_operatoire_id))];
-    const [gRes, prodRes, persRes] = await Promise.all([
+    const [gRes, prodRes, persRes, ligRes] = await Promise.all([
       gids.length ? supabase.from('gammes_operatoires').select('id, statut, avancement_pct, quantite_realisee, parametres').in('id', gids) : { data: [] },
-      gids.length ? supabase.from('production_jour').select('gamme_operatoire_id, quantite, pct_cumule, termine, heures_reelles, commentaire').eq('date', p.date).in('gamme_operatoire_id', gids) : { data: [] },
-      supabase.from('personnel').select('id, nom'),
+      gids.length ? supabase.from('production_jour').select('*').eq('date', p.date).in('gamme_operatoire_id', gids) : { data: [] },
+      supabase.from('personnel').select('id, nom, actif, numero_badge').then((r) => (r.error && /numero_badge|actif/.test(r.error.message || '') ? supabase.from('personnel').select('id, nom') : r)),
+      supabase.from('production_jour_personne').select('*').eq('date', p.date).then((r) => (r.error ? { data: [], error: null } : r)),   // table absente (migration 47) : saisie globale seulement
     ]);
+    const lignesPers = ligRes.data || [];
     for (const r of [gRes, prodRes, persRes]) if (r.error) throw r.error;
     const nom = Object.fromEntries(persRes.data.map((x) => [x.id, x.nom]));
     // Étapes qui attendent la fin d'une étape précédente non terminée : elles ne peuvent pas être déclarées terminées.
@@ -105,13 +137,27 @@ const handlerProtege = async (event) => {
       return {
         gamme_id: gid, of_id: c0.of_id, of: of.numero || '', titre: (of.titres && of.titres.nom) || '', client: (of.titres && of.titres.client) || '',
         operation: (c0.operations && c0.operations.nom) || c0.phase || '', machine: c0.machines ? c0.machines.nom : 'Travail manuel',
-        debut: debuts[0] || null, fin: fins[fins.length - 1] || null, personnel: pers.map((id) => nom[id]).filter(Boolean),
+        debut: debuts[0] || null, fin: fins[fins.length - 1] || null, personnel: pers.map((id) => nom[id]).filter(Boolean), personnel_ids: pers,
         quantite_totale: nombre(g.parametres && g.parametres.quantite) || of.quantite || null,
         avancement_pct: Math.round(Number(g.avancement_pct || 0) * 10) / 10, quantite_realisee: nombre(g.quantite_realisee) || 0,
         statut: g.statut || '', saisie: sais, bloquee_par: bloquees[gid] || [],
       };
     });
-    return { statusCode: 200, body: JSON.stringify({ date: p.date, taches }) };
+    // Tâches saisies ce jour-là mais non planifiées ce jour-là : elles doivent aussi apparaître pour être corrigées.
+    const manquants = [...new Set(lignesPers.map((l) => l.gamme_operatoire_id).filter((id) => !gids.includes(id)))];
+    if (manquants.length) {
+      const [gx, px] = await Promise.all([
+        supabase.from('gammes_operatoires').select(SEL_GAMME).in('id', manquants),
+        supabase.from('production_jour').select('*').eq('date', p.date).in('gamme_operatoire_id', manquants),
+      ]);
+      if (gx.error) throw gx.error;
+      (gx.data || []).forEach((g) => taches.push(versTache(g, ((px.data || []).find((x) => x.gamme_operatoire_id === g.id)) || null)));
+    }
+    // Lignes déjà saisies par personne (y compris pour une tâche d'un autre jour planifiée), pour pré-remplir et corriger.
+    const lignesJour = lignesPers.map((l) => ({ gamme_id: l.gamme_operatoire_id, personnel_id: l.personnel_id, quantite: nombre(l.quantite) || 0,
+      heures_reglage: nombre(l.heures_reglage), heures_production: nombre(l.heures_production), pct_cumule: nombre(l.pct_cumule), termine: !!l.termine, commentaire: l.commentaire || '' }));
+    const personnes = persRes.data.filter((x) => x.actif !== false).map((x) => ({ id: x.id, nom: x.nom, badge: x.numero_badge || '' })).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+    return { statusCode: 200, body: JSON.stringify({ date: p.date, taches, personnes, lignes: lignesJour }) };
   } catch (e) {
     console.error('lecture-production error:', e);
     return { statusCode: 500, body: JSON.stringify({ error: e.message || String(e) }) };
