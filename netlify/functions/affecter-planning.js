@@ -269,6 +269,11 @@ const handlerProtege = async (event) => {
       .eq('id', gamme.id);
     if (updateError) throw updateError;
 
+    // Une seule mise en route et un seul nettoyage par journée et par machine (opérations cochées dans les profils machine).
+    try {
+      if (machineId) await require('./lib/mutualisation').mutualiserJours(supabase, morceaux.map((m) => ({ machine_id: machineId, date: m.date, operation_id: gamme.operation_id })));
+    } catch (e) { console.warn('mutualisation ignorée :', e.message); }
+
     return { statusCode: 200, body: JSON.stringify({ planning_jour_id: ids[0], planning_jour_ids: ids, personnel_ids: personnelIds, date, creneaux: morceaux }) };
   } catch (err) {
     return { statusCode: 500, body: JSON.stringify({ error: err.message }) };

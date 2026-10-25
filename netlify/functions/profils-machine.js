@@ -36,16 +36,17 @@ const handlerProtege = async (event) => {
 
     if (event.httpMethod === 'GET') {
       if (!q.machine_id) return { statusCode: 400, body: JSON.stringify({ error: 'machine_id requis.' }) };
-      const [{ data: types, error: e1 }, { data: phases, error: e2 }] = await Promise.all([
+      let [{ data: types, error: e1 }, { data: phases, error: e2 }] = await Promise.all([
         supabase.from('types_production').select('code, libelle').order('ordre'),
-        supabase.from('phases_standard').select('*, operations(nom)').eq('machine_id', q.machine_id),
+        supabase.from('phases_standard').select('*, operations(nom, mutualiser_mer_net)').eq('machine_id', q.machine_id),
       ]);
+      if (e2 && /mutualiser_mer_net/.test(e2.message || '')) ({ data: phases, error: e2 } = await supabase.from('phases_standard').select('*, operations(nom)').eq('machine_id', q.machine_id));   // migration 49 pas encore exécutée
       if (e1) throw e1;
       if (e2) throw e2;
       const profils = new Map();
       phases.filter((p) => NOMS_LISTE.includes(p.nom)).forEach((p) => {
         const cle = `${p.operation_id}|${p.type_production || ''}`;
-        if (!profils.has(cle)) profils.set(cle, { operation_id: p.operation_id, operation: p.operations.nom, type_production: p.type_production, mise_en_route_min: null, reglage_min: null, cadence_par_h: null, nettoyage_min: null, reglage_fer_min: null, nb_personnes: 1, quantite_formule: null, unite_cadence: null, par_passage: 1 });
+        if (!profils.has(cle)) profils.set(cle, { operation_id: p.operation_id, operation: p.operations.nom, type_production: p.type_production, mise_en_route_min: null, reglage_min: null, cadence_par_h: null, nettoyage_min: null, reglage_fer_min: null, nb_personnes: 1, quantite_formule: null, unite_cadence: null, par_passage: 1, mutualiser: !!(p.operations && p.operations.mutualiser_mer_net) });
         const pr = profils.get(cle);
         if (p.nom === NOMS.mise_en_route) pr.mise_en_route_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
         if (p.nom === NOMS.reglage) pr.reglage_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
@@ -97,6 +98,10 @@ const handlerProtege = async (event) => {
         if (inconnues.length) return { statusCode: 400, body: JSON.stringify({ error: `Caractéristique inconnue : ${inconnues.map((x) => `« ${x} »`).join(', ')}. Créez-la d'abord dans « Caractéristiques produit ».` }) };
       }
 
+      if (typeof b.mutualiser === 'boolean') {   // case « une seule mise en route / un seul nettoyage par journée » : propre à l'opération
+        const { error: mErr } = await supabase.from('operations').update({ mutualiser_mer_net: b.mutualiser }).eq('id', b.operation_id);
+        if (mErr) throw new Error(/mutualiser_mer_net/.test(mErr.message || '') ? `${mErr.message} — exécutez d'abord la migration 49 dans Supabase.` : mErr.message);
+      }
       await effacer(supabase, b.machine_id, b.operation_id, type);
       const lignes = [];
       const ajout = (nom, ordre, champs) => lignes.push({ operation_id: b.operation_id, machine_id: b.machine_id, type_production: type, nom, ordre, occupe_machine: true, nb_personnes: 1, ...champs });

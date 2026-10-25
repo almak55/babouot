@@ -435,6 +435,12 @@ const handlerProtege = async (event) => {
       if (error) throw error;
     }
 
+    // Une seule mise en route et un seul nettoyage par journée et par machine (opérations cochées) : jours touchés par ce planning.
+    try {
+      const cibles = [...lignes.map((x) => x.ligne), ...lignesARemplacer].filter((l) => l.machine_id).map((l) => ({ machine_id: l.machine_id, date: l.date, operation_id: l.operation_id }));
+      if (cibles.length) await require('./lib/mutualisation').mutualiserJours(supabase, cibles);
+    } catch (e) { console.warn('mutualisation ignorée :', e.message); }
+
     reponse.applique = true;
     reponse.lignes_creees = creees.length;
     return { statusCode: 200, body: JSON.stringify(reponse) };
