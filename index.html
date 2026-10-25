@@ -6383,27 +6383,44 @@
       zone.textContent = 'Recherche du personnel disponible…';
       try {
         const machine = document.getElementById('m-machine').value;
-        const res = await fetch(`${API}/proposer-affectation?gamme_id=${id}&date=${date}${machine ? '&machine_id=' + machine : ''}`);
+        const res = await fetch(`${API}/proposer-affectation?gamme_id=${id}&date=${date}${machine ? '&machine_id=' + machine : ''}${machine && !dateManuelle ? '&chercher_jour=1' : ''}`);
         const r = await res.json();
         if (num !== propNum) return;
         if (!res.ok) throw new Error(r.error || 'Erreur inconnue');
+        let noteJour = '';
+        if (r.jour_propose && r.jour_propose.change) {
+          document.getElementById('m-date').value = r.jour_propose.date;
+          noteJour = `<div>📅 Jour proposé : <strong>${esc(r.jour_propose.libelle)}</strong> — premier jour où la machine et un conducteur sont disponibles.</div>`;
+          majDispo(false);
+        }
+        // Étiquettes « conducteur » dans la liste des personnes
+        const badges = {}; (r.conducteurs || []).forEach(c => { badges[c.id] = c.rang === 1 ? 'conducteur titulaire' : 'conducteur suppléant'; });
+        document.querySelectorAll('#m-personnel-list label').forEach(l => {
+          const inp = l.querySelector('input'); if (!inp) return;
+          let b = l.querySelector('.pf-badge'); if (b) b.remove();
+          if (badges[inp.value]) l.insertAdjacentHTML('beforeend', ` <span class="pf-badge" style="background:var(--accent,#0f766e);color:#fff;border-radius:8px;padding:0 7px;font-size:11px;">${badges[inp.value]}</span>`);
+        });
         const cases = Array.from(document.querySelectorAll('#m-personnel-list input'));
         cases.forEach(c => { c.checked = false; });
         const ids = [r.conducteur && r.conducteur.id, ...r.aides.map(a => a.id)].filter(Boolean);
         ids.forEach(pid => { const c = cases.find(x => x.value === pid); if (c) c.checked = true; });
         persTouche = false;
         heureDebutProposee = r.debut_suggere && r.debut_suggere.date === date ? r.debut_suggere.heure : null;
-        let h = `<div>Équipe requise : <strong>${r.equipe_requise}</strong> personne(s)${r.prioritaire ? ' — OF prioritaire' : ''}.</div>`;
-        if (r.conducteur) {
-          h += `<div>🧑‍🏭 Conducteur : <strong>${esc(r.conducteur.nom)}</strong> (${r.conducteur.rang === 1 ? 'titulaire' : 'suppléant ' + (r.conducteur.rang - 1)}) — ${esc(r.conducteur.raison || '')}</div>`;
-        } else if (machine) {
-          h += `<div style="color:var(--danger);">Aucun conducteur disponible pour cette machine sur ce créneau.</div>`;
+        let h = noteJour + `<div>Équipe requise : <strong>${r.equipe_requise}</strong> personne(s)${r.prioritaire ? ' — OF prioritaire' : ''}.</div>`;
+        if (machine) {
+          h += `<div style="margin-top:4px;"><strong>Conducteurs de la machine</strong> (seuls ceux-ci peuvent la conduire) :</div>`;
+          if (!(r.conducteurs || []).length) h += `<div style="color:var(--danger);">Aucun conducteur défini : renseignez-les dans la fiche de la machine.</div>`;
+          (r.conducteurs || []).forEach(c => {
+            const etat = c.statut === 'libre' ? 'libre' : c.statut === 'libre_apres' ? 'libre après sa tâche en cours' : (c.motif || 'indisponible');
+            const choisi = r.conducteur && r.conducteur.id === c.id;
+            h += `<div style="padding-left:10px;">${choisi ? '✅' : '▫️'} ${esc(c.nom)} <span style="color:var(--muted);">(${c.rang === 1 ? 'titulaire' : 'suppléant ' + (c.rang - 1)})</span> — ${esc(etat)}</div>`;
+          });
         }
         if (r.debut_suggere) {
           if (heureDebutProposee) h += `<div>⏱ Début ajusté à <strong>${esc(r.debut_suggere.heure)}</strong> (fin de la tâche en cours du conducteur).</div>`;
           else h += `<div style="color:var(--danger);">Le conducteur n'est libre que le ${esc(r.debut_suggere.date)} à ${esc(r.debut_suggere.heure)} : changez le jour de début pour en tenir compte.</div>`;
         }
-        if (r.aides.length) h += `<div>Aides : ${r.aides.map(a => esc(a.nom) + (a.competent ? '' : ' (sans compétence enregistrée)')).join(', ')}.</div>`;
+        h += `<div style="margin-top:4px;"><strong>Aides</strong> : ${r.aides.length ? r.aides.map(a => esc(a.nom) + (a.competent ? '' : ' (sans compétence enregistrée)')).join(', ') : 'aucune'}.</div>`;
         (r.avertissements || []).forEach(w => { h += `<div style="color:var(--danger);">⚠ ${esc(w)}</div>`; });
         zone.innerHTML = h;
       } catch (e) { if (num === propNum) zone.innerHTML = `<span style="color:var(--danger);">Proposition indisponible (${esc(e.message)}).</span>`; }
