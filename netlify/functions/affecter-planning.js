@@ -177,10 +177,25 @@ const handlerProtege = async (event) => {
         };
       }
 
-      // Déjà affectées ailleurs sur ces créneaux ? Si c'est le même jour, on enchaîne : l'étape démarre
-      // quand la personne a fini sa tâche précédente (si la machine est libre à ce moment-là).
+      // Déjà affectées ailleurs sur ces créneaux ? Si c'est le même jour, on enchaîne : toute l'équipe doit être là en même
+      // temps, donc l'étape démarre quand la dernière personne concernée a fini sa tâche précédente (si la machine est libre).
       const fmtJour = (d) => d.split('-').reverse().slice(0, 2).join('/');
       const hhmmDe = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+      const numeros = {};
+      const decrire = async (o) => {
+        const pj = o.planning_jour;
+        if (pj.of_id && !(pj.of_id in numeros)) {
+          const { data: ofp } = await supabase.from('ordres_fabrication').select('numero').eq('id', pj.of_id).maybeSingle();
+          numeros[pj.of_id] = ofp ? ofp.numero : 'OF ?';
+        }
+        const h = pj.heure_debut ? `${String(pj.heure_debut).slice(0, 5)}–${String(pj.heure_fin).slice(0, 5)}` : 'journée entière';
+        return `${nomDe(o.personnel_id)} : ${numeros[pj.of_id] || 'OF ?'}${pj.phase ? ' · ' + pj.phase : ''} ${h}`;
+      };
+      const chaine = [];   // pourquoi le début a été repoussé, étape après étape
+      const refus = async (prise, motif) => {
+        const trace = chaine.length ? ` Début repoussé : ${chaine.join(' ; ')}.` : '';
+        return { statusCode: 409, body: JSON.stringify({ error: `${nomDe(prise.personnel_id)} est déjà affecté(e) sur ce créneau le ${fmtJour(prise.planning_jour.date)} (${await decrire(prise)})${motif ? ' — ' + motif : ''}.${trace}`, conflit: 'personnel' }) };
+      };
       for (let essai = 0; essai < 12; essai++) {
         const dates = Array.from(new Set(morceaux.map((m) => m.date)));
         const { data: occupees, error: persError } = await supabase
@@ -192,29 +207,22 @@ const handlerProtege = async (event) => {
         if (persError) throw persError;
         const prise = occupees.find((o) => morceaux.some((m) => o.planning_jour.date === m.date && chevauche(m, o.planning_jour)));
         if (!prise) break;
-        const refus = async (motif) => {
-          // Détail de la tâche qui gêne, pour comprendre le blocage.
-          let detail = '';
-          try {
-            const pj = prise.planning_jour;
-            const { data: ofp } = pj.of_id ? await supabase.from('ordres_fabrication').select('numero').eq('id', pj.of_id).maybeSingle() : { data: null };
-            const h = pj.heure_debut ? ` ${String(pj.heure_debut).slice(0, 5)}–${String(pj.heure_fin).slice(0, 5)}` : ' (journée entière)';
-            detail = ` [tâche gênante : ${ofp ? ofp.numero : 'OF ?'}${pj.phase ? ' · ' + pj.phase : ''}${h}]`;
-          } catch (e) { /* détail facultatif */ }
-          return { statusCode: 409, body: JSON.stringify({ error: `${nomDe(prise.personnel_id)} est déjà affecté(e) ailleurs sur ce créneau (${fmtJour(prise.planning_jour.date)})${motif ? ' — ' + motif : ''}${detail}.`, conflit: 'personnel' }) };
-        };
         const jour1 = morceaux[0].date;
-        if (prise.planning_jour.date !== jour1 || !avecDuree) return await refus('');
+        if (prise.planning_jour.date !== jour1 || !avecDuree) return await refus(prise, '');
         // fin de la dernière tâche qui chevauche, ce jour-là, pour les personnes concernées
         const gênantes = occupees.filter((o) => o.planning_jour.date === jour1 && morceaux.some((m) => m.date === jour1 && chevauche(m, o.planning_jour)));
-        if (gênantes.some((o) => !o.planning_jour.heure_fin)) return await refus('sa journée est entièrement réservée');
-        const finMin = Math.max(...gênantes.map((o) => PL.hhmm(String(o.planning_jour.heure_fin).slice(0, 5))));
-        if (finMin >= PL.hhmm(cal.heure_fin)) return await refus('plus de place ce jour-là');
+        if (gênantes.some((o) => !o.planning_jour.heure_fin)) return await refus(gênantes.find((o) => !o.planning_jour.heure_fin), 'sa journée est entièrement réservée');
+        const derniere = gênantes.slice().sort((a, b) => PL.hhmm(String(b.planning_jour.heure_fin).slice(0, 5)) - PL.hhmm(String(a.planning_jour.heure_fin).slice(0, 5)))[0];
+        const finMin = PL.hhmm(String(derniere.planning_jour.heure_fin).slice(0, 5));
+        if (finMin >= PL.hhmm(cal.heure_fin)) return await refus(derniere, 'plus de place ce jour-là');
+        chaine.push(`l'équipe n'est au complet qu'à ${hhmmDe(finMin)} (${await decrire(derniere)})`);
         dateDemandee = jour1; heureDebutMin = finMin;
         morceaux = decouper(jour1);
+        const fin1 = morceaux.filter((m) => m.date === jour1).map((m) => m.heure_fin).filter(Boolean).sort().pop();
+        chaine.push(`l'étape irait alors jusqu'à ${fin1 ? String(fin1).slice(0, 5) : '?'}`);
         const blocM = await machineBloquee(morceaux);
-        if (blocM) return { statusCode: 409, body: JSON.stringify({ error: `${nomDe(prise.personnel_id)} n'est libre qu'à ${hhmmDe(finMin)}, mais la machine est alors déjà occupée.`, conflit: 'machine' }) };
-        if (essai === 11) return await refus('');
+        if (blocM) return { statusCode: 409, body: JSON.stringify({ error: `L'équipe n'est au complet qu'à ${hhmmDe(finMin)} (${await decrire(derniere)}), mais la machine est alors déjà occupée.`, conflit: 'machine' }) };
+        if (essai === 11) return await refus(prise, '');
       }
     }
 
