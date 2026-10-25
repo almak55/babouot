@@ -1402,9 +1402,6 @@
       <div id="sp-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 2px;"></div>
       <div id="sp-quick-msg" class="plan-note" style="min-height:16px;"></div>
       <div id="sp-blocs"><div class="msg">Chargement…</div></div>
-      <details style="margin-top:8px;"><summary class="plan-note" style="cursor:pointer;">Importer un relevé scanné ou un fichier Excel (aide par IA, à vérifier)</summary>
-        <div class="field" style="margin-top:6px;"><input type="file" id="sp-file" accept=".xlsx,.xls,.csv,.pdf,image/*">
-          <div id="sp-import-msg" class="plan-note" style="margin-top:4px;">Les chiffres lus sont placés dans le bloc de la personne reconnue : vous vérifiez avant d'enregistrer.</div></div></details>
       <label style="display:flex;gap:8px;align-items:center;margin:12px 0 4px;font-size:13px;"><input type="checkbox" id="sp-recaler" checked> Décaler automatiquement le planning si une tâche n'est pas terminée comme prévu</label>
       <div id="m-msg"></div>
       <div class="actions"><span id="sp-resume" class="plan-note" style="margin-right:auto;"></span><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="sp-go" disabled>Enregistrer</button></div>
@@ -1453,11 +1450,11 @@
           <strong>${b.pid ? '👤 ' + esc(b.nom) + (b.badge ? ' <span class="plan-note">(badge ' + esc(b.badge) + ')</span>' : '') : 'Saisie globale (sans personne)'}</strong>
           <button class="btn sp-bloc-x" type="button" style="padding:2px 10px;font-size:12px;" title="Retirer cette fiche de la page (sans effacer ce qui est enregistré)">Retirer la fiche</button></div>
         ${aucune ? '<div class="plan-note" style="margin:6px 0;">Aucune tâche planifiée pour cette personne ce jour-là : ajoutez l\'opération ci-dessous.</div>' : `<div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>Tâche</th><th>Réglage (h)</th><th>Production (h)</th><th>Qté produite</th><th>Terminée</th><th>Remarque</th><th></th></tr></thead><tbody>${b.rows.map((r, ri) => ligneHtml(b, bi, r, ri)).join('')}</tbody></table></div>`}
-        <div style="margin-top:6px;position:relative;"><input class="sp-add" type="text" placeholder="+ Autre opération (autre OF) : n° d'OF ou titre" style="width:100%;max-width:420px;"><div class="sp-res"></div></div></div>`;
+        <div style="margin-top:6px;position:relative;"><input class="sp-add" type="text" placeholder="+ Ajouter une opération : n° d'OF ou titre (+ opération), puis Entrée" style="width:100%;max-width:420px;"><div class="sp-res"></div></div></div>`;
     }
     function rendre(focus) {
       const box = document.getElementById('sp-blocs');
-      box.innerHTML = blocs.length ? blocs.map(blocHtml).join('') : '<div class="msg">Tapez un numéro de badge ou un nom ci-dessus (ou cliquez un nom), puis recopiez la fiche papier.</div>';
+      box.innerHTML = blocs.length ? blocs.map(blocHtml).join('') : '<div class="msg">Tapez le numéro de badge de la fiche papier ci-dessus (ou cliquez un nom), puis recopiez ses lignes.</div>';
       majAlertes(); majPuces();
       if (focus) { const f = box.querySelector(`[data-bloc="${focus.bi}"] tbody tr:nth-child(${(focus.ri || 0) + 1}) .sp-hr`) || box.querySelector(`[data-bloc="${focus.bi}"] .sp-add`); if (f) { f.focus(); f.select && f.select(); } }
     }
@@ -1519,12 +1516,15 @@
       return { msg: `Aucune personne ne correspond à « ${x} ».` };
     }
     const quick = document.getElementById('sp-quick'), quickMsg = document.getElementById('sp-quick-msg');
-    quick.addEventListener('keydown', (ev) => {
-      if (ev.key !== 'Enter') return; ev.preventDefault();
+    function traiterQuick(auto) {
       const r = resoudre(quick.value); if (r.aucun) return;
-      if (r.msg) { quickMsg.innerHTML = `<span style="color:var(--danger-text);">${esc(r.msg)}</span>`; return; }
+      if (r.msg) { if (!auto) quickMsg.innerHTML = `<span style="color:var(--danger-text);">${esc(r.msg)}</span>`; return; }
       quickMsg.textContent = ''; quick.value = ''; ajouterPersonne(r.p.id);
-    });
+    }
+    quick.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); traiterQuick(false); } });
+    quick.addEventListener('change', () => traiterQuick(false));
+    // Choix d'une ligne de la liste déroulante (« 217 · Alain ») : pris en compte sans appuyer sur Entrée.
+    quick.addEventListener('input', () => { const v = quick.value; if (/^\d+\s·\s/.test(v) && personnes.some(p => (p.badge ? p.badge + ' · ' : '') + p.nom === v)) traiterQuick(true); else if (/^\d+$/.test(v.trim()) && personnes.filter(p => String(p.badge).replace(/\D/g, '') === v.trim()).length === 1 && !personnes.some(p => String(p.badge).replace(/\D/g, '').startsWith(v.trim()) && String(p.badge).replace(/\D/g, '') !== v.trim())) { traiterQuick(true); } });
     document.getElementById('sp-chips').addEventListener('click', (ev) => { const c = ev.target.closest('.sp-chip'); if (c) ajouterPersonne(c.dataset.pid); });
 
     // ----- Édition (délégation) : l'état est tenu à jour à chaque frappe
@@ -1560,18 +1560,31 @@
       const suivant = liste[i + 1]; if (suivant) { suivant.focus(); suivant.select(); } else { quick.focus(); quick.select(); }
     });
     let minuteur = null;
+    const motsDe = (q) => normN(q).split(/\s+/).filter(Boolean);
+    async function chercherOperations(q) {
+      const mots = motsDe(q); if (!mots.length || mots[0].length < 2) return [];
+      const res = await fetch(`${API}/lecture-production?chercher=${encodeURIComponent(mots[0])}`); const d = await lireJson(res);
+      if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
+      const reste = mots.slice(1);
+      return d.resultats.filter(t => { const txt = normN([t.of, t.titre, t.client, t.operation, t.machine].join(' ')); return reste.every(m => txt.includes(m)); })
+        .sort((a, b) => (a.statut === 'en cours' ? 0 : 1) - (b.statut === 'en cours' ? 0 : 1));
+    }
+    function afficherResultats(zone, liste) {
+      zone.__liste = liste;
+      zone.innerHTML = liste.length ? `<div style="border:1px solid var(--line);border-radius:6px;background:var(--paper-raised,#fff);max-height:240px;overflow:auto;margin-top:2px;">${liste.map(t => `<div class="sp-res-item" data-t='${esc(JSON.stringify(t))}' style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--line);font-size:13px;"><strong>${esc(t.of)}</strong> · ${esc(t.titre)} — ${esc(t.operation)} <span class="plan-note">(${esc(t.machine)} · ${t.avancement_pct} % fait${t.statut === 'en cours' ? ' · en cours' : ''})</span></div>`).join('')}</div>` : '<div class="plan-note">Aucune opération non terminée pour cette recherche.</div>';
+    }
     function rechercher(input) {
       const zone = input.parentElement.querySelector('.sp-res'); const q = input.value.trim();
       clearTimeout(minuteur);
-      if (q.length < 2) { zone.innerHTML = ''; return; }
-      minuteur = setTimeout(async () => {
-        try {
-          const res = await fetch(`${API}/lecture-production?chercher=${encodeURIComponent(q)}`); const d = await lireJson(res);
-          if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
-          zone.innerHTML = d.resultats.length ? `<div style="border:1px solid var(--line);border-radius:6px;background:var(--paper-raised,#fff);max-height:220px;overflow:auto;margin-top:2px;">${d.resultats.map(t => `<div class="sp-res-item" data-t='${esc(JSON.stringify(t))}' style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--line);font-size:13px;"><strong>${esc(t.of)}</strong> · ${esc(t.titre)} — ${esc(t.operation)} <span class="plan-note">(${esc(t.machine)} · ${t.avancement_pct} % fait)</span></div>`).join('')}</div>` : '<div class="plan-note">Aucune opération en cours pour cette recherche.</div>';
-        } catch (e) { zone.innerHTML = `<div class="plan-note" style="color:var(--danger-text);">${esc(e.message)}</div>`; }
-      }, 300);
+      if (q.length < 2) { zone.innerHTML = ''; zone.__liste = []; return; }
+      minuteur = setTimeout(async () => { try { afficherResultats(zone, await chercherOperations(q)); } catch (e) { zone.innerHTML = `<div class="plan-note" style="color:var(--danger-text);">${esc(e.message)}</div>`; } }, 250);
     }
+    // Entrée dans la zone « autre opération » : choisit le résultat s'il est unique (taper « 0004 couture » suffit).
+    box.addEventListener('keydown', async (ev) => {
+      if (ev.key !== 'Enter' || !ev.target.classList.contains('sp-add')) return; ev.preventDefault();
+      const input = ev.target, zone = input.parentElement.querySelector('.sp-res'); clearTimeout(minuteur);
+      try { const l = await chercherOperations(input.value); afficherResultats(zone, l); if (l.length === 1) zone.querySelector('.sp-res-item').click(); } catch (e) { zone.innerHTML = `<div class="plan-note" style="color:var(--danger-text);">${esc(e.message)}</div>`; }
+    });
 
     // ----- Chargement d'un jour
     async function charger() {
@@ -1604,40 +1617,6 @@
     document.getElementById('sp-prec').addEventListener('click', () => decalerJour(-1));
     document.getElementById('sp-suiv').addEventListener('click', () => decalerJour(1));
     document.getElementById('sp-date').addEventListener('change', charger);
-
-    // ----- Import d'un relevé (aide) : placé dans le bloc de la personne reconnue
-    document.getElementById('sp-file').addEventListener('change', async (ev) => {
-      const file = ev.target.files[0]; const info = document.getElementById('sp-import-msg'); if (!file) return;
-      if (file.size > 4 * 1024 * 1024) { info.innerHTML = '<span style="color:var(--danger-text);">Fichier trop volumineux (4 Mo maximum).</span>'; return; }
-      info.textContent = 'Lecture du relevé en cours…';
-      try {
-        const nom = file.name.toLowerCase();
-        const mime = file.type || (nom.endsWith('.pdf') ? 'application/pdf' : nom.endsWith('.csv') ? 'text/csv' : nom.endsWith('.xls') ? 'application/vnd.ms-excel' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        const base64 = await fichierEnBase64(file);
-        const res = await fetch(`${API}/extraire-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file_base64: base64, file_name: file.name, mime_type: mime, date: document.getElementById('sp-date').value }) });
-        const d = await lireJson(res);
-        if (!res.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
-        if (d.date && d.date !== document.getElementById('sp-date').value) { document.getElementById('sp-date').value = d.date; await charger(); }
-        const pid = d.personne && d.personne.id ? d.personne.id : null;
-        let b = blocDe(pid) || creerBloc(pid);
-        d.propositions.forEach(p => {
-          if (!tacheDe(p.gamme_id)) taches.push(p.tache);
-          let r = b.rows.find(x => x.gid === p.gamme_id); if (!r) { r = nouvelleLigne(p.gamme_id, pid); b.rows.push(r); }
-          if (p.quantite !== null && p.quantite !== undefined) r.qte = p.quantite;
-          if (p.heures_reelles !== null && p.heures_reelles !== undefined) { if (/r[ée]glage/i.test(p.commentaire || '')) r.hr = p.heures_reelles; else r.hp = p.heures_reelles; }
-          if (p.pct !== null && p.pct !== undefined) r.pct = p.pct;
-          if (p.termine) r.fini = true; if (p.commentaire) r.com = p.commentaire;
-          r.touche = true;
-          r.src = `${p.texte_source} (${p.confiance === 'haute' ? 'fiable' : p.confiance === 'moyenne' ? 'à vérifier' : 'douteux'})`;
-        });
-        rendre({ bi: blocs.indexOf(b), ri: 0 });
-        const pers = d.personne ? `<div>👤 Fiche de <strong>${esc(d.personne.nom || '?')}</strong>${d.personne.badge ? ` (badge ${esc(d.personne.badge)})` : ''}${d.personne.methode === 'badge' ? ' — identifiée par le badge ✔' : (d.personne.methode === 'nom' ? ' — identifiée par le nom' : '')}</div>` : '';
-        const alertesP = (d.alertes_personne || []).map(x => `<div style="color:var(--accent-amber-text,#b45309);">⚠ ${esc(x)}</div>`).join('');
-        const ko = d.non_rapprochees.length ? ` <strong style="color:var(--accent-amber-text);">${d.non_rapprochees.length} ligne(s) non rapprochée(s) :</strong> ${d.non_rapprochees.slice(0, 6).map(x => esc(x.texte_source)).join(' ; ')}.` : '';
-        info.innerHTML = pers + alertesP + `${d.propositions.length} ligne(s) placée(s)${ko}${d.notes ? '<br>' + esc(d.notes) : ''}`;
-      } catch (e) { info.innerHTML = `<span style="color:var(--danger-text);">${esc(e.message)}</span>`; }
-      ev.target.value = '';
-    });
 
     // ----- Enregistrement : tout ce qui est sur la page, d'un coup
     document.getElementById('sp-go').addEventListener('click', async () => {
