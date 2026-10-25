@@ -5907,8 +5907,8 @@
 
   // ---------- Planning annuel Pléiade ----------
   async function ouvrirModalePlanningAnnuel() {
-    const api = async (methode, corps, query) => {
-      const r = await fetch(`${API}/planning-annuel${query || ''}`, { method: methode, headers: { 'Content-Type': 'application/json' }, body: corps ? JSON.stringify(corps) : undefined });
+    const api = async (methode, corps, query, fonction) => {
+      const r = await fetch(`${API}/${fonction || 'planning-annuel'}${query || ''}`, { method: methode, headers: { 'Content-Type': 'application/json' }, body: corps ? JSON.stringify(corps) : undefined });
       const d = await lireJson(r); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`); return d;
     };
     let data, prop;
@@ -5925,9 +5925,68 @@
         <br>Légende : <strong>S</strong> solde · <strong>N</strong> nouveauté · <strong>T</strong> train (en cours) · <strong>R</strong> réimpression.</div>
       <div id="pa-onglets" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;"></div>
       <div id="pa-corps"></div><div id="m-msg"></div>
-      <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn" id="pa-coches" style="display:none;">Créer les OF cochés</button><button class="btn primary" id="pa-creer">Créer tous les OF de ce mois, dans cet ordre</button></div>`, 'xlarge');
+      <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn" id="pa-import" title="Charger le nouveau planning du client (PDF, photo, Excel) : le logiciel le compare à l'existant">Importer un nouveau planning…</button><button class="btn" id="pa-ajout">+ Ajouter un titre</button><input type="file" id="pa-fichier" accept="image/*,.pdf,.xlsx,.xls,.docx" style="display:none"><button class="btn" id="pa-coches" style="display:none;">Créer les OF cochés</button><button class="btn primary" id="pa-creer">Créer tous les OF de ce mois, dans cet ordre</button></div>`, 'xlarge');
     const $ = (id) => document.getElementById(id);
     $('m-cancel').addEventListener('click', fermerModale);
+    // Ajout d'un titre imprévu (nouveau titre, ou titre déjà connu à replacer).
+    $('pa-ajout').addEventListener('click', () => {
+      const zone = $('m-msg');
+      const f = (id, lib, type, w, ph) => `<label style="display:flex;flex-direction:column;font-size:12px;color:var(--muted);">${lib}<input id="${id}" type="${type}" ${ph ? `placeholder="${ph}"` : ''} style="width:${w}px;padding:4px 6px;color:var(--ink,#222);"></label>`;
+      zone.innerHTML = `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;background:#fff;">
+        <strong>Ajouter un titre au planning annuel</strong>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;align-items:flex-end;">
+          ${f('aj-titre', 'Titre *', 'text', 260, 'ex. FLAUBERT Œuvres 1')}${f('aj-qte', 'Quantité', 'number', 80)}${f('aj-mp', 'Cahiers', 'number', 70)}${f('aj-carte', 'Carte de dos (mm)', 'number', 90)}
+          ${f('aj-tete', 'Tête', 'text', 100, 'orange')}${f('aj-peau', 'Peau', 'text', 100, 'havane')}${f('aj-date', 'Livraison *', 'date', 140)}
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;"><button class="btn" id="aj-non" type="button">Annuler</button><button class="btn primary" id="aj-ok" type="button">Ajouter</button></div></div>`;
+      $('aj-titre').focus();
+      $('aj-non').onclick = () => { zone.innerHTML = ''; };
+      $('aj-ok').onclick = async () => {
+        const titre = $('aj-titre').value.trim(), date = $('aj-date').value;
+        if (!titre || !date) { toast('Titre et date de livraison requis.', 'error'); return; }
+        const n = (id) => { const v = $(id).value; return v === '' ? undefined : parseInt(v, 10); };
+        try {
+          await api('POST', { action: 'ajouter', titre, quantite: n('aj-qte'), mp: n('aj-mp'), carte_dos: n('aj-carte'), tete: $('aj-tete').value.trim() || undefined, peau: $('aj-peau').value.trim() || undefined, date_livraison: date });
+          data = await api('GET'); prop = await api('POST', { action: 'proposer' }); courant = date.slice(0, 7); zone.innerHTML = ''; rendre();
+          toast(`« ${titre} » ajouté en ${nomMois(courant)} (signalé en rouge : à vérifier).`);
+        } catch (e) { zone.insertAdjacentHTML('beforeend', `<div class="msg error">${esc(e.message)}</div>`); }
+      };
+    });
+    // Import d'un nouveau planning (PDF / photo / scan / Excel) : aperçu des différences, puis application de la sélection cochée.
+    const CHAMP_LIB = { quantite: 'Qté', mp: 'Cahiers', carte_dos: 'Carte de dos', tete: 'Tête', peau: 'Peau', mois: 'Mois', date_livraison: 'Livraison' };
+    const valLib = (k, v) => (v === null || v === undefined || v === '' ? '—' : (k === 'mois' ? nomMois(v) : (k === 'date_livraison' ? dateCourte(v) : esc(v))));
+    $('pa-import').addEventListener('click', () => $('pa-fichier').click());
+    const analyserPlanning = async (file) => {
+      const zone = $('m-msg');
+      zone.innerHTML = `<div class="msg">Lecture du planning « ${esc(file.name)} » en cours (peut prendre jusqu'à une minute)…</div>`;
+      let r;
+      try {
+        const estImage = file.type.startsWith('image/');
+        const { base64, mimeType } = estImage ? await compresserImage(file, 2600, 0.85) : { base64: await fichierEnBase64(file), mimeType: file.type || 'application/pdf' };
+        const res = await fetch(`${API}/importer-planning-annuel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file_base64: base64, file_name: file.name, mime_type: mimeType }) });
+        r = await lireJson(res); if (!res.ok) throw new Error(r.error || r.errorMessage || `HTTP ${res.status}`);
+      } catch (e) { zone.innerHTML = `<div class="msg error">Lecture impossible : ${esc(e.message)}</div>`; return; }
+      const lignesN = r.nouveaux.map((n, i) => `<tr><td><input type="checkbox" class="im-chk" data-t="n" data-i="${i}" ${n.sans_date ? '' : 'checked'}></td><td><span style="color:#0f766e;">Nouveau</span></td><td>${esc(n.titre)}</td><td>${['quantite', 'mp', 'carte_dos', 'tete', 'peau'].map((k) => n.champs[k] != null ? `${CHAMP_LIB[k]} ${esc(n.champs[k])}` : '').filter(Boolean).join(' · ')} · livraison ${n.champs.date_livraison ? dateCourte(n.champs.date_livraison) : (n.champs.mois ? nomMois(n.champs.mois) : '<span style="color:#c0392b;">date inconnue</span>')}</td></tr>`).join('');
+      const lignesM = r.modifies.map((x, i) => `<tr><td><input type="checkbox" class="im-chk" data-t="m" data-i="${i}" checked></td><td><span style="color:#b45309;">Modifié</span></td><td>${esc(x.titre)}${x.statut === 'of_cree' ? ' <span class="plan-note">(OF déjà créé)</span>' : ''}</td><td>${x.diffs.map((d) => `${CHAMP_LIB[d.champ]} : ${valLib(d.champ, d.ancien)} → <strong>${valLib(d.champ, d.nouveau)}</strong>`).join(' · ')}</td></tr>`).join('');
+      zone.innerHTML = `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px;background:#fff;">
+        <strong>Nouveau planning lu : ${r.lues} titre(s)</strong> — ${r.nouveaux.length} nouveau(x), ${r.modifies.length} modifié(s), ${r.inchanges} inchangé(s)${r.ignores.length ? `, ${r.ignores.length} déjà fabriqué(s) ignoré(s)` : ''}.
+        <div class="plan-note" style="margin:4px 0;">Vérifiez la lecture (surtout les chiffres), décochez ce que vous ne voulez pas appliquer. Rien n'est supprimé.</div>
+        ${lignesN || lignesM ? `<div style="max-height:260px;overflow:auto;"><table class="sp-table"><tbody>${lignesN}${lignesM}</tbody></table></div>` : '<div class="msg ok">Aucune différence : le planning enregistré est déjà à jour.</div>'}
+        ${r.absents.length ? `<div class="msg" style="margin-top:6px;">⚠ Enregistrés mais <strong>absents</strong> du nouveau planning (annulés ou reportés ?) : ${r.absents.map((a) => esc(a.titre) + ' (' + nomMois(a.mois) + ')').join(' ; ')}. Retirez-les avec ✕ ou changez leur date si besoin.</div>` : ''}
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;"><button class="btn" id="im-non" type="button">Fermer</button>${lignesN || lignesM ? '<button class="btn primary" id="im-ok" type="button">Appliquer la sélection</button>' : ''}</div></div>`;
+      $('im-non').onclick = () => { zone.innerHTML = ''; };
+      if ($('im-ok')) $('im-ok').onclick = async () => {
+        const chg = Array.from(zone.querySelectorAll('.im-chk:checked')).map((c) => (c.dataset.t === 'n' ? { type: 'creer', champs: r.nouveaux[+c.dataset.i].champs } : { type: 'maj', id: r.modifies[+c.dataset.i].id, champs: r.modifies[+c.dataset.i].champs }));
+        if (!chg.length) { toast('Rien de coché.', 'error'); return; }
+        $('im-ok').disabled = true;
+        try {
+          const a = await api('POST', { action: undefined, appliquer: true, changements: chg }, '', 'importer-planning-annuel');
+          data = await api('GET'); prop = await api('POST', { action: 'proposer' }); zone.innerHTML = ''; rendre();
+          toast(`Planning mis à jour : ${a.crees} ajouté(s), ${a.maj} modifié(s) — signalés en rouge ●.`); chargerDonneesReelles();
+        } catch (e) { zone.insertAdjacentHTML('beforeend', `<div class="msg error">${esc(e.message)}</div>`); $('im-ok').disabled = false; }
+      };
+    };
+    $('pa-fichier').addEventListener('change', (ev) => { const f = ev.target.files[0]; ev.target.value = ''; if (f) analyserPlanning(f); });
     $('pa-corps').addEventListener('click', (ev) => { const b = ev.target.closest('.pa-voir-of'); if (!b) return; const o = (state.ordres || []).find((x) => x.uuid === b.dataset.uuid); if (!o) { toast('OF introuvable dans la liste chargée : actualisez la page.', 'error'); return; } ouvrirModaleGamme(o.uuid, o.id); });
     // Liste à cocher des opérations de la gamme avant création (modèle Pléiade) ; résout avec la liste de codes, ou null si annulé.
     const demanderEtapes = async (idRef, nbOf) => {
@@ -6001,6 +6060,7 @@
     const couleurTete = { 'orange': '#f6c177', 'vert': '#b7d77a', 'gris clair': '#d4d8dc', 'gris foncé': '#9aa1a8', 'bleu': '#8ec5ee', 'sable': '#e8d3a8' };
     const pastille = (t) => t ? `<span style="display:inline-block;padding:1px 8px;border-radius:10px;background:${couleurTete[String(t).toLowerCase()] || '#eee'};color:#222;font-size:12px;">${esc(t)}</span>` : '—';
     const lienOf = (ofId) => { const o = (state.ordres || []).find((x) => x.uuid === ofId); return `<button class="btn pa-voir-of" type="button" data-uuid="${ofId}" data-num="${o ? esc(o.id) : ''}" title="Ouvrir la gamme de cet OF" style="padding:3px 10px;font-size:12px;">${o ? esc(o.id) : 'Voir l\'OF'} ›</button>`; };
+    const champDate = (id, v, auj) => `<input type="date" data-id="${id}" data-k="date_livraison" value="${esc(v || '')}" title="Modifier la date de livraison : le titre change de mois si besoin" style="padding:2px 4px;${v && v < auj ? 'color:#c0392b;' : ''}">`;
     const champ = (id, k, v, w) => `<input data-id="${id}" data-k="${k}" value="${esc(v == null ? '' : v)}" style="width:${w}px;padding:2px 4px;">`;
 
     function rendre() {
@@ -6053,9 +6113,9 @@
           <td>${esc(s.titre)} ${s.a_verifier ? '<span title="Modifié récemment" style="color:#c0392b;">●</span>' : ''} ${l.flags ? `<span style="color:var(--muted);font-size:12px;">${esc(l.flags)}</span>` : ''}</td>
           <td>${champ(s.id, 'quantite', s.quantite, 70)}</td><td>${champ(s.id, 'mp', s.mp, 46)}</td><td>${champ(s.id, 'carte_dos', s.carte_dos, 46)}${s.change_reglage ? ' <span title="Nouveau réglage BDM">⚙</span>' : ''}</td>
           <td>${champ(s.id, 'tete', s.tete, 90)}${s.change_tete ? ' <span title="Nettoyage jaspage">🧽</span>' : ''}</td><td>${champ(s.id, 'peau', s.peau, 90)}</td>
-          <td style="white-space:nowrap;${l.date_livraison && l.date_livraison < auj ? 'color:#c0392b;' : ''}">${l.date_livraison ? dateCourte(l.date_livraison) : nomMois(m.mois)}</td>
-          <td style="white-space:nowrap;text-align:right;">${l.of_id ? lienOf(l.of_id) : `<button class="btn pa-of" type="button" data-id="${s.id}" data-rang="${i + 1}" data-titre="${esc(s.titre)}" title="Créer l'OF Pléiade de ce titre uniquement" style="padding:3px 10px;font-size:12px;">Créer l'OF</button> <button class="btn pa-fait" type="button" data-id="${s.id}" data-titre="${esc(s.titre)}" title="Ce titre a déjà été fabriqué : le sortir du planning à produire" style="padding:3px 10px;font-size:12px;">Déjà fabriqué</button>`}</td></tr>`; }).join('')}
-        ${m.sans_carte.map((x) => { const l = lignesMois.find((y) => y.id === x.id) || {}; return `<tr style="background:var(--field-bg);"><td>${l.of_id ? '' : `<input type="checkbox" class="pa-chk" data-id="${x.id}">`}</td><td></td><td>—</td><td>${esc(x.titre)}</td><td>${champ(x.id, 'quantite', l.quantite, 70)}</td><td>${champ(x.id, 'mp', l.mp, 46)}</td><td>${champ(x.id, 'carte_dos', '', 46)}</td><td>${champ(x.id, 'tete', l.tete, 90)}</td><td>${champ(x.id, 'peau', l.peau, 90)}</td><td>${l.date_livraison ? dateCourte(l.date_livraison) : nomMois(m.mois)}</td><td style="white-space:nowrap;text-align:right;">${l.of_id ? lienOf(l.of_id) : `<button class="btn pa-of" type="button" data-id="${x.id}" data-rang="${m.sequence.length + 1}" data-titre="${esc(x.titre)}" title="Créer l'OF Pléiade de ce titre uniquement" style="padding:3px 10px;font-size:12px;">Créer l'OF</button> <button class="btn pa-fait" type="button" data-id="${x.id}" data-titre="${esc(x.titre)}" title="Ce titre a déjà été fabriqué : le sortir du planning à produire" style="padding:3px 10px;font-size:12px;">Déjà fabriqué</button>`}</td></tr>`; }).join('')}
+          <td style="white-space:nowrap;">${champDate(s.id, l.date_livraison, auj)}${l.date_livraison ? '' : `<div class="plan-note" style="font-size:11px;">${nomMois(m.mois)}</div>`}</td>
+          <td style="white-space:nowrap;text-align:right;">${l.of_id ? lienOf(l.of_id) : `<button class="btn pa-of" type="button" data-id="${s.id}" data-rang="${i + 1}" data-titre="${esc(s.titre)}" title="Créer l'OF Pléiade de ce titre uniquement" style="padding:3px 10px;font-size:12px;">Créer l'OF</button> <button class="btn pa-fait" type="button" data-id="${s.id}" data-titre="${esc(s.titre)}" title="Ce titre a déjà été fabriqué : le sortir du planning à produire" style="padding:3px 10px;font-size:12px;">Déjà fabriqué</button> <button class="btn pa-suppr" type="button" data-id="${s.id}" data-titre="${esc(s.titre)}" title="Retirer ce titre du planning annuel (annulé par le client, saisi par erreur…)" style="padding:3px 8px;font-size:12px;color:var(--danger,#c0392b);">✕</button>`}</td></tr>`; }).join('')}
+        ${m.sans_carte.map((x) => { const l = lignesMois.find((y) => y.id === x.id) || {}; return `<tr style="background:var(--field-bg);"><td>${l.of_id ? '' : `<input type="checkbox" class="pa-chk" data-id="${x.id}">`}</td><td></td><td>—</td><td>${esc(x.titre)}</td><td>${champ(x.id, 'quantite', l.quantite, 70)}</td><td>${champ(x.id, 'mp', l.mp, 46)}</td><td>${champ(x.id, 'carte_dos', '', 46)}</td><td>${champ(x.id, 'tete', l.tete, 90)}</td><td>${champ(x.id, 'peau', l.peau, 90)}</td><td style="white-space:nowrap;">${champDate(x.id, l.date_livraison, auj)}${l.date_livraison ? '' : `<div class="plan-note" style="font-size:11px;">${nomMois(m.mois)}</div>`}</td><td style="white-space:nowrap;text-align:right;">${l.of_id ? lienOf(l.of_id) : `<button class="btn pa-of" type="button" data-id="${x.id}" data-rang="${m.sequence.length + 1}" data-titre="${esc(x.titre)}" title="Créer l'OF Pléiade de ce titre uniquement" style="padding:3px 10px;font-size:12px;">Créer l'OF</button> <button class="btn pa-fait" type="button" data-id="${x.id}" data-titre="${esc(x.titre)}" title="Ce titre a déjà été fabriqué : le sortir du planning à produire" style="padding:3px 10px;font-size:12px;">Déjà fabriqué</button> <button class="btn pa-suppr" type="button" data-id="${x.id}" data-titre="${esc(x.titre)}" title="Retirer ce titre du planning annuel (annulé par le client, saisi par erreur…)" style="padding:3px 8px;font-size:12px;color:var(--danger,#c0392b);">✕</button>`}</td></tr>`; }).join('')}
         </tbody></table></div>${blocTraites}`;
       brancherTraites();
       const majCoches = () => { const n = $('pa-corps').querySelectorAll('.pa-chk:checked').length; $('pa-coches').style.display = n ? '' : 'none'; $('pa-coches').textContent = `Créer les OF cochés (${n})`; };
@@ -6079,10 +6139,16 @@
           $('m-msg').innerHTML = `<div class="msg ok">OF ${esc(x.numero)} créé pour « ${esc(x.titre)} ».${(x.avertissements || []).length ? '<br>⚠ ' + x.avertissements.map(esc).join('<br>⚠ ') : ''}</div>`;
         } catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; bt.disabled = false; }
       }));
+      $('pa-corps').querySelectorAll('.pa-suppr').forEach((bt) => bt.addEventListener('click', async () => {
+        if (!confirm(`Retirer « ${bt.dataset.titre} » du planning annuel ?\n(à utiliser si le titre est annulé ou saisi par erreur)`)) return;
+        try { await api('DELETE', null, `?id=${bt.dataset.id}`); data = await api('GET'); prop = await api('POST', { action: 'proposer' }); rendre(); toast('Titre retiré du planning annuel.'); }
+        catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+      }));
       $('pa-corps').querySelectorAll('input[data-id]').forEach((inp) => inp.addEventListener('change', async () => {
         const v = inp.value.trim(); const num = ['quantite', 'mp', 'carte_dos'].includes(inp.dataset.k);
         try {
           await api('PUT', { id: inp.dataset.id, [inp.dataset.k]: num ? (v === '' ? null : parseInt(v, 10)) : (v === '' ? null : v) });
+          if (inp.dataset.k === 'date_livraison' && v && v.slice(0, 7) !== courant) { courant = v.slice(0, 7); toast(`Titre déplacé vers ${nomMois(courant)}.`); }
           data = await api('GET'); prop = await api('POST', { action: 'proposer' }); rendre();
         } catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
       }));
