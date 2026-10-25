@@ -5924,23 +5924,51 @@
           <div style="font-size:12px;color:var(--muted);margin:2px 0 6px;">Ordre et dépendances du modèle Pléiade déjà en place. Décochez les opérations inutiles : l'ordre et les « après… » se recalculent.</div>
           <div id="pa-et-liste" style="max-height:300px;overflow:auto;"></div>`+`          ${catalogue.length ? `<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:13px;font-weight:600;">Autres opérations du catalogue (${catalogue.length}) — ajoutées en fin de gamme</summary>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:2px 14px;max-height:200px;overflow:auto;margin-top:6px;">${catalogue.map((o) => `<label style="display:flex;gap:6px;align-items:center;font-size:13px;"><input type="checkbox" class="pa-ex" value="${esc(o.code)}">${esc(o.nom)}</label>`).join('')}</div></details>` : ''}
+          <label id="pa-memo-zone" style="display:none;font-size:13px;margin-top:8px;gap:6px;align-items:center;"><input type="checkbox" id="pa-memo"> Mémoriser les liens modifiés dans le modèle Pléiade (pour les prochains OF)</label>
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;"><button class="btn" id="pa-et-non">Annuler</button><button class="btn primary" id="pa-et-ok">Créer ${nbOf > 1 ? `les ${nbOf} OF` : 'l\'OF'}</button></div></div>`;
         const parCode = Object.fromEntries(etapes.map((e) => [e.code, e]));
+        const liens = {};   // liens modifiés à la main : code -> { predecesseurs, simultane }
+        const predsDe = (code) => (liens[code] ? liens[code].predecesseurs : (parCode[code].predecesseurs || []));
+        const simultDe = (code) => (liens[code] ? liens[code].simultane : (parCode[code].simultane || []));
         const dessiner = () => {
           const cochees = new Set(Array.from(zone.querySelectorAll('.pa-et:checked')).map((c) => c.value));
-          const resoudre = (code, vus = new Set()) => { if (vus.has(code)) return []; vus.add(code); if (cochees.has(code)) return [code]; const e = parCode[code]; return e ? (e.predecesseurs || []).flatMap((q) => resoudre(q, vus)) : []; };
+          const resoudre = (code, vus = new Set()) => { if (vus.has(code)) return []; vus.add(code); if (cochees.has(code)) return [code]; const e = parCode[code]; return e ? predsDe(code).flatMap((q) => resoudre(q, vus)) : []; };
           let n = 0;
           zone.querySelectorAll('.pa-et-ligne').forEach((ligne) => {
             const code = ligne.dataset.code; const on = cochees.has(code);
             ligne.querySelector('.pa-num').textContent = on ? ++n : '–';
-            const preds = on ? Array.from(new Set((parCode[code].predecesseurs || []).flatMap((q) => resoudre(q)))) : [];
-            const simult = new Set(((parCode[code].simultane) || []).flatMap((q) => resoudre(q)));
-            ligne.querySelector('.pa-apres').textContent = on ? (preds.length ? 'après : ' + preds.map((q) => parCode[q].libelle + (simult.has(q) ? ' (en parallèle)' : '')).join(', ') : 'peut démarrer dès le début') : '';
+            const preds = on ? Array.from(new Set(predsDe(code).flatMap((q) => resoudre(q)))) : [];
+            const simult = new Set(simultDe(code).flatMap((q) => resoudre(q)));
+            ligne.querySelector('.pa-apres').firstChild.textContent = on ? (preds.length ? 'après : ' + preds.map((q) => parCode[q].libelle + (simult.has(q) ? ' (en parallèle)' : '')).join(', ') : 'peut démarrer dès le début') : '';
             ligne.style.opacity = on ? '1' : '.5';
+            ligne.querySelector('.pa-lien').style.display = on ? '' : 'none';
+            ligne.querySelector('.pa-lien').style.fontWeight = liens[code] ? '700' : '';
           });
+          const zm = $('pa-memo-zone'); if (zm) zm.style.display = Object.keys(liens).length ? 'flex' : 'none';
         };
-        $('pa-et-liste').innerHTML = etapes.map((e) => `<label class="pa-et-ligne" data-code="${esc(e.code)}" style="display:grid;grid-template-columns:22px 24px minmax(0,1fr) minmax(0,1.4fr);gap:8px;align-items:center;font-size:13px;padding:2px 0;border-top:1px solid var(--line);"><input type="checkbox" class="pa-et" value="${esc(e.code)}" ${e.par_defaut ? 'checked' : ''}><span class="pa-num" style="color:var(--muted);text-align:right;"></span><span>${esc(e.libelle)}${e.condition && e.condition !== 'toujours' ? ` <em style="color:var(--muted);font-size:11px;">(${esc(e.condition)})</em>` : ''}</span><span class="pa-apres" style="font-size:12px;color:var(--muted);"></span></label>`).join('');
+        $('pa-et-liste').innerHTML = etapes.map((e) => `<label class="pa-et-ligne" data-code="${esc(e.code)}" style="display:grid;grid-template-columns:22px 24px minmax(0,1fr) minmax(0,1.4fr);gap:8px;align-items:center;font-size:13px;padding:2px 0;border-top:1px solid var(--line);"><input type="checkbox" class="pa-et" value="${esc(e.code)}" ${e.par_defaut ? 'checked' : ''}><span class="pa-num" style="color:var(--muted);text-align:right;"></span><span>${esc(e.libelle)}${e.condition && e.condition !== 'toujours' ? ` <em style="color:var(--muted);font-size:11px;">(${esc(e.condition)})</em>` : ''}</span><span style="font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center;"><span class="pa-apres"><span></span></span><button type="button" class="btn pa-lien" data-code="${esc(e.code)}" title="Modifier les « après… » de cette opération" style="padding:0 7px;font-size:12px;">✎</button></span></label>`).join('');
         $('pa-et-liste').querySelectorAll('.pa-et').forEach((c) => c.addEventListener('change', dessiner));
+        // Modification des dépendances d'une opération (« après… », en parallèle).
+        const editeur = document.createElement('div'); editeur.id = 'pa-lien-edit'; editeur.style.cssText = 'display:none;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:8px;background:#fafbfd;font-size:13px;';
+        $('pa-et-liste').after(editeur);
+        const ouvrirEditeur = (code) => {
+          const e = parCode[code]; const avant = etapes.filter((x) => x.ordre < e.ordre);
+          const cur = new Set(predsDe(code)); const sim = new Set(simultDe(code));
+          editeur.style.display = '';
+          editeur.innerHTML = `<strong>« ${esc(e.libelle)} » démarre après :</strong> <span style="color:var(--muted);">(cochez « en parallèle » pour démarrer dès le début de l'opération, sans attendre sa fin)</span>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:2px 14px;margin-top:6px;max-height:190px;overflow:auto;">${avant.map((x) => `<div style="display:flex;gap:6px;align-items:center;"><label style="display:flex;gap:6px;align-items:center;flex:1;"><input type="checkbox" class="le-pred" value="${esc(x.code)}" ${cur.has(x.code) ? 'checked' : ''}>${esc(x.libelle)}</label><label style="font-size:12px;color:var(--muted);display:flex;gap:4px;align-items:center;"><input type="checkbox" class="le-sim" value="${esc(x.code)}" ${sim.has(x.code) ? 'checked' : ''}>en parallèle</label></div>`).join('')}</div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;"><button type="button" class="btn" id="le-init">Rétablir le modèle</button><button type="button" class="btn" id="le-fermer">Annuler</button><button type="button" class="btn primary" id="le-ok">Appliquer</button></div>`;
+          editeur.querySelectorAll('.le-sim').forEach((c) => c.addEventListener('change', () => { if (c.checked) editeur.querySelector(`.le-pred[value="${c.value}"]`).checked = true; }));
+          editeur.querySelectorAll('.le-pred').forEach((c) => c.addEventListener('change', () => { if (!c.checked) editeur.querySelector(`.le-sim[value="${c.value}"]`).checked = false; }));
+          $('le-fermer').onclick = () => { editeur.style.display = 'none'; };
+          $('le-init').onclick = () => { delete liens[code]; editeur.style.display = 'none'; dessiner(); };
+          $('le-ok').onclick = () => {
+            liens[code] = { predecesseurs: Array.from(editeur.querySelectorAll('.le-pred:checked')).map((c) => c.value), simultane: Array.from(editeur.querySelectorAll('.le-sim:checked')).map((c) => c.value) };
+            editeur.style.display = 'none'; dessiner();
+          };
+          editeur.scrollIntoView({ block: 'nearest' });
+        };
+        $('pa-et-liste').querySelectorAll('.pa-lien').forEach((b) => b.addEventListener('click', (ev) => { ev.preventDefault(); ev.stopPropagation(); ouvrirEditeur(b.dataset.code); }));
         dessiner();
         zone.scrollIntoView({ block: 'nearest' });
         $('pa-et-non').onclick = () => { zone.innerHTML = ''; resolve(null); };
@@ -5948,7 +5976,8 @@
           const codes = Array.from(zone.querySelectorAll('.pa-et:checked')).map((c) => c.value);
           if (!codes.length) { toast('Cochez au moins une opération.', 'error'); return; }
           const extras = Array.from(zone.querySelectorAll('.pa-ex:checked')).map((c) => c.value);
-          zone.innerHTML = ''; resolve({ etapes: codes, operations_extra: extras });
+          const memo = $('pa-memo') && $('pa-memo').checked; const liensOk = Object.keys(liens).length ? liens : undefined;
+          zone.innerHTML = ''; resolve({ etapes: codes, operations_extra: extras, ...(liensOk ? { liens: liensOk, memoriser: memo } : {}) });
         };
       });
     };
