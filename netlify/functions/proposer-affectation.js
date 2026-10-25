@@ -25,7 +25,7 @@ const { getSupabase } = require('./lib/supabaseclient');
 const PL = require('./lib/planification');
 const { calculerEtapes } = require('./lib/durees');
 const { decouper } = require('./lib/decoupe');
-const { jourDebutSuggere, aujourdhuiParis } = require('./lib/debut-etape');
+const { jourDebutSuggere, aujourdhuiParis, libelleJour } = require('./lib/debut-etape');
 
 const rep = (statusCode, obj) => ({ statusCode, body: JSON.stringify(obj) });
 const hm = (t) => PL.hhmm(String(t).slice(0, 5));
@@ -66,9 +66,15 @@ const handlerProtege = async (event) => {
       : (etape.phases || []).map((p) => ({ nom: p.nom, duree_h: Number(p.duree_h), nb_personnes: Number(p.nb_personnes) || 1 })));
     const chiffree = phases.some((p) => p.duree_h > 0);
     const date = q.date || (await jourDebutSuggere(supabase, gamme.id, aujourdhuiParis())).date;
-    const creneaux = chiffree ? decouper(date, phases, cal) : [{ date, heure_debut: null, heure_fin: null, phase: null }];
+    const faireCreneaux = (d) => (chiffree ? decouper(d, phases, cal) : [{ date: d, heure_debut: null, heure_fin: null, phase: null }]);
+    let creneaux = faireCreneaux(date);
+    const chercherJour = q.chercher_jour === '1';
     if (!chiffree) avertissements.push('Étape non chiffrée : elle est comptée sur la journée entière.');
-    const dates = Array.from(new Set(creneaux.map((c) => c.date)));
+    let dates = Array.from(new Set(creneaux.map((c) => c.date)));
+    if (chercherJour) {   // fenêtre de recherche : 90 jours calendaires à partir du jour demandé
+      dates = [];
+      for (let k = 0; k < 90; k++) { const mn = PL.enMinutes(date, '00:00') + k * PL.MIN_JOUR; if (PL.estOuvre(mn)) dates.push(PL.dateDe(mn)); }
+    }
 
     // Équipe requise : réglage de la machine, sinon le plus grand effectif des phases chiffrées
     let machine = null;
@@ -85,9 +91,14 @@ const handlerProtege = async (event) => {
       supabase.from('personnel_machines').select('*'),
       supabase.from('personnel_competences').select('personnel_id, operation_id').eq('operation_id', gamme.operation_id),
       supabase.from('personnel_planning_jour').select('personnel_id, date, statut, heure_debut, heure_fin').in('date', dates),
-      supabase.from('planning_jour').select('id, date, heure_debut, heure_fin, personnel_id, of_id, gamme_operatoire_id, statut').in('date', dates).neq('statut', 'annulé'),
+      supabase.from('planning_jour').select('id, date, heure_debut, heure_fin, personnel_id, machine_id, of_id, gamme_operatoire_id, statut').in('date', dates).neq('statut', 'annulé'),
     ]);
     for (const r of [persRes, pmRes, compRes, absRes, lignesRes]) if (r.error) throw r.error;
+    let maintenances = [];
+    if (machineId) {
+      const { data: mt, error: eMt } = await supabase.from('maintenance_machine').select('date_debut, date_fin, statut').eq('machine_id', machineId).neq('statut', 'terminé');
+      if (!eMt) maintenances = mt || [];   // table facultative
+    }
     const ids = lignesRes.data.map((l) => l.id);
     const [liensRes, ofsRes] = await Promise.all([
       ids.length ? supabase.from('planning_jour_personnel').select('planning_jour_id, personnel_id').in('planning_jour_id', ids) : { data: [] },
@@ -127,13 +138,32 @@ const handlerProtege = async (event) => {
       return { statut: 'occupe', motif: libelle };
     };
 
-    // Conducteurs de la machine : titulaire puis suppléants
+    // Conducteurs de la machine : titulaire puis suppléants (uniquement les personnes avec un rang).
+    // Les autres personnes liées à la machine sont seulement « habilitées » : elles sont proposées comme aides.
     const lienMachine = machineId ? pmRes.data.filter((x) => x.machine_id === machineId) : [];
-    const ordreC = lienMachine.slice().sort((a, b) => (a.rang ?? 1e9) - (b.rang ?? 1e9));
+    const ordreC = lienMachine.filter((x) => x.rang !== null && x.rang !== undefined).sort((a, b) => a.rang - b.rang);
+    const habilitesIds = new Set(lienMachine.filter((x) => x.rang === null || x.rang === undefined).map((x) => x.personnel_id));
     const nomDe = (pid) => (persRes.data.find((p) => p.id === pid) || {}).nom || '?';
-    const conducteurs = ordreC.filter((x) => persRes.data.some((p) => p.id === x.personnel_id)).map((x, i) => ({
-      id: x.personnel_id, nom: nomDe(x.personnel_id), rang: x.rang ?? null, titulaire: i === 0 && x.rang === 1, ...evaluer(x.personnel_id),
+    const calcConducteurs = () => ordreC.filter((x) => persRes.data.some((p) => p.id === x.personnel_id)).map((x) => ({
+      id: x.personnel_id, nom: nomDe(x.personnel_id), rang: x.rang, titulaire: x.rang === 1, ...evaluer(x.personnel_id),
     }));
+    const machineOccupee = () => !!machineId && (
+      lignes.some((l) => l.machine_id === machineId && creneaux.some((m) => m.date === l.date && chevauche(bornes(m), bornes(l))))
+      || maintenances.some((mt) => creneaux.some((m) => mt.date_debut <= m.date && (!mt.date_fin || mt.date_fin >= m.date))));
+    // Recherche du premier jour où la machine ET un conducteur sont disponibles.
+    let jourPropose = null;
+    if (chercherJour && machineId) {
+      const initial = creneaux; let trouve = null;
+      for (const d of dates) {
+        creneaux = faireCreneaux(d);
+        if (machineOccupee()) continue;
+        if (ordreC.length && !calcConducteurs().some((c) => c.statut === 'libre' || c.statut === 'libre_apres')) continue;
+        trouve = d; break;
+      }
+      if (trouve) jourPropose = { date: trouve, change: trouve !== date };
+      else { creneaux = initial; avertissements.push('Aucun jour disponible (machine + conducteur) dans les 90 prochains jours.'); }
+    }
+    const conducteurs = calcConducteurs();
     let conducteur = conducteurs.find((c) => c.statut === 'libre') || null;
     if (!conducteur) {
       const apres = conducteurs.filter((c) => c.statut === 'libre_apres')
@@ -148,24 +178,28 @@ const handlerProtege = async (event) => {
 
     // Aides : non conducteurs, libres, compétents puis peu chargés
     const besoin = Math.max(0, equipeRequise - (conducteur ? 1 : (machineId ? 0 : 0)));
-    const conducteursIds = new Set(lienMachine.map((x) => x.personnel_id));
-    const conducteurAilleurs = new Set(pmRes.data.map((x) => x.personnel_id));
+    const conducteursIds = new Set(ordreC.map((x) => x.personnel_id));
+    const conducteurAilleurs = new Set(pmRes.data.filter((x) => x.rang !== null && x.rang !== undefined).map((x) => x.personnel_id));
     const competents = new Set(compRes.data.map((x) => x.personnel_id));
+    // Machine avec une liste d'aides potentiels : on ne propose que ces personnes. Sans liste, tout le personnel est candidat.
+    const restreindreAides = !!machineId && habilitesIds.size > 0;
+    if (machineId && !habilitesIds.size && equipeRequise > 1) avertissements.push('Aucune aide potentielle définie pour cette machine : renseignez-les dans sa fiche (sinon tout le personnel est candidat).');
     const candidatsAides = persRes.data
       .filter((p) => !conducteursIds.has(p.id) && !(conducteur && conducteur.id === p.id))
-      .map((p) => ({ id: p.id, nom: p.nom, poste: p.poste || '', ...evaluer(p.id), competent: competents.has(p.id), autre_conducteur: conducteurAilleurs.has(p.id), charge_min: chargeMin(p.id) }))
+      .filter((p) => !restreindreAides || habilitesIds.has(p.id))
+      .map((p) => ({ id: p.id, nom: p.nom, poste: p.poste || '', ...evaluer(p.id), competent: competents.has(p.id), habilite: habilitesIds.has(p.id), autre_conducteur: conducteurAilleurs.has(p.id), charge_min: chargeMin(p.id) }))
       .filter((p) => p.statut === 'libre')
-      .sort((a, b) => (Number(a.autre_conducteur) - Number(b.autre_conducteur)) || (Number(b.competent) - Number(a.competent)) || (a.charge_min - b.charge_min) || a.nom.localeCompare(b.nom, 'fr'));
+      .sort((a, b) => (Number(a.autre_conducteur) - Number(b.autre_conducteur)) || (Number(b.habilite) - Number(a.habilite)) || (Number(b.competent) - Number(a.competent)) || (a.charge_min - b.charge_min) || a.nom.localeCompare(b.nom, 'fr'));
     const aides = candidatsAides.slice(0, besoin).map((p) => ({
       id: p.id, nom: p.nom, poste: p.poste, competent: p.competent, charge_min: p.charge_min,
-      raison: [p.autre_conducteur ? 'conducteur d\'une autre machine (dernier recours)' : 'non conducteur', p.competent ? 'compétent' : 'sans compétence enregistrée', 'libre'].join(', '),
+      raison: [p.autre_conducteur ? 'conducteur d\'une autre machine (dernier recours)' : 'aide', p.habilite ? 'habilité(e) sur la machine' : '', p.competent ? 'compétent' : 'sans compétence enregistrée', 'libre'].filter(Boolean).join(', '),
     }));
     const manqueAides = Math.max(0, besoin - aides.length);
-    if (manqueAides) avertissements.push(`${manqueAides} personne(s) manquante(s) pour compléter l'équipe de ${equipeRequise}.`);
+    if (manqueAides) avertissements.push(`${manqueAides} aide(s) manquante(s) pour compléter l'équipe de ${equipeRequise}${restreindreAides ? ' : pas assez d\'aides potentiels disponibles de la fiche machine' : ''}.`);
     if (aides.some((a) => !a.competent) && competents.size) avertissements.push('Certaines aides proposées n\'ont pas la compétence enregistrée pour cette opération.');
 
     return rep(200, {
-      equipe_requise: equipeRequise, prioritaire, creneaux: creneaux.map((c) => ({ date: c.date, heure_debut: c.heure_debut, heure_fin: c.heure_fin })),
+      equipe_requise: equipeRequise, prioritaire, jour_propose: jourPropose ? { ...jourPropose, libelle: libelleJour(creneaux[0].date) } : null, date: creneaux[0].date, creneaux: creneaux.map((c) => ({ date: c.date, heure_debut: c.heure_debut, heure_fin: c.heure_fin })),
       conducteur: conducteur ? { id: conducteur.id, nom: conducteur.nom, rang: conducteur.rang, statut: conducteur.statut, libre_des: conducteur.libre_des || null, raison: conducteur.raison } : null,
       conducteurs: conducteurs.map((c) => ({ id: c.id, nom: c.nom, rang: c.rang, statut: c.statut, motif: c.motif || null, libre_des: c.libre_des || null })),
       aides, manque_aides: manqueAides,

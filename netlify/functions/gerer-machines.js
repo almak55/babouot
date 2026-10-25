@@ -60,7 +60,9 @@ const handlerProtege = async (event) => {
         supabase.from('personnel').select('id, nom'),
       ]);
       const nomDe = Object.fromEntries((persRes.data || []).map((p) => [p.id, p.nom]));
-      const conducteursDe = (mid) => (pmRes.data || []).filter((x) => x.machine_id === mid)
+      const aidesDe = (mid) => (pmRes.data || []).filter((x) => x.machine_id === mid && (x.rang === null || x.rang === undefined))
+        .map((x) => ({ personnel_id: x.personnel_id, nom: nomDe[x.personnel_id] || '?' })).sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+      const conducteursDe = (mid) => (pmRes.data || []).filter((x) => x.machine_id === mid && x.rang !== null && x.rang !== undefined)
         .map((x) => ({ personnel_id: x.personnel_id, nom: nomDe[x.personnel_id] || '?', rang: x.rang ?? null }))
         .sort((a, b) => (a.rang ?? 1e9) - (b.rang ?? 1e9) || a.nom.localeCompare(b.nom, 'fr'));
       return {
@@ -69,6 +71,7 @@ const handlerProtege = async (event) => {
           id: m.id, code: m.code, nom: m.nom, actif: m.actif, notes: m.notes,
           nb_personnes: m.nb_personnes || 1,
           conducteurs: conducteursDe(m.id),
+          aides: aidesDe(m.id),
           operations: m.machines_operations.map((mo) => mo.operations),
         }))),
       };
@@ -112,7 +115,7 @@ const handlerProtege = async (event) => {
 
     if (event.httpMethod === 'PUT') {
       const body = JSON.parse(event.body || '{}');
-      const { id, code, nom, operation_codes, actif, notes, nb_personnes, conducteurs } = body;
+      const { id, code, nom, operation_codes, actif, notes, nb_personnes, conducteurs, aides } = body;
       if (!id) {
         return { statusCode: 400, body: JSON.stringify({ error: 'id requis.' }) };
       }
@@ -143,10 +146,27 @@ const handlerProtege = async (event) => {
         const ids = Array.from(new Set(conducteurs.filter(Boolean)));
         const { data: existants, error: eEx } = await supabase.from('personnel_machines').select('*').eq('machine_id', id);
         if (eEx) throw eEx;
-        const aRetirer = existants.filter((x) => !ids.includes(x.personnel_id)).map((x) => x.personnel_id);
+        // Conducteurs retirés de la liste : ils deviennent de simples aides potentiels (lien conservé, sans rang)
+        // — sauf si la liste des aides est fournie : elle fait alors foi (les personnes absentes des deux listes sont déliées).
+        const idsAides = Array.isArray(aides) ? Array.from(new Set(aides.filter((x) => x && !ids.includes(x)))) : null;
+        const aRetirer = existants.filter((x) => !ids.includes(x.personnel_id) && x.rang !== null && x.rang !== undefined && !(idsAides && !idsAides.includes(x.personnel_id))).map((x) => x.personnel_id);
         if (aRetirer.length) {
-          const { error: eDel } = await supabase.from('personnel_machines').delete().eq('machine_id', id).in('personnel_id', aRetirer);
+          const { error: eDel } = await supabase.from('personnel_machines').update({ rang: null }).eq('machine_id', id).in('personnel_id', aRetirer);
           if (eDel) throw eDel;
+        }
+        if (idsAides) {
+          const aSupprimer = existants.filter((x) => !ids.includes(x.personnel_id) && !idsAides.includes(x.personnel_id)).map((x) => x.personnel_id);
+          if (aSupprimer.length) {
+            const { error: eS } = await supabase.from('personnel_machines').delete().eq('machine_id', id).in('personnel_id', aSupprimer);
+            if (eS) throw eS;
+          }
+          for (const pid of idsAides) {
+            const ex = existants.find((x) => x.personnel_id === pid);
+            const r = ex
+              ? (ex.rang !== null && ex.rang !== undefined ? await supabase.from('personnel_machines').update({ rang: null }).eq('machine_id', id).eq('personnel_id', pid) : { error: null })
+              : await supabase.from('personnel_machines').insert({ machine_id: id, personnel_id: pid, rang: null });
+            if (r.error) throw r.error;
+          }
         }
         for (let i = 0; i < ids.length; i++) {
           const existe = existants.some((x) => x.personnel_id === ids[i]);
