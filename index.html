@@ -605,6 +605,13 @@
   .modal .msg.error { color: var(--danger-text); }
   .modal .msg.ok { color: var(--accent-teal); }
   .slot.clickable { cursor: pointer; }
+  .slot.hs { cursor: pointer; background: repeating-linear-gradient(45deg, rgba(220,38,38,.13), rgba(220,38,38,.13) 6px, transparent 6px, transparent 12px); }
+  .slot.maint { cursor: pointer; background: repeating-linear-gradient(45deg, rgba(230,160,20,.18), rgba(230,160,20,.18) 6px, transparent 6px, transparent 12px); }
+  .slot.hs .hs-txt, .slot.maint .hs-txt { font-size: 11px; color: var(--ink-700); line-height: 1.2; }
+  .etat-pastille { display:inline-block; font-size:10px; font-weight:600; padding:1px 7px; border-radius:99px; margin-top:3px; }
+  .etat-pastille.hors_service { background: rgba(220,38,38,.14); color: #b91c1c; }
+  .etat-pastille.maintenance, .etat-pastille.degradee { background: rgba(230,160,20,.2); color: #92600a; }
+  .etat-pastille.programmee { background: rgba(60,100,200,.14); color: #2b4c9b; }
   .slot.clickable:hover { background: var(--accent-teal-soft); }
   .slot.clickable:hover::after {
     content: '+'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -1121,7 +1128,9 @@
     state.machines.forEach(m=>{
       const actif = (state.planning[m.id]||[]).length > 0;
       const accent = actif ? 'teal' : 'muted';
-      rows += `<tr><td class="machine-cell row-accent-${accent}"><div class="m-row"><span class="row-icon ${accent}">${svgIcon(ICON_MACHINE)}</span><div><div class="m-name">${m.name}</div><div class="m-sub">${m.code}</div></div></div></td>`;
+      const etatM = (state.etatsMachines || {})[m.uuid];
+      const pastille = etatM && etatM.etat !== 'ok' ? `<div><span class="etat-pastille ${etatM.etat}" title="${esc(etatM.intervention ? etatM.intervention.type_libelle + (etatM.intervention.description ? ' — ' + etatM.intervention.description : '') : (etatM.prochaine ? etatM.prochaine.type_libelle + ' le ' + jjmmCourt(etatM.prochaine.date_debut) : ''))}">${esc(etatM.etat === 'programmee' && etatM.prochaine ? 'Intervention le ' + jjmmCourt(etatM.prochaine.date_debut) : etatM.libelle + (etatM.jusqu_au ? ' → ' + jjmmCourt(etatM.jusqu_au) : ''))}</span></div>` : '';
+      rows += `<tr><td class="machine-cell row-accent-${accent}"><div class="m-row"><span class="row-icon ${accent}">${svgIcon(ICON_MACHINE)}</span><div><div class="m-name">${m.name}</div><div class="m-sub">${m.code}</div>${pastille}</div></div></td>`;
       for(let d=0; d<7; d++){
         const slotsJour = (state.planning[m.id]||[]).filter(s=>s.day===d);
         const slot = slotsJour[0];
@@ -1140,7 +1149,9 @@
           const pctBadge = of ? `<span class="b-pct">${of.avancement}%</span>` : '';
           rows += `<td class="slot"><div class="bar clic-tache" data-gamme="${slot.gamme||''}" data-date="${slot.date||''}" data-of="${esc(slot.of)}" title="Cliquer pour saisir l'avancement" style="background:${color};cursor:pointer;"><span class="b-text"><span class="b-of">${slot.of}${slot.nbPers > 1 ? ` · ${slot.nbPers} pers.` : ''}</span><span class="b-name">${of?of.produit:''}</span></span>${pctBadge}</div></td>`;
         } else {
-          rows += `<td class="slot clickable" data-machine-uuid="${m.uuid||''}" data-machine-name="${m.name}" data-day="${d}"></td>`;
+          const iv = interventionDuJour(m.uuid, DAYS_ISO[d]);
+          if (iv) rows += `<td class="slot ${iv.bloquant ? (iv.type === 'reparation' || iv.type === 'retour_sigis' ? 'hs' : 'maint') : ''} intervention-cell" data-machine-uuid="${m.uuid||''}" data-machine-name="${esc(m.name)}" title="${esc(iv.texte)}"><div class="hs-txt">${esc(iv.type_libelle)}${iv.heure_debut ? ' ' + iv.heure_debut + '–' + (iv.heure_fin || '…') : ''}</div></td>`;
+          else rows += `<td class="slot clickable" data-machine-uuid="${m.uuid||''}" data-machine-name="${m.name}" data-day="${d}"></td>`;
         }
       }
       rows += `</tr>`;
@@ -1150,6 +1161,7 @@
     table.querySelectorAll('.clic-tache').forEach(b=>{
       b.addEventListener('click', (ev)=>{ ev.stopPropagation(); ouvrirModaleTache(b.dataset.gamme, b.dataset.date, b.dataset.of); });
     });
+    table.querySelectorAll('.intervention-cell').forEach(td => td.addEventListener('click', () => ouvrirModaleInterventions({ id: td.dataset.machineUuid, nom: td.dataset.machineName }, chargerDonneesReelles)));
     table.querySelectorAll('.slot.clickable').forEach(td=>{
       td.addEventListener('click', ()=> ouvrirModaleAffectation({
         machineUuid: td.dataset.machineUuid,
@@ -3493,7 +3505,7 @@
       <div class="panel">
         <div class="panel-head"><h2>Parc machine</h2><button class="btn primary" id="new-machine"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvelle machine</button></div>
         <table>
-          <thead><tr><th>Nom</th><th>Code</th><th>Opération principale</th><th>Statut</th><th></th></tr></thead>
+          <thead><tr><th>Nom</th><th>Code</th><th>Opération principale</th><th>État</th><th></th></tr></thead>
           <tbody id="machines-tbody"><tr><td colspan="5" class="empty">Chargement…</td></tr></tbody>
         </table>
       </div>
@@ -3518,13 +3530,17 @@
             <td>${m.nom}</td>
             <td class="mono">${m.code}</td>
             <td>${(m.operations && m.operations.length) ? m.operations.map(o=>`<span class="tag ok" style="margin-right:4px;">${o.nom}</span>`).join('') : '<span style="color:var(--ink-500)">— aucune —</span>'}</td>
-            <td><span class="tag ${m.actif ? 'ok' : 'danger'}">${m.actif ? 'Active' : 'Inactive'}</span></td>
+            <td>${m.actif ? tagEtatMachine(m.etat) : '<span class="tag danger">Inactive</span>'}</td>
             <td style="white-space:nowrap;">
+              <button class="btn interv-machine" data-id="${m.id}" title="Pannes, maintenance, retours constructeur">Interventions</button>
               <button class="btn edit-machine" data-id="${m.id}">Modifier</button>
               <button class="btn btn-icon-danger delete-machine" data-id="${m.id}" title="Supprimer cette machine" aria-label="Supprimer ${m.nom}">${svgIcon('<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6"/>')}</button>
             </td>
           </tr>
         `));
+      });
+      tbody.querySelectorAll('.interv-machine').forEach(btn => {
+        btn.addEventListener('click', () => { const m = machines.find(x => x.id === btn.dataset.id); ouvrirModaleInterventions({ id: m.id, nom: m.nom }, () => chargerListeMachines(wrap)); });
       });
       tbody.querySelectorAll('.edit-machine').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -3541,6 +3557,108 @@
     } catch (e) {
       tbody.innerHTML = `<tr><td colspan="5" class="empty">Backend indisponible — impossible de charger le parc machine réel. (${e.message})</td></tr>`;
     }
+  }
+
+
+  // ---------- États et interventions des machines ----------
+  const jjmmCourt = (iso) => iso ? iso.slice(8, 10) + '/' + iso.slice(5, 7) : '';
+  // Intervention bloquante (ou en marche dégradée) qui touche ce jour pour cette machine, d'après les données du planning.
+  function interventionDuJour(machineUuid, iso) {
+    if (!machineUuid) return null;
+    const l = (state.interventions || []).filter(x => x.machine_id === machineUuid && x.date_debut <= iso && (!x.date_fin || x.date_fin >= iso));
+    return l.find(x => x.bloquant) || null;
+  }
+  const ETAT_TAG = { hors_service: ['danger', '⛔ Hors service'], maintenance: ['warn', '🔧 Intervention en cours'], degradee: ['warn', '⚠ Marche dégradée'], programmee: ['', '📅 Intervention programmée'], ok: ['ok', '✔ Opérationnelle'] };
+  function tagEtatMachine(e) {
+    if (!e) return '<span class="tag ok">Opérationnelle</span>';
+    const [cl, txt] = ETAT_TAG[e.etat] || ETAT_TAG.ok;
+    const detail = e.etat === 'programmee' && e.prochaine ? ` le ${jjmmCourt(e.prochaine.date_debut)}` : (e.jusqu_au ? ` jusqu'au ${jjmmCourt(e.jusqu_au)}` : (e.etat !== 'ok' && e.etat !== 'programmee' ? ' (fin non connue)' : ''));
+    return `<span class="tag ${cl}">${txt}${detail}</span>${e.etat !== 'programmee' && e.prochaine ? `<div class="plan-note">Prochaine : ${esc(e.prochaine.type_libelle)} le ${jjmmCourt(e.prochaine.date_debut)}</div>` : ''}${e.intervention && e.intervention.description ? `<div class="plan-note">${esc(e.intervention.description)}</div>` : ''}`;
+  }
+
+  async function ouvrirModaleInterventions(machine, apres) {
+    afficherModale(`
+      <h3>État et interventions — ${esc(machine.nom)}</h3>
+      <div id="iv-etat" style="margin-bottom:8px;"><span class="plan-note">Chargement…</span></div>
+      <details id="iv-form" class="panel" style="padding:10px 12px;margin:0 0 10px;" open><summary style="cursor:pointer;font-weight:600;">Déclarer une intervention</summary>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-top:8px;">
+          <div class="field"><label>Nature</label><select id="iv-type"></select></div>
+          <div class="field"><label>Début</label><input id="iv-d1" type="date" value="${dateLocaleIso()}"></div>
+          <div class="field"><label>Heure de début (facultatif)</label><input id="iv-h1" type="time"></div>
+          <div class="field"><label>Fin prévue (vide = inconnue)</label><input id="iv-d2" type="date"></div>
+          <div class="field"><label>Heure de fin (facultatif)</label><input id="iv-h2" type="time"></div>
+          <div class="field"><label>Intervenant (technicien, société…)</label><input id="iv-qui" type="text" placeholder="ex. SAV Kolbus"></div>
+        </div>
+        <div class="field" style="margin-top:6px;"><label>Description / cause</label><input id="iv-desc" type="text" placeholder="ex. courroie cassée, changement de rouleau…"></div>
+        <label style="display:flex;gap:8px;align-items:center;margin:6px 0;font-size:13px;"><input type="checkbox" id="iv-bloq" checked> La machine ne peut pas être utilisée pendant l'intervention <span class="plan-note">(décocher = marche dégradée : elle reste affectable)</span></label>
+        <div id="iv-msg"></div>
+        <div style="text-align:right;"><button class="btn primary" id="iv-ajout" type="button">Enregistrer l'intervention</button></div>
+      </details>
+      <div id="iv-impacts"></div>
+      <div id="iv-liste"></div>
+      <div class="actions"><button class="btn primary" id="m-cancel">Fermer</button></div>
+    `, 'large');
+    document.getElementById('m-cancel').addEventListener('click', () => { fermerModale(); if (apres) apres(); });
+    const API_I = `${API}/gerer-interventions`;
+    let types = {};
+    const ETAT_IV = { 'programmée': ['', '📅 Programmée'], 'en cours': ['warn', '🔧 En cours'], 'terminée': ['ok', '✔ Terminée'] };
+    async function charger() {
+      const res = await fetch(`${API_I}?machine_id=${machine.id}`); const d = await lireJson(res);
+      if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
+      types = d.types;
+      const sel = document.getElementById('iv-type'); if (!sel.options.length) sel.innerHTML = Object.entries(types).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
+      document.getElementById('iv-etat').innerHTML = `<strong>État actuel :</strong> ${tagEtatMachine(d.etat)}${d.machine.actif ? '' : ' <span class="tag danger">Machine désactivée</span>'}`;
+      const l = d.interventions;
+      document.getElementById('iv-liste').innerHTML = l.length ? `<h4 style="margin:6px 0;">Historique et interventions à venir</h4><table class="sp-table"><thead><tr><th>Nature</th><th>Période</th><th>État</th><th></th></tr></thead><tbody>${l.map(i => `<tr data-id="${i.id}">
+          <td><strong>${esc(i.type_libelle)}</strong>${i.bloquant ? '' : ' <span class="plan-note">(marche dégradée)</span>'}<br><span class="plan-note">${esc(i.description || '')}${i.intervenant ? ' · ' + esc(i.intervenant) : ''}</span></td>
+          <td>${dateCourte(i.date_debut)}${i.heure_debut ? ' ' + i.heure_debut : ''} → ${i.date_fin ? dateCourte(i.date_fin) + (i.heure_fin ? ' ' + i.heure_fin : '') : '<em>fin non connue</em>'}${i.date_fin_prevue && i.date_fin && i.date_fin > i.date_fin_prevue ? `<div class="plan-note" style="color:var(--danger-text);">prévu le ${dateCourte(i.date_fin_prevue)}</div>` : ''}</td>
+          <td><span class="tag ${ETAT_IV[i.etat][0]}">${ETAT_IV[i.etat][1]}</span></td>
+          <td style="white-space:nowrap;">${i.etat === 'terminée' ? '' : `<input class="iv-fin" type="date" value="${i.date_fin || ''}" title="Nouvelle date de fin prévue" style="width:130px;"> <button class="btn iv-datefin" type="button" title="Enregistrer la nouvelle date de fin" style="padding:2px 8px;">OK</button> <button class="btn iv-term" type="button" data-prog="${i.etat === 'programmée' ? 1 : 0}" style="padding:2px 8px;">${i.etat === 'programmée' ? 'Annuler' : 'Terminer'}</button> `}<button class="btn btn-icon-danger iv-del" type="button" title="Supprimer cette ligne" style="padding:2px 8px;">✕</button></td></tr>`).join('')}</tbody></table>` : '<div class="plan-note">Aucune intervention enregistrée pour cette machine.</div>';
+    }
+    function afficherImpacts(impacts) {
+      const z = document.getElementById('iv-impacts');
+      if (!impacts || !impacts.length) { z.innerHTML = ''; return; }
+      const gids = [...new Set(impacts.map(x => x.gamme_id).filter(Boolean))];
+      z.innerHTML = `<div class="msg error" style="margin:0 0 10px;"><strong>⚠ ${impacts.length} créneau(x) déjà planifié(s) sur cette machine pendant l'intervention :</strong>
+        <ul style="margin:6px 0 8px 18px;">${impacts.slice(0, 12).map(x => `<li>${dateCourte(x.date)}${x.heure_debut ? ' ' + x.heure_debut + '–' + x.heure_fin : ''} — <strong>${esc(x.of)}</strong> ${esc(x.titre)} · ${esc(x.operation)}</li>`).join('')}${impacts.length > 12 ? `<li>… et ${impacts.length - 12} autre(s)</li>` : ''}</ul>
+        <button class="btn" id="iv-liberer" type="button">Libérer ces tâches pour les replanifier</button> <span class="plan-note">Elles repassent « à planifier » ; replanifiez-les sur une autre machine ou après l'intervention (les étapes déjà commencées sont conservées).</span><div id="iv-lib-msg"></div></div>`;
+      document.getElementById('iv-liberer').addEventListener('click', async () => {
+        const m = document.getElementById('iv-lib-msg'); m.textContent = 'Libération…';
+        try {
+          const res = await fetch(`${API}/deplanifier-etape`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gamme_ids: gids }) }); const d = await lireJson(res);
+          if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status));
+          m.innerHTML = `<div class="plan-note" style="color:var(--accent-teal);">${d.deplanifiees.length} étape(s) libérée(s)${d.conservees && d.conservees.length ? ' · ' + d.conservees.length + ' conservée(s) (déjà commencées)' : ''}.</div>`;
+          chargerDonneesReelles();
+        } catch (e) { m.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+      });
+    }
+    async function appeler(methode, corps, qs) {
+      const res = await fetch(`${API_I}${qs || ''}`, { method: methode, headers: { 'Content-Type': 'application/json' }, body: corps ? JSON.stringify(corps) : undefined });
+      const d = await lireJson(res); if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status)); return d;
+    }
+    document.getElementById('iv-ajout').addEventListener('click', async () => {
+      const msg = document.getElementById('iv-msg');
+      try {
+        const d = await appeler('POST', { machine_id: machine.id, type: document.getElementById('iv-type').value, date_debut: document.getElementById('iv-d1').value, heure_debut: document.getElementById('iv-h1').value, date_fin: document.getElementById('iv-d2').value, heure_fin: document.getElementById('iv-h2').value, bloquant: document.getElementById('iv-bloq').checked, description: document.getElementById('iv-desc').value, intervenant: document.getElementById('iv-qui').value });
+        msg.innerHTML = '<div class="plan-note" style="color:var(--accent-teal);">Intervention enregistrée.</div>';
+        document.getElementById('iv-desc').value = ''; document.getElementById('iv-qui').value = ''; document.getElementById('iv-d2').value = '';
+        afficherImpacts(d.impacts); await charger(); chargerDonneesReelles();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
+    document.getElementById('iv-liste').addEventListener('click', async (ev) => {
+      const tr = ev.target.closest('tr[data-id]'); if (!tr) return; const id = tr.dataset.id;
+      try {
+        if (ev.target.closest('.iv-term')) {
+          if (ev.target.closest('.iv-term').dataset.prog === '1') { if (!confirm('Annuler cette intervention programmée ?')) return; await appeler('DELETE', null, `?id=${id}`); }
+          else await appeler('PUT', { id, action: 'terminer' });
+          afficherImpacts([]); }
+        else if (ev.target.closest('.iv-datefin')) { const d = await appeler('PUT', { id, date_fin: tr.querySelector('.iv-fin').value }); afficherImpacts(d.impacts); }
+        else if (ev.target.closest('.iv-del')) { if (!confirm('Supprimer cette ligne (erreur de saisie) ? Pour clore une intervention, utilisez plutôt « Terminer ».')) return; await appeler('DELETE', null, `?id=${id}`); }
+        else return;
+        await charger(); chargerDonneesReelles();
+      } catch (e) { document.getElementById('iv-liste').insertAdjacentHTML('afterbegin', `<div class="msg error">${esc(e.message)}</div>`); }
+    });
+    try { await charger(); } catch (e) { document.getElementById('iv-etat').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
   }
 
   function ouvrirModaleSuppressionMachine(machine) {
@@ -5291,6 +5409,7 @@
       const data = await res.json();
 
       state.machines = data.machines.map(m => ({ id: m.code, uuid: m.id, name: m.nom, code: m.code }));
+      state.interventions = data.interventions || []; state.etatsMachines = data.etats_machines || {};
       // Ligne virtuelle pour les opérations manuelles (aucune machine) : sinon leurs créneaux seraient invisibles.
       if (data.planning.some(c => !c.machine_id)) state.machines.push({ id: 'MANUEL', uuid: null, name: 'Travail manuel (sans machine)', code: 'MANUEL', manuel: true });
 
@@ -6626,7 +6745,8 @@
           champ.value = premierLibre.date;
         }
         const choisi = champ.value;
-        zone.innerHTML = r.jours.map(j => `<button type="button" class="dispo-chip ${j.etat} ${j.date === choisi ? 'choisi' : ''}" data-date="${j.date}" title="${esc(j.etat === 'libre' ? 'Libre — cliquer pour choisir ce jour' : j.details.join('\n'))}">${esc(j.libelle)}</button>`).join('')
+        const bandeau = (r.interventions || []).map(i => `<div class="msg ${i.bloquant ? 'error' : ''}" style="margin:0 0 6px;font-size:12px;">${i.bloquant ? '⛔' : '⚠'} ${esc(i.texte)}${i.etat === 'programmée' ? ' (programmée)' : ''}${i.bloquant ? ' — la machine ne peut pas être affectée à ces dates.' : ' — marche dégradée.'}</div>`).join('');
+        zone.innerHTML = bandeau + r.jours.map(j => `<button type="button" class="dispo-chip ${j.etat} ${j.date === choisi ? 'choisi' : ''}" data-date="${j.date}" title="${esc(j.etat === 'libre' ? 'Libre — cliquer pour choisir ce jour' : j.details.join('\n'))}">${esc(j.libelle)}</button>`).join('')
           + `<div class="dispo-legende">${note ? esc(note) + ' · ' : ''}Vert : libre (cliquez pour choisir) · barré : occupé (survolez pour voir par quoi) · orangé : maintenance.</div>`;
         zone.querySelectorAll('.dispo-chip.libre').forEach(b => b.addEventListener('click', () => {
           champ.value = b.dataset.date; dateManuelle = true;
