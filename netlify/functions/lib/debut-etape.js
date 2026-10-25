@@ -105,7 +105,10 @@ async function jourDebutSuggere(supabase, gammeId, aujourdhui) {
     raison = dominante.join(' et ');
   }
   const date = PL.dateDe(jour);
-  return { date, libelle: libelleJour(date), raison, bloques };
+  // Toutes les contraintes, de la plus tardive (celle qui décide) à la plus précoce.
+  const hm = (t) => { const m = Math.round(t - PL.debutDeJour(t)); return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
+  const details = raisons.slice().sort((x, y) => y[0] - x[0]).map(([t, r]) => ({ raison: r, quand: `${libelleJour(PL.dateDe(t))} ${hm(t)}`, decisive: t === instant }));
+  return { date, libelle: libelleJour(date), raison, bloques, details };
 }
 
 const aujourdhuiParis = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' });
