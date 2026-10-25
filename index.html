@@ -3523,13 +3523,13 @@
     const dessiner = () => {
       const lignes = donnees.profils.map((p, i) => `
         <div class="profil-ligne"><div><strong>${esc(p.operation)}</strong> · ${esc(nomType(p.type_production))}<br>
-          <span class="plan-note">mise en route ${nbm(p.mise_en_route_min)} · réglage ${nbm(p.reglage_min)} · roulage ${p.cadence_par_h ? p.cadence_par_h + ' ' + (p.unite_cadence || 'ex.') + '/h' : '—'}${p.quantite_formule ? ' (sur ' + esc(p.quantite_formule) + ')' : ''} · nettoyage ${nbm(p.nettoyage_min)}</span></div>
+          <span class="plan-note">mise en route ${nbm(p.mise_en_route_min)} · réglage ${nbm(p.reglage_min)}${p.reglage_fer_min ? ' + ' + nbm(p.reglage_fer_min) + '/fer' : ''} · roulage ${p.cadence_par_h ? p.cadence_par_h + ' ' + (p.unite_cadence || 'ex.') + '/h' : '—'}${p.quantite_formule ? ' (sur ' + esc(p.quantite_formule) + ')' : ''} · nettoyage ${nbm(p.nettoyage_min)}</span></div>
           <span><button class="btn" data-modif="${i}">Modifier</button> <button class="btn" data-suppr="${i}">Supprimer</button></span></div>`).join('');
       $('pf-liste').innerHTML = lignes || '<div class="empty">Aucun profil enregistré pour cette machine.</div>';
       $('pf-liste').querySelectorAll('[data-modif]').forEach(b => b.addEventListener('click', () => {
         const p = donnees.profils[Number(b.dataset.modif)];
         $('pf-op').value = p.operation_id; $('pf-type').value = p.type_production || '';
-        $('pf-mer').value = p.mise_en_route_min ?? ''; $('pf-reg').value = p.reglage_min ?? '';
+        $('pf-mer').value = p.mise_en_route_min ?? ''; $('pf-reg').value = p.reglage_min ?? ''; $('pf-regfer').value = p.reglage_fer_min ?? '';
         $('pf-cad').value = p.cadence_par_h ?? ''; $('pf-net').value = p.nettoyage_min ?? ''; $('pf-pers').value = p.nb_personnes || 1; $('pf-pp').value = p.par_passage || 1;
         $('pf-unite').value = p.unite_cadence || ''; $('pf-formule').value = p.quantite_formule || ''; majUnite();
         calcul();
@@ -3555,7 +3555,8 @@
           <div class="field"><label>Type de production</label><select id="pf-type"><option value="">Tous types</option>${donnees.types.map(t => `<option value="${esc(t.code)}">${esc(t.libelle)}</option>`).join('')}</select>
             <button class="btn" type="button" id="pf-newtype" style="margin-top:6px;">+ Nouveau type…</button></div>
           <div class="field"><label>Mise en route (min)</label><input id="pf-mer" type="number" min="0" step="any"></div>
-          <div class="field"><label>Réglage (min)</label><input id="pf-reg" type="number" min="0" step="any"></div>
+          <div class="field"><label>Réglage du passage (min)</label><input id="pf-reg" type="number" min="0" step="any"></div>
+          <div class="field"><label>Réglage par fer (min) <span class="plan-note">— tracé, empreintes, collage, positionnement, pression/température ; × « Nombre de fers » de l'OF</span></label><input id="pf-regfer" type="number" min="0" step="any"></div>
           <div class="field"><label>Cadence portant sur…</label>
             <select id="pf-preset">
               <option value="exemplaires">Des exemplaires (par défaut)</option>
@@ -3569,6 +3570,7 @@
           <div class="field"><label>Nettoyage (min)</label><input id="pf-net" type="number" min="0" step="any"></div>
           <div class="field"><label>Personnes au roulage</label><input id="pf-pers" type="number" min="1" step="1" value="1"></div>
           <div class="field"><label>Exemplaires par passage <span class="plan-note">— 1 = un à la fois ; 2 = deux en même temps (la cadence compte alors des passages/h)</span></label><input id="pf-pp" type="number" min="1" step="1" value="1"></div>
+          <div class="field"><label>Aperçu : nombre de fers</label><input id="pf-fers" type="number" min="0" step="1" value="3"></div>
           <div class="field"><label>Aperçu pour <input id="pf-qte" type="number" min="1" value="1000" style="width:90px; display:inline-block;"> unités à traiter</label><div id="pf-total" class="mono" style="padding:8px 0;">—</div></div>
         </div>
       </div>
@@ -3598,11 +3600,12 @@
       const q = nv('pf-qte') || 0; const cad = nv('pf-cad');
       const n = Math.max(1, parseInt($('pf-pp').value, 10) || 1);
       const passages = Math.ceil(q / n - 1e-9);
-      const min = (nv('pf-mer') || 0) + (nv('pf-reg') || 0) + (nv('pf-net') || 0) + (cad ? passages / cad * 60 : 0);
+      const nbFers = Number($('pf-fers').value) || 0;
+      const min = (nv('pf-mer') || 0) + (nv('pf-reg') || 0) + (nv('pf-regfer') || 0) * nbFers + (nv('pf-net') || 0) + (cad ? passages / cad * 60 : 0);
       const u = $('pf-unite').value.trim() || 'exemplaires';
       $('pf-total').textContent = min ? `${fmtH(min / 60)} au total (${q} ${u} à traiter${n > 1 ? ` = ${passages} passages de ${n}` : ''})` : '—';
     }
-    ['pf-mer', 'pf-reg', 'pf-cad', 'pf-net', 'pf-qte'].forEach(id => $(id).addEventListener('input', calcul));
+    ['pf-mer', 'pf-reg', 'pf-regfer', 'pf-fers', 'pf-cad', 'pf-net', 'pf-qte'].forEach(id => $(id).addEventListener('input', calcul));
     $('pf-pp').addEventListener('input', majUnite);
     $('pf-newtype').addEventListener('click', async () => {
       const libelle = prompt('Nom du nouveau type de production (ex. Brochure) :');
@@ -3625,7 +3628,7 @@
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             machine_id: machine.id, operation_id: $('pf-op').value, type_production: $('pf-type').value || null,
-            mise_en_route_min: nv('pf-mer'), reglage_min: nv('pf-reg'), cadence_par_h: nv('pf-cad'), nettoyage_min: nv('pf-net'), nb_personnes: nv('pf-pers') || 1, exemplaires_par_passage: nv('pf-pp') || 1,
+            mise_en_route_min: nv('pf-mer'), reglage_min: nv('pf-reg'), reglage_fer_min: nv('pf-regfer'), cadence_par_h: nv('pf-cad'), nettoyage_min: nv('pf-net'), nb_personnes: nv('pf-pers') || 1, exemplaires_par_passage: nv('pf-pp') || 1,
             unite_cadence: $('pf-unite').value.trim() || null, quantite_formule: $('pf-formule').value.trim() || null,
           }),
         });
