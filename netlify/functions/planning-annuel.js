@@ -138,6 +138,15 @@ const handlerProtege = async (event) => {
     if (b.action === 'generer') {
       const ids = Array.isArray(b.ids) ? b.ids : [];
       if (!ids.length) return rep(400, { error: 'ids requis.' });
+      // « Mémoriser dans le modèle » : les liens modifiés deviennent ceux du modèle Pléiade pour les prochains OF.
+      if (b.memoriser && b.liens && typeof b.liens === 'object') {
+        for (const [code, lien] of Object.entries(b.liens)) {
+          if (!lien || !Array.isArray(lien.predecesseurs)) continue;
+          const { error: eM } = await supabase.from('pleiade_gamme_modele')
+            .update({ predecesseurs: lien.predecesseurs.filter((q) => typeof q === 'string'), simultane: (Array.isArray(lien.simultane) ? lien.simultane : []).filter((q) => typeof q === 'string') }).eq('code', code);
+          if (eM) throw eM;
+        }
+      }
       const resultats = [];
       for (let i = 0; i < ids.length; i++) {
         const { data: l, error } = await supabase.from('pleiade_annuel').select('*').eq('id', ids[i]).single();
@@ -148,7 +157,7 @@ const handlerProtege = async (event) => {
         if (!l.quantite) { resultats.push({ id: l.id, titre: l.titre, erreur: 'Quantité manquante.' }); continue; }
         const livraison = l.date_livraison || (l.mois ? dernierJourOuvre(l.mois) : null);
         const res = await generer.handler({ httpMethod: 'POST', body: JSON.stringify({
-          action: 'creer', categorie, etapes: Array.isArray(b.etapes) ? b.etapes : undefined, operations_extra: Array.isArray(b.operations_extra) ? b.operations_extra : undefined, titre: l.titre, quantite: l.quantite, delai: livraison,
+          action: 'creer', categorie, etapes: Array.isArray(b.etapes) ? b.etapes : undefined, operations_extra: Array.isArray(b.operations_extra) ? b.operations_extra : undefined, liens: b.liens && typeof b.liens === 'object' ? b.liens : undefined, titre: l.titre, quantite: l.quantite, delai: livraison,
           date_reception: dateReception(l.reception, livraison), couleur_tete: l.tete, couleur_peau: l.peau,
           carte_dos: l.carte_dos, nb_cahiers: l.mp, rang_priorite: (b.rang_depart || 1) + i, priorite: l.a_verifier ? 'haute' : 'normale',
         }) });
