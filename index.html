@@ -1455,7 +1455,9 @@
         rendreTable();
         document.getElementById('sp-go').disabled = !taches.length;
         const ko = d.non_rapprochees.length ? ` <strong style="color:var(--accent-amber-text);">${d.non_rapprochees.length} ligne(s) non rapprochée(s) :</strong> ${d.non_rapprochees.slice(0, 6).map(x => esc(x.texte_source)).join(' ; ')}${d.non_rapprochees.length > 6 ? '…' : ''}.` : '';
-        info.innerHTML = `${d.propositions.length} tâche(s) pré-remplie(s)${d.date ? ' pour le ' + dateCourte(d.date) : ''}. Vérifiez les quantités avant d'enregistrer.${ko} ${d.notes ? '<br>' + esc(d.notes) : ''}`;
+        const pers = d.personne ? `<div style="margin-bottom:4px;">👤 Fiche de <strong>${esc(d.personne.nom || '?')}</strong>${d.personne.badge ? ` (badge ${esc(d.personne.badge)})` : ''}${d.personne.methode === 'badge' ? ' — identifiée par le badge ✔' : (d.personne.methode === 'nom' ? ' — identifiée par le nom' : '')}</div>` : '';
+        const alertesP = (d.alertes_personne || []).map(x => `<div style="color:var(--accent-amber-text,#b45309);">⚠ ${esc(x)}</div>`).join('');
+        info.innerHTML = pers + alertesP + `${d.propositions.length} tâche(s) pré-remplie(s)${d.date ? ' pour le ' + dateCourte(d.date) : ''}. Vérifiez les quantités avant d'enregistrer.${ko} ${d.notes ? '<br>' + esc(d.notes) : ''}`;
       } catch (e) { info.innerHTML = `<span style="color:var(--danger-text);">${esc(e.message)}</span>`; }
       ev.target.value = '';
     });
@@ -2298,6 +2300,7 @@
         ${champ('pf-nomf', 'Nom de famille', 'nom_famille')}
         ${champ('pf-nom', 'Nom affiché dans le planning', 'nom', 'text', 'placeholder="par défaut : Prénom Nom"')}
         ${champ('pf-matricule', 'Matricule', 'matricule')}
+        ${champ('pf-badge', 'N° de badge de pointage', 'numero_badge', 'text', 'placeholder="ex. 210 (unique)" inputmode="numeric"')}
       </div>
       ${titreSection('Poste et contrat')}
       <div style="${grille}">
@@ -2333,7 +2336,7 @@
     $('m-submit').addEventListener('click', async () => {
       const msg = $('m-msg');
       const corps = {
-        prenom: $('pf-prenom').value, nom_famille: $('pf-nomf').value, nom: $('pf-nom').value, matricule: $('pf-matricule').value,
+        prenom: $('pf-prenom').value, nom_famille: $('pf-nomf').value, nom: $('pf-nom').value, matricule: $('pf-matricule').value, numero_badge: $('pf-badge').value,
         poste: $('pf-poste').value, role_type: $('pf-role').value, equipe: $('pf-equipe').value, type_contrat: $('pf-contrat').value,
         heures_semaine: $('pf-heures').value, cout_horaire: $('pf-cout').value, date_entree: $('pf-entree').value,
         telephone: $('pf-tel').value, email: $('pf-email').value, habilitations: $('pf-hab').value, notes: $('pf-notes').value,
