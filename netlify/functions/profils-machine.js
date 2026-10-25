@@ -8,7 +8,7 @@
 //        -> { types: [{code, libelle}], profils: [{ operation_id, operation, type_production,
 //             mise_en_route_min, reglage_min, cadence_par_h, nettoyage_min, nb_personnes }] }
 // POST   { machine_id, operation_id, type_production|null, mise_en_route_min?, reglage_min?,
-//          cadence_par_h?, nettoyage_min?, nb_personnes?, exemplaires_par_passage? }   -> crée ou remplace le profil
+//          cadence_par_h?, nettoyage_min?, nb_personnes?, exemplaires_par_passage?, reglage_fer_min? }   -> crée ou remplace le profil
 // POST   { action: 'ajouter_type', libelle }               -> ajoute un type de production
 // DELETE ?machine_id=&operation_id=&type_production=       -> supprime le profil
 //        (type_production vide ou « tous » = profil valable pour tous les types)
@@ -19,7 +19,7 @@
 const { getSupabase } = require('./lib/supabaseclient');
 const { analyser } = require('./lib/formules');
 
-const NOMS = { mise_en_route: 'Mise en route', reglage: 'Réglage', roulage: 'Roulage', nettoyage: 'Nettoyage' };
+const NOMS = { mise_en_route: 'Mise en route', reglage: 'Réglage', reglage_fer: 'Réglage par fer', roulage: 'Roulage', nettoyage: 'Nettoyage' };
 const NOMS_LISTE = Object.values(NOMS);
 
 const nombre = (v) => {
@@ -45,10 +45,11 @@ const handlerProtege = async (event) => {
       const profils = new Map();
       phases.filter((p) => NOMS_LISTE.includes(p.nom)).forEach((p) => {
         const cle = `${p.operation_id}|${p.type_production || ''}`;
-        if (!profils.has(cle)) profils.set(cle, { operation_id: p.operation_id, operation: p.operations.nom, type_production: p.type_production, mise_en_route_min: null, reglage_min: null, cadence_par_h: null, nettoyage_min: null, nb_personnes: 1, quantite_formule: null, unite_cadence: null, par_passage: 1 });
+        if (!profils.has(cle)) profils.set(cle, { operation_id: p.operation_id, operation: p.operations.nom, type_production: p.type_production, mise_en_route_min: null, reglage_min: null, cadence_par_h: null, nettoyage_min: null, reglage_fer_min: null, nb_personnes: 1, quantite_formule: null, unite_cadence: null, par_passage: 1 });
         const pr = profils.get(cle);
         if (p.nom === NOMS.mise_en_route) pr.mise_en_route_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
         if (p.nom === NOMS.reglage) pr.reglage_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
+        if (p.nom === NOMS.reglage_fer) pr.reglage_fer_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
         if (p.nom === NOMS.nettoyage) pr.nettoyage_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
         if (p.nom === NOMS.roulage) { pr.cadence_par_h = p.cadence_par_h === null ? null : Number(p.cadence_par_h); pr.nb_personnes = p.nb_personnes; pr.quantite_formule = p.quantite_formule || null; pr.unite_cadence = p.unite_cadence || null; pr.par_passage = Number(p.par_passage) > 1 ? Number(p.par_passage) : 1; }
       });
@@ -72,7 +73,7 @@ const handlerProtege = async (event) => {
       const type = typeOuNull(b.type_production);
       const valeurs = {
         mise_en_route: nombre(b.mise_en_route_min), reglage: nombre(b.reglage_min),
-        nettoyage: nombre(b.nettoyage_min), cadence: nombre(b.cadence_par_h),
+        nettoyage: nombre(b.nettoyage_min), cadence: nombre(b.cadence_par_h), reglage_fer: nombre(b.reglage_fer_min),
       };
       for (const [cle, v] of Object.entries(valeurs)) {
         if (Number.isNaN(v) || (v !== null && v < 0)) return { statusCode: 400, body: JSON.stringify({ error: `Valeur invalide pour « ${cle} » (nombre positif attendu).` }) };
@@ -101,6 +102,7 @@ const handlerProtege = async (event) => {
       const ajout = (nom, ordre, champs) => lignes.push({ operation_id: b.operation_id, machine_id: b.machine_id, type_production: type, nom, ordre, occupe_machine: true, nb_personnes: 1, ...champs });
       if (valeurs.mise_en_route !== null) ajout(NOMS.mise_en_route, 1, { type_calcul: 'fixe', duree_h: valeurs.mise_en_route / 60 });
       if (valeurs.reglage !== null) ajout(NOMS.reglage, 2, { type_calcul: 'fixe', duree_h: valeurs.reglage / 60 });
+      if (valeurs.reglage_fer !== null) ajout(NOMS.reglage_fer, 2, { type_calcul: 'par_element', duree_h: valeurs.reglage_fer / 60, element_param: 'nb_fers', element_label: 'fer' });
       if (valeurs.cadence !== null) ajout(NOMS.roulage, 3, { type_calcul: 'cadence', cadence_par_h: valeurs.cadence, nb_personnes: nbPers, ...(formule || unite ? { quantite_formule: formule, unite_cadence: unite } : {}), ...(parPassage > 1 ? { par_passage: parPassage } : {}) });
       if (valeurs.nettoyage !== null) ajout(NOMS.nettoyage, 4, { type_calcul: 'fixe', duree_h: valeurs.nettoyage / 60 });
       const { error } = await supabase.from('phases_standard').insert(lignes);
