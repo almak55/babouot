@@ -6422,7 +6422,9 @@
         const ids = [r.conducteur && r.conducteur.id, ...r.aides.map(a => a.id)].filter(Boolean);
         ids.forEach(pid => { const c = cases.find(x => x.value === pid); if (c) c.checked = true; });
         persTouche = false;
-        heureDebutProposee = r.debut_suggere && r.debut_suggere.date === date ? r.debut_suggere.heure : null;
+        // Conducteur libre seulement après sa tâche en cours : le jour et l'heure de début s'alignent sur ce moment (confirmé côté serveur).
+        heureDebutProposee = r.debut_suggere ? r.debut_suggere.heure : null;
+        if (r.debut_suggere && document.getElementById('m-date').value !== r.debut_suggere.date) { document.getElementById('m-date').value = r.debut_suggere.date; majDispo(false); }
         let h = noteJour + `<div>Équipe requise : <strong>${r.equipe_requise}</strong> personne(s)${r.prioritaire ? ' — OF prioritaire' : ''}.</div>`;
         if (machine) {
           h += `<div style="margin-top:4px;"><strong>Conducteurs de la machine</strong> (seuls ceux-ci peuvent la conduire) :</div>`;
@@ -6433,10 +6435,7 @@
             h += `<div style="padding-left:10px;">${choisi ? '✅' : '▫️'} ${esc(c.nom)} <span style="color:var(--muted);">(${c.rang === 1 ? 'titulaire' : 'suppléant ' + (c.rang - 1)})</span> — ${esc(etat)}</div>`;
           });
         }
-        if (r.debut_suggere) {
-          if (heureDebutProposee) h += `<div>⏱ Début ajusté à <strong>${esc(r.debut_suggere.heure)}</strong> (fin de la tâche en cours du conducteur).</div>`;
-          else h += `<div style="color:var(--danger);">Le conducteur n'est libre que le ${esc(r.debut_suggere.date)} à ${esc(r.debut_suggere.heure)} : changez le jour de début pour en tenir compte.</div>`;
-        }
+        if (r.debut_suggere) h += `<div>⏱ Début le <strong>${esc(r.debut_suggere.date.split('-').reverse().slice(0, 2).join('/'))} à ${esc(r.debut_suggere.heure)}</strong> : dès que ${r.conducteur ? esc(r.conducteur.nom) : 'le conducteur'} a fini sa tâche en cours (non prioritaire).</div>`;
         h += `<div style="margin-top:4px;"><strong>Aides</strong> : ${r.aides.length ? r.aides.map(a => esc(a.nom) + (a.competent ? '' : ' (sans compétence enregistrée)')).join(', ') : 'aucune'}.</div>`;
         (r.avertissements || []).forEach(w => { h += `<div style="color:var(--danger);">⚠ ${esc(w)}</div>`; });
         zone.innerHTML = h;
