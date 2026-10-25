@@ -4654,14 +4654,14 @@
       const predHtml = autres.length ? `
         <div class="field pred-field"><label>Démarre après… <span class="plan-note">(cochez une ou plusieurs opérations ; aucune case cochée = peut démarrer dès le début)</span></label>
           <div class="pred-list">${lignesPred}</div>
-          <small>Les opérations sont listées dans l'ordre de saisie de l'OF, ce n'est <strong>pas</strong> l'ordre d'exécution : c'est vous qui définissez ce qui vient après quoi. <strong>Attendre la fin</strong> : l'opération démarre quand la coche est terminée. <strong>En ligne</strong> : elle démarre en même temps que l'opération cochée (réglage en parallèle) et sa production se déroule dans les mêmes temps (ex. contrôle couvertures pendant le montage). <strong>Démarrage progressif</strong> : elle démarre dès qu'une part de l'opération cochée est faite (ex. la pliure dès que des feuilles refendues sont prêtes), mais ne peut pas finir avant elle.</small></div>` : '';
+          <small>Les opérations sont les mêmes que dans la gamme opératoire, dans le même ordre logique de fabrication ; c'est vous qui définissez ce qui vient après quoi. <strong>Attendre la fin</strong> : l'opération démarre quand la coche est terminée. <strong>En ligne</strong> : elle démarre en même temps que l'opération cochée (réglage en parallèle) et sa production se déroule dans les mêmes temps (ex. contrôle couvertures pendant le montage). <strong>Démarrage progressif</strong> : elle démarre dès qu'une part de l'opération cochée est faite (ex. la pliure dès que des feuilles refendues sont prêtes), mais ne peut pas finir avant elle.</small></div>` : '';
       const manquants = e.parametres_manquants.length
         ? `<div class="msg error" style="margin:6px 0 0;">À renseigner : ${e.parametres_requis.filter(p => e.parametres_manquants.includes(p.cle)).map(p => esc(p.libelle)).join(', ')}.</div>` : '';
       const erreursF = (e.erreurs_formule || []).map(x => `<div class="msg error" style="margin:6px 0 0;">Formule « ${esc(x.phase)} » : ${esc(x.message)}</div>`).join('');
       return `
         <div class="step-card" data-gamme="${e.gamme_id}" data-verrou="${verrou ? 1 : 0}">
           <div class="step-head">
-            <strong>${e.operation}</strong>
+            <strong>${e.rang ? e.rang + '. ' : ''}${e.operation}</strong>
             <span><span class="tag ${e.chiffre ? 'ok' : 'warn'}">${e.chiffre ? fmtH(e.total_h) : 'Non chiffré'}</span>${e.statut === 'à planifier' || e.statut === 'planifié' ? ` <button class="btn s-retirer" type="button" data-gamme="${e.gamme_id}" data-planifie="${e.statut === 'planifié' ? 1 : 0}" title="Retirer cette opération de l'OF">Retirer</button>` : ''}</span>
           </div>
           <div class="step-source">${SOURCES[e.source]}${e.duree_manuelle_h !== null ? ' — <strong>durée manuelle appliquée</strong>' : ''}</div>
