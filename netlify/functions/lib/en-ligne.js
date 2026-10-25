@@ -89,7 +89,20 @@ function appliquerEnLigne(etapes, regles) {
     const ref = enLigne.slice().sort((a, b) => somme(b.phases, 'production') - somme(a.phases, 'production'))[0];
     const prodRef = somme(ref.phases, 'production');
     const prodMoi = somme(e.phases, 'production');
-    if (!(prodRef > 0) || !(prodMoi > 0) || !e.phases.length) return;
+    if (!(prodRef > 0)) return;
+    if (!(prodMoi > 0)) {
+      // Opération en ligne sans temps de production propre (ex. contrôle des couvertures, sans machine) :
+      // sa production dure autant que celle de l'opération en amont ; ses éventuels réglages/nettoyages restent.
+      e.phases.push({
+        nom: 'Production (en ligne)', duree_h: arrondi(prodRef), detail: `en ligne avec « ${ref.operation} » : même durée de production (${arrondi(prodRef)} h)`,
+        occupe_machine: false, nb_personnes: 1, type_calcul: 'en_ligne',
+      });
+      e.chiffre = true; e.source = 'en_ligne';
+      e.total_h = arrondi(e.phases.reduce((t, p) => t + p.duree_h, 0));
+      e.heures_machine = arrondi(e.phases.filter((p) => p.occupe_machine).reduce((t, p) => t + p.duree_h, 0));
+      e.heures_personnes = arrondi(e.phases.reduce((t, p) => t + p.duree_h * p.nb_personnes, 0));
+      return;
+    }
     const k = prodRef / prodMoi;
     e.phases.forEach((p) => {
       if (typePhase(p.nom) !== 'production') return;
