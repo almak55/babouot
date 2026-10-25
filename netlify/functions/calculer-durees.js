@@ -187,6 +187,16 @@ const handlerProtege = async (event) => {
       }
     }
 
+    // Mêmes opérations que la gamme, présentées dans le même ordre logique de fabrication (et non dans l'ordre de saisie).
+    try {
+      const { data: opsOrdre } = await supabase.from('operations').select('id, ordre_defaut').in('id', Array.from(new Set(etapes.map((e) => e.operation_id))));
+      const ordreDe = Object.fromEntries((opsOrdre || []).map((o) => [o.id, o.ordre_defaut]));
+      const logique = require('./lib/ordre-gamme').ordreLogique(etapes.map((e) => ({ sequence: e.sequence, predecesseurs: e.predecesseurs, operations: { ordre_defaut: ordreDe[e.operation_id] } })));
+      const rang = new Map(logique.map((g, i) => [g.sequence, i + 1]));
+      etapes.forEach((e) => { e.rang = rang.get(e.sequence) || null; });
+      etapes.sort((a, b) => (a.rang || 1e9) - (b.rang || 1e9) || a.sequence - b.sequence);
+    } catch (eOrdre) { console.warn('calculer-durees : tri logique impossible', eOrdre.message); }
+
     const totalH = arrondi(etapes.reduce((s, e) => s + e.total_h, 0));
     return {
       statusCode: 200,
