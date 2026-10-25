@@ -122,8 +122,8 @@ const handlerProtege = async (event) => {
 
     // Découpe la durée en créneaux horaires à partir de `jourDebut` (pause et jours non ouvrés sautés).
     // heure_debut (facultatif, « HH:MM ») : le 1er jour, on commence à cette heure (ex. dès la fin de la tâche précédente du conducteur).
-    const dateDemandee = date;
-    const heureDebutMin = /^\d{1,2}:\d{2}/.test(String(body.heure_debut || '')) ? PL.hhmm(String(body.heure_debut).slice(0, 5)) : undefined;
+    let dateDemandee = date;
+    let heureDebutMin = /^\d{1,2}:\d{2}/.test(String(body.heure_debut || '')) ? PL.hhmm(String(body.heure_debut).slice(0, 5)) : undefined;
     const decouper = (jourDebut) => decouperCommun(jourDebut, phasesEtape, cal, jourDebut === dateDemandee ? heureDebutMin : undefined);
     const chevauche = (m, ligne) => !ligne.heure_debut || !ligne.heure_fin
       || (PL.hhmm(String(ligne.heure_debut).slice(0, 5)) < PL.hhmm(m.heure_fin) && PL.hhmm(m.heure_debut) < PL.hhmm(String(ligne.heure_fin).slice(0, 5)));
@@ -177,20 +177,34 @@ const handlerProtege = async (event) => {
         };
       }
 
-      // Déjà affectées ailleurs sur ces créneaux ?
-      const { data: occupees, error: persError } = await supabase
-        .from('planning_jour_personnel')
-        .select('personnel_id, planning_jour!inner(date, statut, heure_debut, heure_fin)')
-        .in('personnel_id', personnelIds)
-        .in('planning_jour.date', dates)
-        .neq('planning_jour.statut', 'annulé');
-      if (persError) throw persError;
-      const prise = occupees.find((o) => morceaux.some((m) => o.planning_jour.date === m.date && chevauche(m, o.planning_jour)));
-      if (prise) {
-        return {
-          statusCode: 409,
-          body: JSON.stringify({ error: `${nomDe(prise.personnel_id)} est déjà affecté(e) ailleurs sur ce créneau (${prise.planning_jour.date.split('-').reverse().slice(0, 2).join('/')}).`, conflit: 'personnel' }),
-        };
+      // Déjà affectées ailleurs sur ces créneaux ? Si c'est le même jour, on enchaîne : l'étape démarre
+      // quand la personne a fini sa tâche précédente (si la machine est libre à ce moment-là).
+      const fmtJour = (d) => d.split('-').reverse().slice(0, 2).join('/');
+      const hhmmDe = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+      for (let essai = 0; essai < 12; essai++) {
+        const dates = Array.from(new Set(morceaux.map((m) => m.date)));
+        const { data: occupees, error: persError } = await supabase
+          .from('planning_jour_personnel')
+          .select('personnel_id, planning_jour!inner(date, statut, heure_debut, heure_fin)')
+          .in('personnel_id', personnelIds)
+          .in('planning_jour.date', dates)
+          .neq('planning_jour.statut', 'annulé');
+        if (persError) throw persError;
+        const prise = occupees.find((o) => morceaux.some((m) => o.planning_jour.date === m.date && chevauche(m, o.planning_jour)));
+        if (!prise) break;
+        const refus = (motif) => ({ statusCode: 409, body: JSON.stringify({ error: `${nomDe(prise.personnel_id)} est déjà affecté(e) ailleurs sur ce créneau (${fmtJour(prise.planning_jour.date)})${motif ? ' — ' + motif : ''}.`, conflit: 'personnel' }) });
+        const jour1 = morceaux[0].date;
+        if (prise.planning_jour.date !== jour1 || !avecDuree) return refus('');
+        // fin de la dernière tâche qui chevauche, ce jour-là, pour les personnes concernées
+        const gênantes = occupees.filter((o) => o.planning_jour.date === jour1 && morceaux.some((m) => m.date === jour1 && chevauche(m, o.planning_jour)));
+        if (gênantes.some((o) => !o.planning_jour.heure_fin)) return refus('sa journée est entièrement réservée');
+        const finMin = Math.max(...gênantes.map((o) => PL.hhmm(String(o.planning_jour.heure_fin).slice(0, 5))));
+        if (finMin >= PL.hhmm(cal.heure_fin)) return refus('plus de place ce jour-là');
+        dateDemandee = jour1; heureDebutMin = finMin;
+        morceaux = decouper(jour1);
+        const blocM = await machineBloquee(morceaux);
+        if (blocM) return { statusCode: 409, body: JSON.stringify({ error: `${nomDe(prise.personnel_id)} n'est libre qu'à ${hhmmDe(finMin)}, mais la machine est alors déjà occupée.`, conflit: 'machine' }) };
+        if (essai === 11) return refus('');
       }
     }
 
