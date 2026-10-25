@@ -100,7 +100,15 @@ const handlerProtege = async (event) => {
     }
     const ids = lignesRes.data.map((l) => l.id);
     const [liensRes, ofsRes] = await Promise.all([
-      ids.length ? supabase.from('planning_jour_personnel').select('planning_jour_id, personnel_id').in('planning_jour_id', ids) : { data: [] },
+      (async () => {   // par paquets (limite de longueur d'URL)
+        const out = [];
+        for (let i = 0; i < ids.length; i += 150) {
+          const r = await supabase.from('planning_jour_personnel').select('planning_jour_id, personnel_id').in('planning_jour_id', ids.slice(i, i + 150));
+          if (r.error) return r;
+          out.push(...r.data);
+        }
+        return { data: out, error: null };
+      })(),
       lignesRes.data.length ? supabase.from('ordres_fabrication').select('id, numero, priorite, type_production').in('id', Array.from(new Set(lignesRes.data.map((l) => l.of_id).filter(Boolean)))) : { data: [] },
     ]);
     for (const r of [liensRes, ofsRes]) if (r.error) throw r.error;

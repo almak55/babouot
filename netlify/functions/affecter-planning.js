@@ -185,26 +185,36 @@ const handlerProtege = async (event) => {
         const dates = Array.from(new Set(morceaux.map((m) => m.date)));
         const { data: occupees, error: persError } = await supabase
           .from('planning_jour_personnel')
-          .select('personnel_id, planning_jour!inner(date, statut, heure_debut, heure_fin)')
+          .select('personnel_id, planning_jour!inner(id, date, statut, heure_debut, heure_fin, phase, of_id, gamme_operatoire_id)')
           .in('personnel_id', personnelIds)
           .in('planning_jour.date', dates)
           .neq('planning_jour.statut', 'annulé');
         if (persError) throw persError;
         const prise = occupees.find((o) => morceaux.some((m) => o.planning_jour.date === m.date && chevauche(m, o.planning_jour)));
         if (!prise) break;
-        const refus = (motif) => ({ statusCode: 409, body: JSON.stringify({ error: `${nomDe(prise.personnel_id)} est déjà affecté(e) ailleurs sur ce créneau (${fmtJour(prise.planning_jour.date)})${motif ? ' — ' + motif : ''}.`, conflit: 'personnel' }) });
+        const refus = async (motif) => {
+          // Détail de la tâche qui gêne, pour comprendre le blocage.
+          let detail = '';
+          try {
+            const pj = prise.planning_jour;
+            const { data: ofp } = pj.of_id ? await supabase.from('ordres_fabrication').select('numero').eq('id', pj.of_id).maybeSingle() : { data: null };
+            const h = pj.heure_debut ? ` ${String(pj.heure_debut).slice(0, 5)}–${String(pj.heure_fin).slice(0, 5)}` : ' (journée entière)';
+            detail = ` [tâche gênante : ${ofp ? ofp.numero : 'OF ?'}${pj.phase ? ' · ' + pj.phase : ''}${h}]`;
+          } catch (e) { /* détail facultatif */ }
+          return { statusCode: 409, body: JSON.stringify({ error: `${nomDe(prise.personnel_id)} est déjà affecté(e) ailleurs sur ce créneau (${fmtJour(prise.planning_jour.date)})${motif ? ' — ' + motif : ''}${detail}.`, conflit: 'personnel' }) };
+        };
         const jour1 = morceaux[0].date;
-        if (prise.planning_jour.date !== jour1 || !avecDuree) return refus('');
+        if (prise.planning_jour.date !== jour1 || !avecDuree) return await refus('');
         // fin de la dernière tâche qui chevauche, ce jour-là, pour les personnes concernées
         const gênantes = occupees.filter((o) => o.planning_jour.date === jour1 && morceaux.some((m) => m.date === jour1 && chevauche(m, o.planning_jour)));
-        if (gênantes.some((o) => !o.planning_jour.heure_fin)) return refus('sa journée est entièrement réservée');
+        if (gênantes.some((o) => !o.planning_jour.heure_fin)) return await refus('sa journée est entièrement réservée');
         const finMin = Math.max(...gênantes.map((o) => PL.hhmm(String(o.planning_jour.heure_fin).slice(0, 5))));
-        if (finMin >= PL.hhmm(cal.heure_fin)) return refus('plus de place ce jour-là');
+        if (finMin >= PL.hhmm(cal.heure_fin)) return await refus('plus de place ce jour-là');
         dateDemandee = jour1; heureDebutMin = finMin;
         morceaux = decouper(jour1);
         const blocM = await machineBloquee(morceaux);
         if (blocM) return { statusCode: 409, body: JSON.stringify({ error: `${nomDe(prise.personnel_id)} n'est libre qu'à ${hhmmDe(finMin)}, mais la machine est alors déjà occupée.`, conflit: 'machine' }) };
-        if (essai === 11) return refus('');
+        if (essai === 11) return await refus('');
       }
     }
 
