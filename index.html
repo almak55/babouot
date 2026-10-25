@@ -6337,7 +6337,8 @@
         if (r.bloques && r.bloques.length) {
           note.innerHTML = `<span style="color:var(--danger);">À planifier d'abord : ${r.bloques.map(esc).join(', ')}.</span>`;
         } else {
-          note.textContent = `Début le ${r.libelle} — ${r.raison}.`;
+          note.innerHTML = esc(`Début le ${r.libelle} — ${r.raison}.`)
+            + (r.details && r.details.length > 1 ? `<div style="margin-top:3px;">Contraintes : ${r.details.map(d => (d.decisive ? '<strong>' : '') + esc(d.raison) + ' (' + esc(d.quand) + ')' + (d.decisive ? ' ← décisive</strong>' : '')).join(' ; ')}.</div>` : '');
         }
       } catch (e) { if (num === suggestionNum) note.textContent = ''; }
     }
