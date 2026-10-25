@@ -101,8 +101,23 @@ const handlerProtege = async (event) => {
       const b = JSON.parse(event.body || '{}');
       if (!b.id) return rep(400, { error: 'id requis.' });
       const maj = nettoyer(b); if (!Object.keys(maj).length) return rep(400, { error: 'Rien à modifier.' });
+      // Changement de date de livraison : le mois suit, la ligne est signalée « modifiée récemment »,
+      // et l'OF déjà créé voit son délai suivre.
+      if ('date_livraison' in maj) {
+        if (maj.date_livraison && !/^\d{4}-\d{2}-\d{2}$/.test(maj.date_livraison)) return rep(400, { error: 'Date de livraison invalide.' });
+        if (maj.date_livraison) { maj.mois = maj.date_livraison.slice(0, 7); maj.a_verifier = true; }
+      } else if ('mois' in maj && maj.mois) {
+        // Déplacement vers un autre mois sans date précise : on oublie l'ancienne date.
+        maj.date_livraison = null; maj.a_verifier = true;
+      }
+      const { data: ligne, error: eL } = await supabase.from('pleiade_annuel').select('of_id').eq('id', b.id).maybeSingle();
+      if (eL) throw eL;
       const { error } = await supabase.from('pleiade_annuel').update(maj).eq('id', b.id);
       if (error) throw error;
+      if (ligne && ligne.of_id && maj.date_livraison) {
+        const { error: eOf } = await supabase.from('ordres_fabrication').update({ delai: maj.date_livraison }).eq('id', ligne.of_id);
+        if (eOf) console.warn('planning-annuel : délai de l\'OF non mis à jour', eOf.message);
+      }
       return rep(200, { ok: true });
     }
     if (m === 'DELETE') {
@@ -117,7 +132,10 @@ const handlerProtege = async (event) => {
 
     if (b.action === 'ajouter') {
       if (!b.titre) return rep(400, { error: 'titre requis.' });
-      const { data, error } = await supabase.from('pleiade_annuel').insert({ ordre: 9999, statut: 'a_produire', ...nettoyer(b) }).select('id').single();
+      const ajout = nettoyer(b);
+      if (ajout.date_livraison) ajout.mois = ajout.date_livraison.slice(0, 7);
+      if (!ajout.mois) return rep(400, { error: 'Date ou mois de livraison requis.' });
+      const { data, error } = await supabase.from('pleiade_annuel').insert({ ordre: 9999, statut: 'a_produire', a_verifier: true, ...ajout }).select('id').single();
       if (error) throw error;
       return rep(200, { id: data.id });
     }
