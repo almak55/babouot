@@ -6286,15 +6286,119 @@
     const CHAMP_LIB = { quantite: 'Qté', mp: 'Cahiers', carte_dos: 'Carte de dos', tete: 'Tête', peau: 'Peau', mois: 'Mois', date_livraison: 'Livraison' };
     const valLib = (k, v) => (v === null || v === undefined || v === '' ? '—' : (k === 'mois' ? nomMois(v) : (k === 'date_livraison' ? dateCourte(v) : esc(v))));
     $('pa-import').addEventListener('click', () => $('pa-fichier').click());
+    // ----- Lecture du planning en TRANCHES COURTES : une fonction Netlify est limitée à ~10 s, or lire tout un planning
+    // d'un coup avec l'IA est trop long (erreur 504). On lit page par page ; si une tranche est encore trop longue,
+    // elle est coupée en deux (avec recouvrement) et relue, jusqu'à 3 fois.
+    const URL_IMPORT = `${API}/importer-planning-annuel`;
+    const postImport = async (corps) => {
+      const res = await fetch(URL_IMPORT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+      let d = null; try { d = await lireJson(res); } catch (e) { d = null; }
+      return { ok: res.ok, status: res.status, d };
+    };
+    const normTitre = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/œ/g, 'oe').replace(/[^a-z0-9]+/g, ' ').trim();
+    const chargerImageFichier = (file) => new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file); const im = new Image();
+      im.onload = () => { URL.revokeObjectURL(url); resolve(im); }; im.onerror = () => reject(new Error('Image illisible.')); im.src = url;
+    });
+    const canvasDePage = async (file, info) => {
+      const cvs = [];
+      if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+        const pdfjs = await chargerPdfJs();
+        const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+        for (let n = 1; n <= doc.numPages; n++) {
+          const page = await doc.getPage(n); const base = page.getViewport({ scale: 1 });
+          const vp = page.getViewport({ scale: Math.min(2.6, 2000 / base.width) });
+          const cv = document.createElement('canvas'); cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+          await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+          cvs.push(cv); info(`Préparation du document : page ${n} sur ${doc.numPages}…`);
+        }
+      } else {
+        const im = await chargerImageFichier(file);
+        const k = Math.min(1, 2600 / Math.max(im.naturalWidth, im.naturalHeight));
+        const cv = document.createElement('canvas'); cv.width = Math.round(im.naturalWidth * k); cv.height = Math.round(im.naturalHeight * k);
+        cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height); cvs.push(cv);
+      }
+      return cvs;
+    };
+    const tacheImage = (page, cv, y0, y1, niveau) => ({
+      ordre: [page, y0], niveau,
+      envoyer: () => {
+        const sy = Math.round(y0 * cv.height), sh = Math.max(40, Math.round((y1 - y0) * cv.height));
+        const c2 = document.createElement('canvas'); c2.width = cv.width; c2.height = sh;
+        c2.getContext('2d').drawImage(cv, 0, sy, cv.width, sh, 0, 0, cv.width, sh);
+        return postImport({ action: 'lire', image_base64: c2.toDataURL('image/jpeg', 0.85).split(',')[1], mime_type: 'image/jpeg', haut_coupe: y0 > 0, bas_coupe: y1 < 1 });
+      },
+      couper: () => { if (niveau >= 3) return null; const mid = (y0 + y1) / 2, rec = 0.04;
+        return [tacheImage(page, cv, y0, Math.min(1, mid + rec), niveau + 1), tacheImage(page, cv, Math.max(0, mid - rec), y1, niveau + 1)]; },
+    });
+    const tacheTexte = (entete, lignes, rang, niveau) => ({
+      ordre: [0, rang], niveau,
+      envoyer: () => postImport({ action: 'lire', texte: entete + '\n' + lignes.join('\n') }),
+      couper: () => { if (niveau >= 3 || lignes.length < 2) return null; const m = Math.ceil(lignes.length / 2);
+        return [tacheTexte(entete, lignes.slice(0, m), rang, niveau + 1), tacheTexte(entete, lignes.slice(m), rang + m / 1000, niveau + 1)]; },
+    });
+    const lirePlanningParTranches = async (file, info) => {
+      const attente = [];
+      if (/^image\//.test(file.type) || file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+        (await canvasDePage(file, info)).forEach((cv, i) => attente.push(tacheImage(i + 1, cv, 0, 1, 0)));
+      } else {
+        const r0 = await postImport({ action: 'decouper', file_base64: await fichierEnBase64(file), file_name: file.name, mime_type: file.type });
+        if (!r0.ok) throw new Error((r0.d && r0.d.error) || `HTTP ${r0.status}`);
+        for (let i = 0; i < r0.d.lignes.length; i += 12) attente.push(tacheTexte(r0.d.entete, r0.d.lignes.slice(i, i + 12), i, 0));
+      }
+      const resultats = []; let total = attente.length, faites = 0, niveauDepart = 0, actifs = 0, fini = false;
+      const afficher = () => info(`Lecture du planning « ${esc(file.name)} » : ${faites} tranche(s) lue(s) sur ${total}… (plusieurs secondes par tranche)`);
+      const traiter = async (t) => {
+        if (t.niveau < niveauDepart) { const ch = t.couper(); if (ch) { total += ch.length - 1; attente.push(...ch); return; } }
+        const r = await t.envoyer();
+        if (r.ok) { resultats.push({ ordre: t.ordre, lues: (r.d && r.d.lues) || [] }); faites++; afficher(); return; }
+        const tropLong = r.d === null || (r.d && r.d.trop_long) || [502, 503, 504].includes(r.status);
+        if (!tropLong) throw new Error((r.d && (r.d.error || r.d.errorMessage)) || `HTTP ${r.status}`);
+        niveauDepart = Math.max(niveauDepart, t.niveau + 1);
+        const ch = t.couper();
+        if (!ch) throw new Error('Une partie du planning reste trop longue à lire. Essayez un fichier plus net (PDF d\'origine ou Excel) ou une photo mieux cadrée.');
+        total += ch.length - 1; attente.push(...ch); afficher();
+      };
+      afficher();
+      await new Promise((resolve, reject) => {
+        const pomper = () => {
+          if (fini) return;
+          if (!attente.length && actifs === 0) { fini = true; resolve(); return; }
+          while (actifs < 3 && attente.length) {
+            const t = attente.shift(); actifs++;
+            traiter(t).then(() => { actifs--; pomper(); }).catch((e) => { fini = true; reject(e); });
+          }
+        };
+        pomper();
+      });
+      // Assemblage : ordre du document, doublons des zones de recouvrement fusionnés, mois repris de la ligne précédente si absent.
+      resultats.sort((x, y) => x.ordre[0] - y.ordre[0] || x.ordre[1] - y.ordre[1]);
+      const vus = new Map(), lues = [];
+      resultats.forEach((r) => r.lues.forEach((l) => {
+        const cle = normTitre(l.titre) + '|' + (l.quantite == null ? '' : l.quantite);
+        const deja = vus.get(cle);
+        if (deja) { Object.keys(l).forEach((k) => { if ((deja[k] === null || deja[k] === undefined) && l[k] != null) deja[k] = l[k]; }); return; }
+        vus.set(cle, l); lues.push(l);
+      }));
+      let precedent = null;
+      lues.forEach((l) => {
+        if (!l.mois && !l.date_livraison && precedent) l.mois = precedent.mois || (precedent.date_livraison ? precedent.date_livraison.slice(0, 7) : null);
+        precedent = l;
+      });
+      if (!lues.length) throw new Error('Aucun titre n\'a pu être lu dans ce document.');
+      return lues;
+    };
     const analyserPlanning = async (file) => {
       const zone = $('m-msg');
-      zone.innerHTML = `<div class="msg">Lecture du planning « ${esc(file.name)} » en cours (peut prendre jusqu'à une minute)…</div>`;
+      const info = (t) => { zone.innerHTML = `<div class="msg">${t}</div>`; };
+      info(`Lecture du planning « ${esc(file.name)} » en cours…`);
       let r;
       try {
-        const estImage = file.type.startsWith('image/');
-        const { base64, mimeType } = estImage ? await compresserImage(file, 2600, 0.85) : { base64: await fichierEnBase64(file), mimeType: file.type || 'application/pdf' };
-        const res = await fetch(`${API}/importer-planning-annuel`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ file_base64: base64, file_name: file.name, mime_type: mimeType }) });
-        r = await lireJson(res); if (!res.ok) throw new Error(r.error || r.errorMessage || `HTTP ${res.status}`);
+        const lues = await lirePlanningParTranches(file, info);
+        info(`${lues.length} titre(s) lus. Comparaison avec le planning enregistré…`);
+        const rc = await postImport({ action: 'comparer', lues });
+        if (!rc.ok) throw new Error((rc.d && (rc.d.error || rc.d.errorMessage)) || `HTTP ${rc.status}`);
+        r = rc.d;
       } catch (e) { zone.innerHTML = `<div class="msg error">Lecture impossible : ${esc(e.message)}</div>`; return; }
       const lignesN = r.nouveaux.map((n, i) => `<tr><td><input type="checkbox" class="im-chk" data-t="n" data-i="${i}" ${n.sans_date ? '' : 'checked'}></td><td><span style="color:#0f766e;">Nouveau</span></td><td>${esc(n.titre)}</td><td>${['quantite', 'mp', 'carte_dos', 'tete', 'peau'].map((k) => n.champs[k] != null ? `${CHAMP_LIB[k]} ${esc(n.champs[k])}` : '').filter(Boolean).join(' · ')} · livraison ${n.champs.date_livraison ? dateCourte(n.champs.date_livraison) : (n.champs.mois ? nomMois(n.champs.mois) : '<span style="color:#c0392b;">date inconnue</span>')}</td></tr>`).join('');
       const lignesM = r.modifies.map((x, i) => `<tr><td><input type="checkbox" class="im-chk" data-t="m" data-i="${i}" checked></td><td><span style="color:#b45309;">Modifié</span></td><td>${esc(x.titre)}${x.statut === 'of_cree' ? ' <span class="plan-note">(OF déjà créé)</span>' : ''}</td><td>${x.diffs.map((d) => `${CHAMP_LIB[d.champ]} : ${valLib(d.champ, d.ancien)} → <strong>${valLib(d.champ, d.nouveau)}</strong>`).join(' · ')}</td></tr>`).join('');
