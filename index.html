@@ -6965,7 +6965,7 @@
     C('prio_normale', (o.priorite || 'normale') === 'normale'); C('prio_haute', o.priorite === 'haute'); C('prio_urgente', o.priorite === 'urgente');
     C('v_simple', o.simple); C('v_coffret', o.coffret); C('v_rhodoides', o.rhodoides); C('v_etuis', o.etuis);
     T('couleur', v.couleur_peau); T('cuir', v.couleur_peau); T('format', v.format_bloc); T('nb_pages', o.nb_pages); T('nb_cahiers', o.nb_cahiers);
-    T('carton', v.carton); T('gardes', v.gardes); T('piece_pave', v.pave ? v.piece_pave : 'Pas de pavé'); T('couleur_tete', v.couleur_tete);
+    T('carton', v.carton); T('gardes', v.gardes); T('piece_pave', v.pave ? (v.piece_pave || 'Oui (peau ' + v.couleur_peau + ')') : 'Pas de pavé'); T('couleur_tete', v.couleur_tete);
     C('grainage_oui', true); C('signet_oui', !!v.signets); C('signet_non', !v.signets); T('signet_couleur', v.signets);
     C('tranchefile_oui', !!v.tranchefile); C('tranchefile_non', !v.tranchefile); T('tranchefile_couleur', v.tranchefile);
     d.gamme.forEach((g) => { C('op_' + g.operation_code, true); T('ordre_' + g.operation_code, g.sequence); });
