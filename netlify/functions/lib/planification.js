@@ -29,6 +29,7 @@
 //     les compétentes (à égalité : la moins chargée).
 
 const MIN_JOUR = 1440;
+const MIN_TRANCHE_MACHINE = 30;   // une machine ne tourne pas par miettes : pas de tranche de conduite plus courte (sauf pour finir une phase ou en fin de journée)
 const HORIZON_JOURS = 400;
 
 const hhmm = (s) => { const [h, m] = String(s).split(':').map(Number); return h * 60 + m; };
@@ -122,7 +123,7 @@ function soustraire(fenetre, occupes) {
 // Consomme `dureeMin` minutes de travail à partir de `depuisMin`, uniquement
 // dans les plages de travail où aucun intervalle de `occupes` n'est actif.
 // Renvoie la liste des tranches [{d, f}] ou null si l'horizon est dépassé.
-function consommer(dureeMin, depuisMin, occupes, cal) {
+function consommer(dureeMin, depuisMin, occupes, cal, minTranche) {
   let reste = dureeMin;
   const tranches = [];
   const finHorizon = debutDeJour(depuisMin) + HORIZON_JOURS * MIN_JOUR;
@@ -132,6 +133,10 @@ function consommer(dureeMin, depuisMin, occupes, cal) {
       const a = Math.max(a0, depuisMin);
       if (b <= a) continue;
       for (const l of soustraire({ d: a, f: b }, occupes)) {
+        // Pas de miette : un trou coincé entre deux occupations (quelqu'un d'autre, une autre tâche) et plus court que la tranche
+        // minimale n'est pas utilisé, sauf s'il suffit à finir la phase. La fin de journée / de matinée, elle, coupe normalement.
+        if (minTranche && l.f - l.d < minTranche && l.f - l.d < reste && l.f < b
+          && occupes.some((o) => o.d <= l.f && o.f > l.f && o.tag !== 'virt' && o.tag !== 'net')) continue;
         const prise = Math.min(reste, l.f - l.d);
         tranches.push({ d: l.d, f: l.d + prise });
         reste -= prise;
@@ -336,6 +341,7 @@ function simulerEtape(etape, machineId, curseur, ctx, charge, sync) {
   const pool = imposees || etape.personnes_pour(machineId);
   const phasesRes = [];
   const problemes = [];
+  const condEtape = {};   // conducteur déjà retenu par une phase précédente de CETTE étape, par jour (réglage → roulage → …)
   let c = curseur;
 
   for (const phase of etape.phases) {
@@ -343,6 +349,7 @@ function simulerEtape(etape, machineId, curseur, ctx, charge, sync) {
     // En ligne : la production ne démarre pas avant celle du prédécesseur (le réglage, lui, se fait en parallèle).
     if (sync && phase.type_phase === 'production' && c < sync.debut) c = sync.debut;
     const occMach = phase.besoin_machine ? occMachine : [];
+    const minTr = phase.besoin_machine ? (phase.duree_min <= 90 ? phase.duree_min : MIN_TRANCHE_MACHINE) : 0;   // phase courte : d'un seul tenant ; longue : pas de tranche < 30 min
     // Durée écoulée : pour un travail manuel, elle dépend du nombre de personnes réellement présentes.
     const effectifPrevu = imposees ? imposees.length : Math.min(Math.max(1, phase.nb_personnes || 1), pool.length || Infinity);
     const duree = phase.repartissable && Number.isFinite(effectifPrevu)
@@ -358,7 +365,7 @@ function simulerEtape(etape, machineId, curseur, ctx, charge, sync) {
         problemes.push({ type: 'sans_personnel', bloquant: false, detail: `Aucune personne compétente trouvée pour « ${ph.nom} » : personnel à affecter.` });
       } else {
         notes = pool.map((id) => {
-          const t = consommer(ph.duree_min, c, [].concat(occMach, occPers(id)), cal);
+          const t = consommer(ph.duree_min, c, [].concat(occMach, occPers(id)), cal, minTr);
           return { id, fin: t ? t[t.length - 1].f : Infinity, charge: charge.get(id) || 0 };
         });
         notes.sort((a, b) => a.fin - b.fin || a.charge - b.charge || (a.id < b.id ? -1 : 1));
@@ -374,9 +381,10 @@ function simulerEtape(etape, machineId, curseur, ctx, charge, sync) {
       const k = Math.max(1, ph.nb_personnes || 1);
       let courant = choisis;
       for (let essai = 0; essai < 8; essai++) {
-        const t0 = consommer(ph.duree_min, c, [].concat(occMach, ...courant.map(occPers)), cal);
+        const t0 = consommer(ph.duree_min, c, [].concat(occMach, ...courant.map(occPers)), cal, minTr);
         if (!t0) break;
-        const cond = (((ctx.conducteurs || {})[machineId] || {})[debutDeJour(t0[0].d)]);
+        const jourT0 = debutDeJour(t0[0].d);
+        const cond = (((ctx.conducteurs || {})[machineId] || {})[jourT0]) || condEtape[jourT0];
         if (!cond || courant[0] === cond) break;
         if (!pool.includes(cond)) {
           problemes.push({ type: 'conducteurs_differents', bloquant: false, detail: `« ${ph.nom} » : un autre conducteur est déjà prévu sur cette machine ce jour-là mais il n'est pas habilité pour cette opération — deux conducteurs différents.` });
@@ -390,7 +398,7 @@ function simulerEtape(etape, machineId, curseur, ctx, charge, sync) {
     const quotas = etape.heures_max || {};
     const limitees = choisis.filter((id) => Number(quotas[id]) > 0 && Number(quotas[id]) < ph.duree_min);
     const pleins = choisis.filter((id) => !limitees.includes(id));
-    let t = consommer(ph.duree_min, c, [].concat(occMach, ...pleins.map(occPers)), cal);
+    let t = consommer(ph.duree_min, c, [].concat(occMach, ...pleins.map(occPers)), cal, minTr);
     if (!t) return null;
     let presences = null;
     if (limitees.length) {
@@ -399,7 +407,7 @@ function simulerEtape(etape, machineId, curseur, ctx, charge, sync) {
       limitees.forEach((id) => { presences[id] = prefixe(t, Number(quotas[id])); });
       // Une personne limitée doit être libre pendant SA présence ; sinon on revient à la contrainte stricte.
       if (limitees.some((id) => !libreSur(presences[id], occPers(id)))) {
-        t = consommer(ph.duree_min, c, [].concat(occMach, ...choisis.map(occPers)), cal);
+        t = consommer(ph.duree_min, c, [].concat(occMach, ...choisis.map(occPers)), cal, minTr);
         if (!t) return null;
         pleins.forEach((id) => { presences[id] = t; });
         limitees.forEach((id) => { presences[id] = prefixe(t, Number(quotas[id])); });
@@ -418,6 +426,7 @@ function simulerEtape(etape, machineId, curseur, ctx, charge, sync) {
         }
       });
     }
+    if (machineId && ph.besoin_machine && choisis.length) t.forEach((x) => { const j = debutDeJour(x.d); if (!condEtape[j]) condEtape[j] = choisis[0]; });
     phasesRes.push({
       nom: ph.nom, type_phase: ph.type_phase || null, mer: !!ph.mer, duree_min: ph.duree_min, besoin_machine: !!ph.besoin_machine,
       repartissable: !!ph.repartissable, effectif: choisis.length || null, effectif_standard: Math.max(1, ph.nb_personnes || 1),
