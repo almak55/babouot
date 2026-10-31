@@ -104,7 +104,7 @@ ${operations.map((o) => `${o.code} = ${o.nom}`).join('\n')}`;
       const etat = ['ici', 'date', 'inconnue'].includes(f.reception_etat) ? f.reception_etat : 'inconnue';
       // Emboîtage par défaut (tranchefile/signet + finitions ; toujours pour un OF Pléiade) et assemblage avant la couture : voir lib/emboitage.js
       const typeProd = typesProd.some((t) => t.code === f.type_production) ? f.type_production : null;
-      const emb = require('./lib/emboitage').completer((f.operation_codes || []).filter((c) => codesValides.has(c)), operations, { type_production: typeProd });
+      const emb = require('./lib/emboitage').completer((f.operation_codes || []).filter((c) => codesValides.has(c)), operations, { type_production: typeProd, couleur_peau: (f.caracteristiques || {}).couleur_peau });
       const recDate = iso(f.reception_date);
       return {
         page: f.page ?? (pages[i] && pages[i].page) ?? i + 1,
@@ -119,7 +119,7 @@ ${operations.map((o) => `${o.code} = ${o.nom}`).join('\n')}`;
         operation_codes: emb.codes,
         emboitage_auto: emb.ajoute, assemblage_auto: emb.ajoute_assemblage, signes_emboitage: emb.signes, emboitage_code: emb.emboitage_code, assemblage_code: emb.assemblage_code,
         confiance: ['haute', 'moyenne', 'basse'].includes(f.confiance) ? f.confiance : 'moyenne',
-        notes: [f.notes, ...[emb.ajoute_assemblage, emb.ajoute].filter(Boolean).map((x) => `« ${x.nom} » ajouté automatiquement (${x.raison}).`)].filter(Boolean).join(' '),
+        notes: [f.notes, ...[emb.ajoute_assemblage, emb.ajoute_paves, emb.ajoute].filter(Boolean).map((x) => `« ${x.nom} » ajouté automatiquement (${x.raison}).`)].filter(Boolean).join(' '),
       };
     });
     return { statusCode: 200, body: JSON.stringify({ fiches, aujourdhui }) };

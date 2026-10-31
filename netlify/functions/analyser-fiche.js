@@ -164,9 +164,9 @@ ${listeOperations}`;
     resultat.operation_codes = (resultat.operation_codes || []).filter(c => codesValides.has(c));
     if (!typesProd.some((t) => t.code === resultat.type_production)) resultat.type_production = null;
     // Emboîtage par défaut (tranchefile/signet + finitions ; toujours pour un OF Pléiade) et assemblage avant la couture : voir lib/emboitage.js
-    const emb = require('./lib/emboitage').completer(resultat.operation_codes, operations, { type_production: resultat.type_production });
+    const emb = require('./lib/emboitage').completer(resultat.operation_codes, operations, { type_production: resultat.type_production, couleur_peau: (resultat.caracteristiques || {}).couleur_peau });
     resultat.operation_codes = emb.codes;
-    [emb.ajoute_assemblage, emb.ajoute].filter(Boolean).forEach((x) => { resultat.notes = [resultat.notes, `« ${x.nom} » ajouté automatiquement (${x.raison}).`].filter(Boolean).join(' '); });
+    [emb.ajoute_assemblage, emb.ajoute_paves, emb.ajoute].filter(Boolean).forEach((x) => { resultat.notes = [resultat.notes, `« ${x.nom} » ajouté automatiquement (${x.raison}).`].filter(Boolean).join(' '); });
     // Caractéristiques : on ne garde que les clés du catalogue, valeurs converties selon leur type.
     const propres = {};
     Object.entries(resultat.caracteristiques || {}).forEach(([cle, val]) => {

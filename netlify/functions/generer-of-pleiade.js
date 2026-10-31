@@ -56,6 +56,7 @@ const handlerProtege = async (event) => {
       const g = gamme.find((x) => x.operation_code === o.code);
       avertissements.push(`« ${g.libelle} » n'a pas encore de temps standard : la planification sera « non chiffrée » tant qu'il n'est pas saisi.`);
     });
+    if (valeurs.pave_auto) avertissements.push(`Peau « ${valeurs.couleur_peau} » : l'opération Pavés est ajoutée systématiquement (après les applats, en ligne avec la dorure) — décochez-la dans la liste des étapes si elle ne s'applique pas.`);
     if (!valeurs.couleur_tete && valeurs.categorie !== 'ALBUM') avertissements.push('Couleur de tête non définie pour cette catégorie.');
     if (valeurs.categorie === 'ALBUM') avertissements.push('Album : tranchefile et signets « à définir » dans le tableau de référence.');
 
