@@ -7,15 +7,20 @@
 //   - OF Pléiade (ou coffret) : l'opération « Emboîtage Pléiade » est toujours ajoutée.
 // Même principe pour l'ASSEMBLAGE : une fiche qui demande une couture (cahiers pliés puis cousus) oublie souvent
 // l'assemblage, qui doit pourtant précéder la couture : « Assemblage » est ajouté juste avant la couture.
+// Et pour les OF Pléiade dont la peau est Marron (Havane) ou Bordeaux : l'opération « Pavés » est ajoutée après les applats, avant la dorure.
 // Rien n'est ajouté si la gamme contient déjà une opération d'emboîtage. Les opérations sont reconnues par leur NOM
 // (catalogue des opérations), la proposition reste modifiable à l'écran avant la création de l'OF.
 
+const { peauAPave } = require('./pleiade');
 const norm = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const estEmboitage = (o) => /emboitage/.test(norm(o.nom)) && !/repar|control/.test(norm(o.nom));
 const estSigneTranchefile = (o) => /signet|tranchefil/.test(norm(o.nom));
 const estCouture = (o) => /(^|[^a-z])couture/.test(norm(o.nom)) && !/repar|control/.test(norm(o.nom));
 const estAssemblage = (o) => /assemblage/.test(norm(o.nom)) && !/repar|control/.test(norm(o.nom));
 const estPliure = (o) => /pliure|pliage/.test(norm(o.nom)) && !/garde/.test(norm(o.nom));
+const estPaves = (o) => /^paves?$/.test(norm(o.nom).trim()) || norm(o.code) === 'paves';
+const estApplats = (o) => /applat/.test(norm(o.nom));
+const estDorureCouv = (o) => /dorure/.test(norm(o.nom)) && !/tranche|coins?/.test(norm(o.nom));
 const estFinition = (o) => /jaquette|caisse|palette|etui|conditionnement|finition|rhodoid|sous film/.test(norm(o.nom)) && !/rainage/.test(norm(o.nom));
 
 // Opération d'emboîtage à ajouter (ou null si le catalogue n'en a pas de convenable).
@@ -38,10 +43,10 @@ function completer(codes, operations, opts) {
   const ops = operations || [];
   const parCode = new Map(ops.map((o) => [o.code, o]));
   const lues = (codes || []).map((c) => parCode.get(c)).filter(Boolean);
-  const signes = { ts: lues.some(estSigneTranchefile), fin: lues.some(estFinition), emb: lues.some(estEmboitage), coud: lues.some(estCouture), asm: lues.some(estAssemblage) };
+  const signes = { ts: lues.some(estSigneTranchefile), fin: lues.some(estFinition), emb: lues.some(estEmboitage), coud: lues.some(estCouture), asm: lues.some(estAssemblage), pav: lues.some(estPaves) };
   const type = opts && opts.type_production;
   const pleiade = type === 'pleiade' || type === 'coffret';
-  const res = { codes: (codes || []).slice(), ajoute: null, ajoute_assemblage: null, signes, emboitage_code: null, assemblage_code: null };
+  const res = { codes: (codes || []).slice(), ajoute: null, ajoute_assemblage: null, ajoute_paves: null, signes, emboitage_code: null, assemblage_code: null };
   // Assemblage : avant la couture (après la pliure et les opérations qui précèdent la couture sur la fiche).
   const asm = assemblageDe(ops);
   res.assemblage_code = asm ? asm.code : null;
@@ -52,6 +57,18 @@ function completer(codes, operations, opts) {
     const pl = l.some((o, i) => o && estPliure(o) && i < pc);
     res.ajoute_assemblage = { code: asm.code, nom: asm.nom, raison: pl ? 'pliure et couture sur la fiche : l\'assemblage précède la couture' : 'couture sur la fiche : l\'assemblage précède la couture' };
     signes.asm = true;
+  }
+  // Pavés : OF Pléiade en peau Marron (Havane) ou Bordeaux ; après les applats, avant la dorure des couvertures.
+  const pav = ops.find(estPaves);
+  if (pav && pleiade && peauAPave(opts && opts.couleur_peau) && !signes.pav) {
+    const l = res.codes.map((c) => parCode.get(c));
+    let pos = l.findIndex((o) => o && estDorureCouv(o));
+    let dernApplats = -1; l.forEach((o, i) => { if (o && estApplats(o)) dernApplats = i; });
+    if (pos < 0) pos = dernApplats >= 0 ? dernApplats + 1 : l.length;
+    if (dernApplats >= pos) pos = dernApplats + 1;
+    res.codes.splice(pos, 0, pav.code);
+    res.ajoute_paves = { code: pav.code, nom: pav.nom, raison: `OF Pléiade, peau ${String(opts.couleur_peau).trim()} : les pavés sont systématiques` };
+    signes.pav = true;
   }
   const cible = emboitageDe(ops, pleiade);
   res.emboitage_code = cible ? cible.code : null;

@@ -19,6 +19,10 @@ async function chargerReferentiel(supabase) {
 
 const vide = (v) => v === null || v === undefined || String(v).trim() === '';
 
+// Peaux Marron (Havane) et Bordeaux : l'opération « Pavés » est systématiquement proposée (même sans pièce de pavé dans la catégorie).
+const sansAccents = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const peauAPave = (couleur) => /havane|marron|bordeau/.test(sansAccents(couleur));
+
 // Valeurs de la fiche déduites de la catégorie + variantes.
 function valeursFiche(ref, opts) {
   const cat = ref.categories.find((c) => c.code === opts.categorie);
@@ -46,6 +50,9 @@ function valeursFiche(ref, opts) {
   // Valeurs imposées par le planning annuel (prioritaires sur le tableau de référence).
   if (!vide(opts.couleur_tete)) v.couleur_tete = String(opts.couleur_tete);
   if (!vide(opts.couleur_peau)) v.couleur_peau = String(opts.couleur_peau);
+  // Peau Marron (Havane) ou Bordeaux : Pavés proposé systématiquement.
+  v.pave_auto = false;
+  if (!v.pave && peauAPave(v.couleur_peau)) { v.pave = true; v.pave_auto = true; }
   return v;
 }
 
@@ -93,6 +100,8 @@ function construireGamme(ref, opts, pave) {
     const simult = new Set((e.simultane || []).flatMap((p) => resoudre(p)));
     const dependances = {};
     preds.forEach((p) => { if (simult.has(p)) dependances[String(seq[p])] = { mode: 'progressif', seuil_pct: e.seuil_pct || 10 }; });
+    // Les pavés tournent EN LIGNE avec la dorure Pléiade : même fenêtre de production, la dorure démarre avec eux.
+    if (e.code === 'DORURE' && preds.includes('PAVES')) dependances[String(seq.PAVES)] = { en_ligne: true };
     return {
       code: e.code,
       sequence: seq[e.code],
@@ -143,4 +152,4 @@ function etapesPossibles(ref, opts, pave) {
   }));
 }
 
-module.exports = { etapesPossibles, CONDITIONS, chargerReferentiel, valeursFiche, construireGamme, caracteristiquesOf, vide };
+module.exports = { peauAPave, etapesPossibles, CONDITIONS, chargerReferentiel, valeursFiche, construireGamme, caracteristiquesOf, vide };
