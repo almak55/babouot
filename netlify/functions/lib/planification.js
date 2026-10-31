@@ -231,6 +231,81 @@ function dureeAvecEffectif(dureeMin, effectifStandard, n) {
   return quart > 0 ? quart : Math.max(1, Math.round(brut));
 }
 
+// ---------------------------------------------------------------------------------------------
+// Journée de machine (mise en route, réglage, roulage, nettoyage)
+//
+// Pour les équipements qui demandent une mise en route et un nettoyage (montage de couvertures, machine couleur,
+// emboîtage, pressure en colle…) :
+//   • UNE mise en route par jour et par machine, à l'ouverture, dès qu'un travail y passe ;
+//   • chaque travail garde son réglage puis son roulage ; un travail qui continue le lendemain ne refait pas son réglage ;
+//   • les travaux se suivent sans qu'un autre s'intercale entre le réglage et la fin du roulage d'un travail ;
+//   • les travaux s'arrêtent à (fermeture − durée de nettoyage), soit 16:00 : le nettoyage de fin de journée démarre alors,
+//     même si le travail n'est pas terminé ; si la charge de la machine est finie plus tôt, il suit le dernier travail.
+//     Les créneaux de nettoyage sont écrits à l'enregistrement du planning (lib/nettoyage.js).
+// Une étape est « en journée » si elle porte etape.journee = { mer_min, mer: {…phase de mise en route} } (posé par planifier-of).
+// Les intervalles d'occupation portent un `tag` : 'mer' (mise en route), 'net' (nettoyage), 'maint' (maintenance) ; sans tag = travail.
+// ---------------------------------------------------------------------------------------------
+const NETTOYAGE_MIN = 30;
+const JOURS_RESERVES = 150;
+
+// La machine a-t-elle déjà sa mise en route ce jour-là ? (posée par un autre travail du même jour : une seule par jour)
+function jourTravaille(intervalles, jour) {
+  return intervalles.some((iv) => iv.tag === 'mer' && iv.d < jour + MIN_JOUR && iv.f > jour);
+}
+
+// Occupation de la machine telle que la voit un travail « en journée » : les nettoyages déjà posés sont ignorés (ils seront
+// replacés après le dernier travail), l'ouverture est réservée à la mise en route des jours qui n'en ont pas encore, et la fin de journée au nettoyage.
+function occupationJournee(reelle, curseur, cal, merLen, merMin) {
+  const base = reelle.filter((iv) => iv.tag !== 'net');
+  const res = [];
+  const debut = debutDeJour(curseur);
+  for (let k = 0; k < JOURS_RESERVES; k++) {
+    const jour = debut + k * MIN_JOUR;
+    if (!estOuvre(jour, cal)) continue;
+    const fen = fenetresDuJour(jour, cal);
+    if (!fen.length) continue;
+    const ouverture = fen[0][0]; const fermeture = fen[fen.length - 1][1];
+    if (!jourTravaille(base, jour)) res.push({ d: ouverture, f: ouverture + (merLen[jour] || merMin), tag: 'virt' });
+    res.push({ d: Math.max(ouverture, fermeture - NETTOYAGE_MIN), f: fermeture, tag: 'virt' });
+  }
+  return base.concat(res);
+}
+
+function simulerJournee(etape, machineId, curseur, ctx, charge, sync) {
+  const cal = ctx.calendrier;
+  const reelle = ctx.occupation.machines[machineId] || [];
+  const j = etape.journee;
+  const travail = etape.phases.filter((p) => !p.mer && p.type_phase !== 'nettoyage');
+  const merLen = {};
+  const avec = (occ) => ({ calendrier: cal, occupation: { machines: { ...ctx.occupation.machines, [machineId]: occ }, personnes: ctx.occupation.personnes } });
+  let r = null; let merPhases = [];
+  for (let tour = 0; tour < 4; tour++) {
+    r = simulerEtape({ ...etape, phases: travail }, machineId, curseur, avec(occupationJournee(reelle, curseur, cal, merLen, j.mer_min)), charge, sync);
+    if (!r) return null;
+    // Jours où le travail occupe la machine : chacun a besoin de sa mise en route (sauf s'il y a déjà du travail ce jour-là).
+    const jours = Array.from(new Set(r.phases.filter((p) => p.besoin_machine).flatMap((p) => p.brutes.map((t) => debutDeJour(t.d))))).sort((a, b) => a - b);
+    merPhases = []; let stable = true;
+    for (const jour of jours) {
+      if (jourTravaille(reelle.filter((iv) => iv.tag !== 'net'), jour)) continue;
+      const fen = fenetresDuJour(jour, cal); if (!fen.length) continue;
+      const ouverture = fen[0][0];
+      const rm = simulerEtape({ ...etape, phases: [j.mer] }, machineId, ouverture, avec(reelle.filter((iv) => iv.tag !== 'net')), charge, null);
+      if (!rm || !rm.phases.length) continue;
+      const fin = rm.phases[0].brutes[rm.phases[0].brutes.length - 1].f;
+      if (fin - ouverture > (merLen[jour] || j.mer_min)) { merLen[jour] = fin - ouverture; stable = false; }   // personnel pris à l'ouverture : on laisse la place
+      merPhases.push({ ...rm.phases[0], mer: true });
+    }
+    if (stable) break;
+  }
+  const phases = merPhases.concat(r.phases).sort((a, b) => a.brutes[0].d - b.brutes[0].d);
+  return {
+    machine_id: machineId, phases,
+    debut_min: phases.length ? phases[0].tranches[0].d : curseur,
+    fin_min: r.fin_min,
+    problemes: r.problemes,
+  };
+}
+
 function simulerEtape(etape, machineId, curseur, ctx, charge, sync) {
   const cal = ctx.calendrier;
   const occMachine = machineId ? (ctx.occupation.machines[machineId] || []) : [];
@@ -304,7 +379,7 @@ function simulerEtape(etape, machineId, curseur, ctx, charge, sync) {
       });
     }
     phasesRes.push({
-      nom: ph.nom, type_phase: ph.type_phase || null, duree_min: ph.duree_min, besoin_machine: !!ph.besoin_machine,
+      nom: ph.nom, type_phase: ph.type_phase || null, mer: !!ph.mer, duree_min: ph.duree_min, besoin_machine: !!ph.besoin_machine,
       repartissable: !!ph.repartissable, effectif: choisis.length || null, effectif_standard: Math.max(1, ph.nb_personnes || 1),
       duree_une_personne_min: ph.repartissable ? Math.round(ph.duree_standard_min * Math.max(1, ph.nb_personnes || 1)) : null,
       personnes: presences ? Object.keys(presences) : choisis,
@@ -349,7 +424,23 @@ function planifierEtape(etape, curseur, ctx, charge, sync) {
 
   let meilleur = null;
   for (const m of candidats) {
-    const essai = simulerEtape(etape, m, curseur, ctx, charge, sync);
+    let essai;
+    if (etape.journee && m) {
+      // Travail « en journée » : aucun autre travail ne s'intercale entre son réglage et la fin de son roulage.
+      // S'il y en a un, on repart derrière lui (le premier qui gêne), jusqu'à trouver un créneau d'un seul tenant.
+      let cur = curseur;
+      for (let k = 0; k < 400; k++) {
+        essai = simulerJournee(etape, m, cur, ctx, charge, sync);
+        if (!essai) break;
+        const bloc = essai.phases.filter((p) => !p.mer && p.besoin_machine);
+        if (!bloc.length) break;
+        const d0 = Math.min(...bloc.map((p) => p.brutes[0].d)); const f0 = Math.max(...bloc.map((p) => p.brutes[p.brutes.length - 1].f));
+        const gene = (ctx.occupation.machines[m] || []).filter((iv) => !iv.tag && iv.d < f0 && iv.f > d0);
+        if (!gene.length) break;
+        const suite = Math.min(...gene.map((iv) => iv.f));
+        cur = Math.max(cur + 1, suite);
+      }
+    } else essai = simulerEtape(etape, m, curseur, ctx, charge, sync);
     if (essai && (!meilleur || essai.fin_min < meilleur.fin_min)) meilleur = essai;
   }
   if (!meilleur) {
@@ -372,7 +463,7 @@ function inscrire(res, ctx, charge) {
   if (res.fin_min === null) return;
   res.phases.forEach((ph) => {
     ph.tranches.forEach((t) => {
-      const iv = { d: t.d, f: t.f };
+      const iv = ph.mer ? { d: t.d, f: t.f, tag: 'mer' } : { d: t.d, f: t.f };
       if (ph.besoin_machine && res.machine_id) (ctx.occupation.machines[res.machine_id] ??= []).push(iv);
       if (!ph.presences) ph.personnes.forEach((p) => (ctx.occupation.personnes[p] ??= []).push(iv));
     });
@@ -636,7 +727,7 @@ function analyserReseau(noeuds) {
 }
 
 module.exports = {
-  enMinutes, dateDe, heureDe, debutDeJour, hhmm, MIN_JOUR, HORIZON_JOURS,
+  enMinutes, dateDe, heureDe, debutDeJour, hhmm, MIN_JOUR, HORIZON_JOURS, NETTOYAGE_MIN,
   joursFeries, libelleFerie, estOuvre,
   dureeAvecEffectif, fenetresDuJour, soustraire, consommer, fusionner, ordreTopologique, contraintesLien, planifierAvant, planifierArriere, analyserReseau,
 };
