@@ -3915,7 +3915,7 @@
           <div class="field"><label>Personnes au roulage</label><input id="pf-pers" type="number" min="1" step="1" value="1"></div>
           <div class="field"><label>Exemplaires par passage <span class="plan-note">— 1 = un à la fois ; 2 = deux en même temps (la cadence compte alors des passages/h)</span></label><input id="pf-pp" type="number" min="1" step="1" value="1"></div>
           <div class="field"><label>Aperçu : nombre de fers</label><input id="pf-fers" type="number" min="0" step="1" value="3"></div>
-          <div class="field"><label>Aperçu pour <input id="pf-qte" type="number" min="1" value="1000" style="width:90px; display:inline-block;"> unités à traiter</label><div id="pf-total" class="mono" style="padding:8px 0;">—</div></div>
+          <div class="field" style="grid-column: 1 / -1;"><label>Aperçu du temps total <span class="plan-note">— simulation pour vérifier le réglage ; rien n'est enregistré</span></label><div id="pf-apercu" style="display:flex;flex-wrap:wrap;gap:8px 10px;align-items:flex-end;"></div><div id="pf-total" class="mono" style="padding:8px 0;">—</div></div>
         </div>
       </div>
       <div class="field hidden" id="pf-autres-box" style="margin-top:10px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;">
@@ -3938,7 +3938,7 @@
       const u = $('pf-unite').value.trim() || 'exemplaires';
       const n = Math.max(1, parseInt($('pf-pp').value, 10) || 1);
       $('pf-cad-label').textContent = n > 1 ? 'Roulage : cadence moyenne (passages / h)' : `Roulage : cadence moyenne (${u} / h)`;
-      calcul();
+      dessinerApercu(); calcul();
     }
     $('pf-preset').addEventListener('change', () => {
       const pr = PRESETS[$('pf-preset').value];
@@ -3946,16 +3946,43 @@
       majUnite();
     });
     $('pf-unite').addEventListener('input', majUnite);
+    // Aperçu : une case par donnée de la formule (ex. feuilles × coupes par pile) ; formule complexe ou vide : une seule quantité.
+    const LIB_VAR = { quantite: 'exemplaires', nb_cahiers: 'cahiers par exemplaire', nb_feuilles: 'feuilles à couper', nb_coupes_pile: 'coupes par pile', nb_fers: 'fers', grammage_g: 'grammage (g/m²)' };
+    const DEF_VAR = { quantite: 1000, nb_cahiers: 20, nb_feuilles: 1000, nb_coupes_pile: 1 };
+    const valApercu = {};
+    function variablesApercu() {
+      const f = $('pf-formule').value.trim() || 'quantite';
+      return /^[a-z][a-z0-9_]*(\s*\*\s*[a-z][a-z0-9_]*)*$/i.test(f) ? Array.from(new Set(f.toLowerCase().split('*').map(x => x.trim()))) : null;
+    }
+    function dessinerApercu() {
+      document.querySelectorAll('#pf-apercu .pf-var').forEach(i => { valApercu[i.dataset.cle] = i.value; });
+      const q0 = $('pf-qte'); if (q0) valApercu.__q = q0.value;
+      const vars = variablesApercu();
+      const u = $('pf-unite').value.trim() || 'exemplaires';
+      const champ = (cle, lib, val) => `<label style="font-size:13px;display:flex;flex-direction:column;gap:2px;">${esc(lib)}<input class="pf-var" data-cle="${esc(cle)}" type="number" min="0" step="any" value="${esc(val)}" style="width:110px;"></label>`;
+      $('pf-apercu').innerHTML = vars
+        ? vars.map(v => champ(v, LIB_VAR[v] || v, valApercu[v] ?? DEF_VAR[v] ?? 1)).join('<span style="padding-bottom:8px;">×</span>')
+        : `<label style="font-size:13px;display:flex;flex-direction:column;gap:2px;">Quantité à traiter (${esc(u)}) <span class="plan-note">— formule complexe : saisissez directement la quantité</span><input id="pf-qte" type="number" min="0" step="any" value="${esc(valApercu.__q ?? 1000)}" style="width:130px;"></label>`;
+    }
+    function quantiteApercu() {
+      const vars = variablesApercu();
+      if (!vars) return { q: nv('pf-qte') || 0, detail: '' };
+      const vals = vars.map(v => ({ v, n: Number(String(document.querySelector(`#pf-apercu .pf-var[data-cle="${v}"]`).value).replace(',', '.')) || 0 }));
+      const q = vals.reduce((t, x) => t * x.n, 1);
+      return { q, detail: vals.length > 1 || vals[0].v !== 'quantite' ? vals.map(x => `${x.n.toLocaleString('fr-FR')} ${LIB_VAR[x.v] || x.v}`).join(' × ') + ' = ' : '' };
+    }
     function calcul() {
-      const q = nv('pf-qte') || 0; const cad = nv('pf-cad');
+      const ap = quantiteApercu(); const q = ap.q; const cad = nv('pf-cad');
       const n = Math.max(1, parseInt($('pf-pp').value, 10) || 1);
       const passages = Math.ceil(q / n - 1e-9);
       const nbFers = Number($('pf-fers').value) || 0;
       const min = (nv('pf-mer') || 0) + (nv('pf-reg') || 0) + (nv('pf-regfer') || 0) * nbFers + (nv('pf-net') || 0) + (cad ? passages / cad * 60 : 0);
       const u = $('pf-unite').value.trim() || 'exemplaires';
-      $('pf-total').textContent = min ? `${fmtH(min / 60)} au total (${q} ${u} à traiter${n > 1 ? ` = ${passages} passages de ${n}` : ''})` : '—';
+      $('pf-total').textContent = min ? `${fmtH(min / 60)} au total (${ap.detail}${Math.round(q * 100) / 100} ${u} à traiter${n > 1 ? ` = ${passages} passages de ${n}` : ''})` : '—';
     }
-    ['pf-mer', 'pf-reg', 'pf-regfer', 'pf-fers', 'pf-cad', 'pf-net', 'pf-qte'].forEach(id => $(id).addEventListener('input', calcul));
+    ['pf-mer', 'pf-reg', 'pf-regfer', 'pf-fers', 'pf-cad', 'pf-net'].forEach(id => $(id).addEventListener('input', calcul));
+    $('pf-apercu').addEventListener('input', calcul);
+    $('pf-formule').addEventListener('input', () => { dessinerApercu(); calcul(); });
     $('pf-pp').addEventListener('input', majUnite);
     // Le réglage « une seule mise en route / un seul nettoyage » est propre à l'opération : on ne l'envoie que si vous l'avez modifié.
     $('pf-mut').addEventListener('change', () => { $('pf-mut').dataset.touche = '1'; });
@@ -4011,7 +4038,7 @@
         document.querySelectorAll('.pf-autre').forEach(c => { c.checked = false; });
       } catch (e) { $('pf-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
     });
-    dessiner(); calcul();
+    dessiner(); dessinerApercu(); calcul();
   }
 
   // ---------- Temps standards & chiffrage ----------
