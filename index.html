@@ -401,6 +401,54 @@
   .modal textarea.msg-ta { font-family: inherit; font-size: 13.5px; }
   .modal .msg-saisie-pied label, .modal label:has(> #nm-mail), .modal label:has(> #ma-mail) { text-transform: none; letter-spacing: 0; color: var(--ink-700); }
   .msg-liste-obj { width: 100%; margin-top: 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--field-bg); color: var(--ink-900); font-size: 13px; }
+
+  /* ---- Vue globale de la charge (Reporting) ---- */
+  .vg-bar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .vg-seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+  .vg-seg button { background: transparent; border: none; padding: 7px 15px; font: inherit; font-size: 13px; color: var(--ink-700); cursor: pointer; }
+  .vg-seg button.on { background: var(--accent-teal); color: #fff; font-weight: 600; }
+  .vg-nav { display: flex; gap: 6px; align-items: center; }
+  .vg-titre { font-weight: 600; font-size: 15px; min-width: 190px; text-align: center; }
+  .vg-c0 { background: transparent; } .vg-c1 { background: rgba(22,184,166,.20); } .vg-c2 { background: rgba(22,184,166,.50); }
+  .vg-c3 { background: rgba(245,166,35,.60); } .vg-c4 { background: rgba(240,86,75,.65); } .vg-cna { background: var(--paper-raised-2); opacity: .6; }
+  .vg-cal { padding: 14px 16px; }
+  .vg-mois { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+  .vg-jsem { text-align: center; font-size: 11.5px; color: var(--ink-500); padding-bottom: 2px; }
+  .vg-cell { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-height: 78px; cursor: pointer; font-size: 12px; display: flex; flex-direction: column; gap: 2px; color: var(--ink-900); }
+  .vg-cell:hover { outline: 2px solid var(--accent-teal); }
+  .vg-cell .n { font-weight: 700; }
+  .vg-cell .vg-top { display: flex; justify-content: space-between; gap: 4px; }
+  .vg-hors { opacity: .42; }
+  .vg-auj { box-shadow: inset 0 0 0 2px var(--accent-teal); }
+  .vg-chips { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 11px; color: var(--ink-700); margin-top: auto; }
+  .vg-annee { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 18px 16px; }
+  .vg-mini-t { font-weight: 600; font-size: 13px; text-transform: capitalize; cursor: pointer; margin-bottom: 4px; display: flex; justify-content: space-between; }
+  .vg-mini { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+  .vg-mini div { aspect-ratio: 1; border-radius: 3px; font-size: 9.5px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--ink-900); border: 1px solid transparent; }
+  .vg-mini div:hover { border-color: var(--accent-teal); }
+  .vg-mini .vide { cursor: default; border: none; }
+  .vg-leg { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--ink-500); padding: 10px 16px 14px; }
+  .vg-leg i { display: inline-block; width: 13px; height: 13px; border-radius: 3px; margin-right: 5px; vertical-align: -2px; border: 1px solid var(--line); }
+  .vg-sem { width: 100%; border-collapse: separate; border-spacing: 3px; font-size: 12.5px; }
+  .vg-sem th { font-weight: 600; font-size: 11.5px; color: var(--ink-500); text-align: center; padding: 4px; cursor: pointer; }
+  .vg-sem th:first-child, .vg-sem td:first-child { text-align: left; cursor: default; }
+  .vg-sem td { text-align: center; padding: 8px 4px; border-radius: 6px; cursor: pointer; }
+  .vg-sem td:first-child { padding-left: 2px; white-space: nowrap; }
+  .vg-sem tfoot td { font-size: 12px; }
+  .vg-jour-m { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 10px; }
+  .vg-jour-m h4 { margin: 0 0 6px; font-size: 14px; display: flex; justify-content: space-between; gap: 8px; }
+  .vg-cren { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 4px 12px; font-size: 13px; padding: 4px 0; border-top: 1px solid var(--line); }
+  .vg-prog { height: 11px; border-radius: 6px; background: var(--paper-raised-2); position: relative; }
+  .vg-prog > span { display: block; height: 100%; border-radius: 6px; }
+  .vg-prog .att { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink-900); opacity: .55; border-radius: 1px; }
+  .vg-v { background: var(--accent-green); } .vg-o { background: var(--accent-amber); } .vg-r { background: var(--danger); }
+  .vg-of { display: grid; grid-template-columns: minmax(180px, 1.3fr) minmax(160px, 1.6fr) minmax(170px, 1.2fr) auto; gap: 8px 18px; align-items: center; padding: 11px 18px; border-top: 1px solid var(--line); font-size: 13px; }
+  @media (max-width: 900px) { .vg-of { grid-template-columns: 1fr; } .vg-cell { min-height: 58px; } .vg-cell .vg-chips { display: none; } }
+  .vg-raison-v { color: var(--accent-green); } .vg-raison-o { color: var(--accent-amber-text); } .vg-raison-r { color: var(--danger-text); }
+  .vg-2col { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  .vg-liste { padding: 6px 18px 14px; font-size: 13px; }
+  .vg-liste > div { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); }
+  .vg-liste > div:first-child { border-top: none; }
   .empty { padding: 36px 16px; text-align: center; color: var(--ink-500); font-size: 12.5px; }
 
   .bar-track { background: var(--line); border-radius: 4px; height: 6px; overflow: hidden; margin-top: 4px; }
@@ -5387,7 +5435,254 @@
     return wrap;
   }
 
+
+  // ---------- Vue globale de la charge de travail (Reporting) ----------
+  // Calendrier jour / semaine / mois / année, OF en cours avec progression colorée, échéances, charge par machine.
+  // Les chiffres viennent de la fonction « vue-globale » (lecture seule).
+  const VG_JOURS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+  const vg = { mode: 'semaine', ref: new Date().toLocaleDateString('sv-SE'), cal: null, of: null, erreur: null, jeton: 0 };
+  const vgIso = (d) => d.toLocaleDateString('sv-SE');
+  const vgDate = (iso) => new Date(iso + 'T12:00:00');
+  const vgAdd = (iso, n) => vgIso(new Date(vgDate(iso).getTime() + n * 86400000));
+  const vgLundi = (iso) => vgAdd(iso, -((vgDate(iso).getDay() + 6) % 7));
+  const vgFmt = (iso, o) => vgDate(iso).toLocaleDateString('fr-FR', o);
+  const vgJJMM = (iso) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
+  const vgH = (x) => (Math.round((x || 0) * 10) / 10).toLocaleString('fr-FR');
+  const vgPct = (c) => (c === null || c === undefined ? null : Math.round(c * 100));
+  function vgSemaine(iso) {
+    const d = vgDate(iso); d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + 3);
+    const j4 = new Date(d.getFullYear(), 0, 4);
+    return 1 + Math.round(((d - j4) / 86400000 - 3 + ((j4.getDay() + 6) % 7)) / 7);
+  }
+  function vgClasse(c) {
+    if (c === null || c === undefined) return 'vg-cna';
+    if (c <= 0) return 'vg-c0';
+    return c < 0.5 ? 'vg-c1' : (c < 0.85 ? 'vg-c2' : (c <= 1 ? 'vg-c3' : 'vg-c4'));
+  }
+  function vgPeriode() {
+    const r = vg.ref;
+    if (vg.mode === 'jour') return { debut: r, fin: r };
+    if (vg.mode === 'semaine') { const l = vgLundi(r); return { debut: l, fin: vgAdd(l, 6) }; }
+    if (vg.mode === 'mois') {
+      const d = vgDate(r), p = vgIso(new Date(d.getFullYear(), d.getMonth(), 1)), z = vgIso(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+      return { debut: vgLundi(p), fin: vgAdd(vgLundi(z), 6), premier: p, dernier: z };
+    }
+    const a = vgDate(r).getFullYear(); return { debut: `${a}-01-01`, fin: `${a}-12-31` };
+  }
+  function vgTitre() {
+    const p = vgPeriode();
+    if (vg.mode === 'jour') return vgFmt(vg.ref, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    if (vg.mode === 'semaine') return `Semaine ${vgSemaine(p.debut)} — du ${vgJJMM(p.debut)} au ${vgJJMM(p.fin)}/${p.fin.slice(0, 4)}`;
+    if (vg.mode === 'mois') return vgFmt(vg.ref, { month: 'long', year: 'numeric' });
+    return String(vgDate(vg.ref).getFullYear());
+  }
+  function vgNaviguer(sens) {
+    const d = vgDate(vg.ref);
+    if (vg.mode === 'jour') vg.ref = vgAdd(vg.ref, sens);
+    else if (vg.mode === 'semaine') vg.ref = vgAdd(vg.ref, 7 * sens);
+    else if (vg.mode === 'mois') vg.ref = vgIso(new Date(d.getFullYear(), d.getMonth() + sens, 1));
+    else vg.ref = vgIso(new Date(d.getFullYear() + sens, 0, 1));
+    chargerVg(false);
+  }
+  async function vgAppel(q) {
+    const res = await fetch(`${API}/vue-globale?${q}`);
+    const d = await lireJson(res);
+    if (!res.ok) throw new Error(d.error || d.errorMessage || `Erreur serveur (HTTP ${res.status})`);
+    return d;
+  }
+  async function chargerVg(avecOf) {
+    const jeton = ++vg.jeton, p = vgPeriode();
+    vg.erreur = null; dessinerVg();
+    try {
+      const [cal, of] = await Promise.all([vgAppel(`section=calendrier&debut=${p.debut}&fin=${p.fin}`), (avecOf || !vg.of) ? vgAppel('section=of') : Promise.resolve(null)]);
+      if (jeton !== vg.jeton) return;
+      vg.cal = cal; if (of) vg.of = of;
+    } catch (e) { if (jeton !== vg.jeton) return; vg.erreur = e.message; }
+    dessinerVg();
+  }
+
+  function renderVueGlobale() {
+    const wrap = el(`<div>
+      <div class="vg-bar">
+        <button class="btn" id="vg-retour">← Retour au reporting</button>
+        <div class="vg-seg" id="vg-modes">${[['jour', 'Jour'], ['semaine', 'Semaine'], ['mois', 'Mois'], ['annee', 'Année']].map(([k, l]) => `<button data-m="${k}">${l}</button>`).join('')}</div>
+        <div class="vg-nav"><button class="btn" id="vg-prec" aria-label="Précédent">‹</button><div class="vg-titre" id="vg-titre"></div><button class="btn" id="vg-suiv" aria-label="Suivant">›</button><button class="btn" id="vg-auj">Aujourd'hui</button><button class="btn" id="vg-maj" title="Actualiser les données">↻</button></div>
+      </div>
+      <div class="kpis" id="vg-tuiles"></div>
+      <div class="panel"><div class="panel-head"><h2 id="vg-cal-titre">Calendrier de la charge</h2></div><div id="vg-cal" class="vg-cal"><div class="empty">Chargement…</div></div><div class="vg-leg" id="vg-leg"></div></div>
+      <div class="panel"><div class="panel-head"><h2>OF en cours — progression</h2><span class="plan-note" id="vg-of-resume"></span></div><div id="vg-of"><div class="empty">Chargement…</div></div><div class="vg-leg" id="vg-of-leg"></div></div>
+      <div class="vg-2col"><div class="panel" style="margin:0 0 20px;"><div class="panel-head"><h2>Points d'attention</h2></div><div id="vg-att" class="vg-liste"></div></div>
+        <div class="panel" style="margin:0 0 20px;"><div class="panel-head"><h2>Échéances des 14 prochains jours</h2></div><div id="vg-ech" class="vg-liste"></div></div></div>
+      <div class="panel"><div class="panel-head"><h2>Charge par machine sur la période</h2></div><div id="vg-mach" style="padding:14px 18px; display:flex; flex-direction:column; gap:11px;"></div></div>
+    </div>`);
+    wrap.querySelector('#vg-retour').addEventListener('click', () => { state.repVue = null; render(); });
+    wrap.querySelectorAll('#vg-modes button').forEach(b => b.addEventListener('click', () => { vg.mode = b.dataset.m; chargerVg(false); }));
+    wrap.querySelector('#vg-prec').addEventListener('click', () => vgNaviguer(-1));
+    wrap.querySelector('#vg-suiv').addEventListener('click', () => vgNaviguer(1));
+    wrap.querySelector('#vg-auj').addEventListener('click', () => { vg.ref = new Date().toLocaleDateString('sv-SE'); chargerVg(false); });
+    wrap.querySelector('#vg-maj').addEventListener('click', () => chargerVg(true));
+    wrap.querySelector('#vg-cal').addEventListener('click', (ev) => {
+      const j = ev.target.closest('[data-j]'), m = ev.target.closest('[data-mois]');
+      if (j) { vg.mode = 'jour'; vg.ref = j.dataset.j; chargerVg(false); }
+      else if (m) { vg.mode = 'mois'; vg.ref = m.dataset.mois; chargerVg(false); }
+    });
+    setTimeout(() => chargerVg(true), 0);
+    return wrap;
+  }
+
+  function dessinerVg() {
+    const g = (id) => document.getElementById(id);
+    if (!g('vg-cal')) return;
+    document.querySelectorAll('#vg-modes button').forEach(b => b.classList.toggle('on', b.dataset.m === vg.mode));
+    { const t = vgTitre(); g('vg-titre').textContent = t.charAt(0).toUpperCase() + t.slice(1); }
+    const p = vgPeriode(), cal = vg.cal && vg.cal.periode.debut === p.debut && vg.cal.periode.fin === p.fin ? vg.cal : null;
+    g('vg-cal-titre').textContent = { jour: 'Journée', semaine: 'Semaine — machines × jours', mois: 'Mois', annee: 'Année' }[vg.mode];
+    if (vg.erreur) { g('vg-cal').innerHTML = `<div class="msg error">${esc(vg.erreur)}</div>`; }
+    else if (!cal) { g('vg-cal').innerHTML = '<div class="empty">Chargement…</div>'; }
+    else { vgTuiles(cal, p); vgCalendrier(cal, p); vgMachines(cal, p); vgAttention(cal, p); }
+    g('vg-leg').innerHTML = [['vg-c0', 'Rien de planifié'], ['vg-c1', 'Moins de 50 %'], ['vg-c2', '50 à 85 %'], ['vg-c3', '85 à 100 %'], ['vg-c4', 'Surcharge (plus de 100 %)'], ['vg-cna', 'Week-end / sans capacité']].map(([c, l]) => `<span><i class="${c}"></i>${l}</span>`).join('')
+      + `<span style="flex-basis:100%;">Charge d'un jour = le plus élevé de : heures-personnes planifiées ÷ capacité de l'équipe (présents × 8 h) et heures-machines planifiées ÷ capacité du parc (machines actives, hors arrêt, × 8 h).</span>`;
+    vgOf();
+  }
+
+  function vgTuiles(cal, p) {
+    const jours = Object.entries(cal.jours).filter(([d]) => d >= (vg.mode === 'mois' ? p.premier : p.debut) && d <= (vg.mode === 'mois' ? p.dernier : p.fin));
+    const somme = (f) => jours.reduce((t, [, j]) => t + f(j), 0);
+    const charges = jours.map(([, j]) => j.charge).filter(c => c !== null);
+    const moy = charges.length ? charges.reduce((a, b) => a + b, 0) / charges.length : null;
+    const sur = charges.filter(c => c > 1).length, haute = charges.filter(c => c > 0.85 && c <= 1).length;
+    const ap = vg.of ? vg.of.a_planifier : null;
+    const tuile = (cls, v, l) => `<div class="kpi ${cls}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+    document.getElementById('vg-tuiles').innerHTML =
+      tuile('accent-teal', `${vgH(somme(j => j.machine_h))} h`, 'Heures machine planifiées')
+      + tuile('accent-teal', `${vgH(somme(j => j.pers_h))} h`, 'Heures-personnes planifiées')
+      + tuile(moy !== null && moy > 1 ? 'accent-danger' : (moy !== null && moy > 0.85 ? 'accent-amber' : 'accent-teal'), moy === null ? '—' : `${vgPct(moy)}%`, 'Charge moyenne (jours ouvrés)')
+      + tuile(sur ? 'accent-danger' : (haute ? 'accent-amber' : 'accent-teal'), `${sur}<span style="font-size:15px;font-weight:500;color:var(--ink-500);"> + ${haute}</span>`, 'Jours en surcharge (+ jours à plus de 85 %)')
+      + tuile(somme(j => j.absents) ? 'accent-amber' : 'accent-teal', somme(j => j.absents), 'Absences (jours-personnes)')
+      + (ap ? tuile(ap.heures > 0 ? 'accent-amber' : 'accent-teal', `${vgH(ap.heures)} h`, `Reste à planifier (${ap.nb_of} OF, étapes chiffrées)`) : '');
+  }
+
+  function vgInfoJour(iso, j) {
+    const pc = vgPct(j.charge);
+    return `${vgFmt(iso, { weekday: 'long', day: 'numeric', month: 'long' })} — ${vgH(j.machine_h)} h machine, ${vgH(j.pers_h)} h-personnes${pc !== null ? `, charge ${pc} %` : ''}${j.absents ? `, ${j.absents} absent(s)` : ''}${j.machines_arret ? `, ${j.machines_arret} machine(s) à l'arrêt` : ''}`;
+  }
+
+  function vgCalendrier(cal, p) {
+    const zone = document.getElementById('vg-cal'), auj = new Date().toLocaleDateString('sv-SE');
+    if (vg.mode === 'mois') {
+      let h = `<div class="vg-mois">${VG_JOURS.map(j => `<div class="vg-jsem">${j}</div>`).join('')}`;
+      for (let d = p.debut; d <= p.fin; d = vgAdd(d, 1)) {
+        const j = cal.jours[d]; if (!j) continue;
+        const dans = d >= p.premier && d <= p.dernier, pc = vgPct(j.charge);
+        h += `<div class="vg-cell ${vgClasse(j.charge)} ${dans ? '' : 'vg-hors'} ${d === auj ? 'vg-auj' : ''}" data-j="${d}" title="${esc(vgInfoJour(d, j))}">
+          <div class="vg-top"><span class="n">${Number(d.slice(8, 10))}</span><span>${pc !== null && (j.machine_h || j.pers_h) ? pc + '%' : ''}</span></div>
+          <div>${j.machine_h ? vgH(j.machine_h) + ' h machine' : ''}</div>
+          <div class="vg-chips">${j.nb_of ? `<span>📋 ${j.nb_of} OF</span>` : ''}${j.absents ? `<span>👤 ${j.absents}</span>` : ''}${j.machines_arret ? `<span>🔧 ${j.machines_arret}</span>` : ''}</div></div>`;
+      }
+      zone.innerHTML = h + '</div>';
+    } else if (vg.mode === 'annee') {
+      const an = Number(p.debut.slice(0, 4));
+      let h = '<div class="vg-annee">';
+      for (let m = 0; m < 12; m++) {
+        const premier = vgIso(new Date(an, m, 1)), dernier = vgIso(new Date(an, m + 1, 0));
+        const vides = (vgDate(premier).getDay() + 6) % 7;
+        const charges = []; let cases = '';
+        for (let i = 0; i < vides; i++) cases += '<div class="vide"></div>';
+        for (let d = premier; d <= dernier; d = vgAdd(d, 1)) {
+          const j = cal.jours[d]; charges.push(j ? j.charge : null);
+          cases += `<div class="${vgClasse(j ? j.charge : null)}" data-j="${d}" title="${esc(j ? vgInfoJour(d, j) : d)}">${Number(d.slice(8, 10))}</div>`;
+        }
+        const util = charges.filter(c => c !== null), moy = util.length ? util.reduce((a, b) => a + b, 0) / util.length : null;
+        h += `<div><div class="vg-mini-t" data-mois="${premier}"><span>${vgFmt(premier, { month: 'long' })}</span><span class="plan-note">${moy !== null && moy > 0 ? vgPct(moy) + ' %' : ''}</span></div>
+          <div class="vg-mini">${VG_JOURS.map(j => `<div class="vide" style="font-size:9px;color:var(--ink-500);">${j[0]}</div>`).join('')}${cases}</div></div>`;
+      }
+      zone.innerHTML = h + '</div>';
+    } else if (vg.mode === 'semaine') {
+      const jours = Array.from({ length: 7 }, (_, i) => vgAdd(p.debut, i));
+      const arret = (nom, d) => (cal.interventions || []).some(x => x.machine === nom && x.bloquant && x.date_debut <= d && (!x.date_fin || x.date_fin >= d));
+      const celClasse = (hh) => vgClasse(hh <= 0 ? 0 : hh / 8);
+      let h = `<table class="vg-sem"><thead><tr><th>Machine</th>${jours.map(d => `<th data-j="${d}">${VG_JOURS[(vgDate(d).getDay() + 6) % 7]}<br>${vgJJMM(d)}</th>`).join('')}<th>Total</th></tr></thead><tbody>`;
+      cal.par_machine.forEach(m => {
+        h += `<tr><td>${esc(m.nom)}</td>${jours.map(d => { const x = (m.par_jour || {})[d] || 0, st = arret(m.nom, d); return `<td class="${celClasse(x)}" data-j="${d}" title="${esc(m.nom + ' — ' + vgFmt(d, { weekday: 'long', day: 'numeric', month: 'long' }) + (st ? ' — à l\'arrêt' : ''))}">${st ? '🔧 ' : ''}${x ? vgH(x) + ' h' : ''}</td>`; }).join('')}<td class="mono">${vgH(m.heures)} h</td></tr>`;
+      });
+      h += `</tbody><tfoot><tr><td><strong>Équipe</strong> <span class="plan-note">heures-personnes</span></td>${jours.map(d => { const j = cal.jours[d]; return `<td class="${j.cap_pers_h ? vgClasse(j.pers_h / j.cap_pers_h) : 'vg-cna'}" data-j="${d}">${j.pers_h ? vgH(j.pers_h) + ' h' : ''}${j.cap_pers_h ? `<br><span class="plan-note">/ ${vgH(j.cap_pers_h)} h</span>` : ''}</td>`; }).join('')}<td></td></tr>
+        <tr><td><strong>Charge du jour</strong></td>${jours.map(d => { const j = cal.jours[d], pc = vgPct(j.charge); return `<td class="${vgClasse(j.charge)}" data-j="${d}"><strong>${pc !== null ? pc + ' %' : ''}</strong></td>`; }).join('')}<td></td></tr>
+        <tr><td>Absents</td>${jours.map(d => { const j = cal.jours[d], noms = (cal.absences || []).filter(a => a.date === d).map(a => a.personnel).join(', '); return `<td data-j="${d}" title="${esc(noms)}">${j.absents ? '👤 ' + j.absents : ''}</td>`; }).join('')}<td></td></tr></tfoot></table>`;
+      zone.innerHTML = cal.par_machine.length ? h : '<div class="empty">Aucune machine active.</div>';
+    } else {
+      const j = cal.jours[vg.ref], pc = vgPct(j.charge);
+      const parMachine = {};
+      (cal.creneaux || []).forEach(c => { (parMachine[c.machine || '—'] ??= []).push(c); });
+      const arretM = (nom) => (cal.interventions || []).find(x => x.machine === nom && x.bloquant && x.date_debut <= vg.ref && (!x.date_fin || x.date_fin >= vg.ref));
+      let h = `<div style="margin-bottom:12px;font-size:13px;"><span class="tag ${pc !== null && pc > 100 ? 'danger' : (pc !== null && pc > 85 ? 'warn' : 'ok')}">Charge ${pc !== null ? pc + ' %' : '—'}</span> ${vgH(j.machine_h)} h machine · ${vgH(j.pers_h)} h-personnes (capacité équipe ${vgH(j.cap_pers_h)} h)</div>`;
+      const noms = cal.par_machine.map(m => m.nom);
+      noms.concat(parMachine['—'] ? ['—'] : []).forEach(nom => {
+        const liste = parMachine[nom] || [], inter = nom === '—' ? null : arretM(nom);
+        if (!liste.length && !inter) return;
+        h += `<div class="vg-jour-m"><h4><span>${nom === '—' ? 'Travail manuel (sans machine)' : esc(nom)}</span>${inter ? `<span class="tag danger">⛔ À l'arrêt — ${esc(inter.type || 'intervention')}${inter.description ? ' : ' + esc(inter.description) : ''}</span>` : `<span class="plan-note">${vgH(liste.reduce((t, c) => t + c.heures, 0))} h</span>`}</h4>
+          ${liste.map(c => `<div class="vg-cren"><span class="mono">${c.heure_debut ? c.heure_debut + '–' + c.heure_fin : 'Journée'}</span><span><strong>${esc(c.of_numero || '')}</strong> ${esc(c.titre || '')} <span class="plan-note">· ${esc(c.phase || '')} · ${vgH(c.heures)} h</span><br><span class="plan-note">${c.personnel.length ? '👤 ' + esc(c.personnel.join(', ')) : 'Personne non affectée'}</span></span></div>`).join('')}</div>`;
+      });
+      const libres = noms.filter(n => !parMachine[n] && !arretM(n));
+      if (!(cal.creneaux || []).length) h += '<div class="empty">Rien n\'est planifié ce jour-là.</div>';
+      else if (libres.length) h += `<div class="plan-note">Machines sans travail planifié : ${esc(libres.join(', '))}.</div>`;
+      if ((cal.absences || []).length) h += `<div style="margin-top:10px;font-size:13px;">👤 Absents : ${cal.absences.map(a => `${esc(a.personnel)} <span class="plan-note">(${esc(a.statut)})</span>`).join(', ')}</div>`;
+      zone.innerHTML = h;
+    }
+  }
+
+  function vgOf() {
+    const zone = document.getElementById('vg-of'), leg = document.getElementById('vg-of-leg'), res = document.getElementById('vg-of-resume');
+    if (!zone) return;
+    if (!vg.of) { zone.innerHTML = vg.erreur ? '' : '<div class="empty">Chargement…</div>'; return; }
+    const o = vg.of, S = o.seuils;
+    const n = (k) => o.of_en_cours.filter(x => x.niveau === k).length;
+    res.textContent = o.of_en_cours.length ? `${o.of_en_cours.length} OF — ${n('vert')} dans les temps · ${n('orange')} léger retard · ${n('rouge')} retard important` : '';
+    const lettre = { vert: 'v', orange: 'o', rouge: 'r' };
+    zone.innerHTML = o.of_en_cours.length ? o.of_en_cours.map(x => `
+      <div class="vg-of">
+        <div><strong class="mono">${esc(x.numero)}</strong> ${x.statut === 'en pause' ? '<span class="tag warn">En pause</span>' : ''}${x.priorite && x.priorite !== 'normale' ? ` <span class="tag ${x.priorite === 'urgente' ? 'danger' : 'warn'}">${esc(x.priorite)}</span>` : ''}<br>${esc(x.titre)}${x.client ? ` <span class="plan-note">— ${esc(x.client)}</span>` : ''}</div>
+        <div><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><span class="mono">${x.avancement} %</span><span class="plan-note">${x.attendu !== null ? 'attendu ' + x.attendu + ' %' : ''}</span></div>
+          <div class="vg-prog" title="${esc(x.raison)}"><span class="vg-${lettre[x.niveau]}" style="width:${Math.max(2, Math.min(100, x.avancement))}%"></span>${x.attendu !== null ? `<i class="att" style="left:${Math.min(99, x.attendu)}%"></i>` : ''}</div></div>
+        <div><span class="vg-raison-${lettre[x.niveau]}">${esc(x.raison)}</span><br><span class="plan-note">${x.delai ? 'Délai ' + vgJJMM(x.delai) + '/' + x.delai.slice(0, 4) : 'Sans délai'}${x.fin_prevue ? ' · fin planifiée ' + vgJJMM(x.fin_prevue) : ''}</span></div>
+        <button class="btn" data-msg="${esc(x.id)}" title="Écrire à propos de cet OF">✉</button>
+      </div>`).join('') : '<div class="empty">Aucun OF en cours.</div>';
+    zone.querySelectorAll('[data-msg]').forEach(b => b.addEventListener('click', () => ouvrirNouveauMessage({ type: 'of', id: b.dataset.msg })));
+    leg.innerHTML = `<span><i class="vg-v"></i>Vert : dans les temps</span><span><i class="vg-o"></i>Orange : léger retard (plus de ${S.orange_pts} points sous l'attendu, ou fin planifiée après le délai)</span><span><i class="vg-r"></i>Rouge : retard important (plus de ${S.rouge_pts} points, fin planifiée à plus de ${S.fin_rouge_j} j après le délai, ou délai dépassé)</span>
+      <span style="flex-basis:100%;">Le trait noir marque l'avancement attendu à ce jour, d'après les créneaux déjà planifiés de l'OF ; l'avancement réel vient des saisies de production.</span>`;
+    const ech = document.getElementById('vg-ech');
+    if (ech) ech.innerHTML = o.echeances.length ? o.echeances.map(x => `<div><span><strong class="mono">${esc(x.numero)}</strong> ${esc(x.titre)}</span><span class="mono">${vgJJMM(x.delai)} · ${x.avancement} % <span class="vg-raison-${lettre[x.niveau]}">●</span></span></div>`).join('') : '<div class="plan-note">Aucune échéance dans les 14 prochains jours.</div>';
+  }
+
+  function vgMachines(cal, p) {
+    const zone = document.getElementById('vg-mach'); if (!zone) return;
+    const debut = vg.mode === 'mois' ? p.premier : p.debut, fin = vg.mode === 'mois' ? p.dernier : p.fin;
+    const ouvres = Object.keys(cal.jours).filter(d => d >= debut && d <= fin && cal.jours[d].cap_machine_h > 0).length;
+    const cap = Math.max(1, ouvres) * cal.capacite.heures_jour;
+    const lignes = cal.par_machine.filter(m => m.heures > 0 || vg.mode === 'jour' || vg.mode === 'semaine').slice(0, 15);
+    zone.innerHTML = lignes.length ? lignes.map(m => {
+      const pc = Math.round(m.heures / cap * 100), cls = pc > 100 ? 'danger' : (pc >= 85 ? 'warn' : '');
+      return `<div><div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;margin-bottom:4px;"><span>${esc(m.nom)}</span><span class="mono">${vgH(m.heures)} h sur ${m.jours_actifs} j · ${pc}%</span></div><div class="bar-track"><div class="bar-fill ${cls}" style="width:${Math.min(100, pc)}%"></div></div></div>`;
+    }).join('') + `<div class="plan-note">Taux = heures planifiées ÷ (jours ouvrés de la période × 8 h) ; ${ouvres} jour(s) ouvré(s) sur la période.</div>` : '<div class="plan-note">Aucune machine planifiée sur cette période.</div>';
+  }
+
+  function vgAttention(cal, p) {
+    const zone = document.getElementById('vg-att'); if (!zone) return;
+    const debut = vg.mode === 'mois' ? p.premier : p.debut, fin = vg.mode === 'mois' ? p.dernier : p.fin;
+    const jours = Object.entries(cal.jours).filter(([d]) => d >= debut && d <= fin);
+    const sur = jours.filter(([, j]) => j.charge !== null && j.charge > 1).map(([d]) => vgJJMM(d));
+    const lignes = [];
+    if (sur.length) lignes.push(['danger', `${sur.length} jour(s) en surcharge`, sur.slice(0, 8).join(', ') + (sur.length > 8 ? '…' : '')]);
+    const bloq = (cal.interventions || []).filter(x => x.bloquant);
+    bloq.slice(0, 6).forEach(x => lignes.push(['warn', `🔧 ${esc(x.machine)} à l'arrêt`, `${x.date_debut ? vgJJMM(x.date_debut) : ''}${x.date_fin ? ' → ' + vgJJMM(x.date_fin) : ' → fin non connue'}`]));
+    const abs = {}; (cal.absences || []).forEach(a => { abs[a.personnel] = (abs[a.personnel] || 0) + 1; });
+    Object.entries(abs).slice(0, 6).forEach(([nom, nb]) => lignes.push(['', `👤 ${esc(nom)} absent(e)`, `${nb} jour(s)`]));
+    const rouges = vg.of ? vg.of.of_en_cours.filter(x => x.niveau === 'rouge') : [];
+    if (rouges.length) lignes.push(['danger', `${rouges.length} OF en retard important`, rouges.slice(0, 4).map(x => esc(x.numero)).join(', ')]);
+    zone.innerHTML = lignes.length ? lignes.map(([c, a, b]) => `<div><span>${c ? `<span class="tag ${c}">${a}</span>` : a}</span><span class="plan-note">${b}</span></div>`).join('') : '<div class="plan-note">Rien à signaler sur cette période.</div>';
+  }
+
   function renderReporting(){
+    if (state.repVue === 'globale') return renderVueGlobale();
     // Tous les chiffres viennent des données réelles de l'application (OF, planning, machines, personnel, stocks).
     const aujourdhui = new Date().toLocaleDateString('sv-SE');
     const enCours = state.ordres.filter(o=>o.statut==='en cours').length;
@@ -5405,6 +5700,9 @@
     const nbArret = machines.filter(alArret).length;
 
     const wrap = el(`<div></div>`);
+    const barreVg = el(`<div style="display:flex; justify-content:flex-end; margin-bottom:14px;"><button class="btn primary" id="vg-ouvrir">Vue globale de la charge</button></div>`);
+    barreVg.querySelector('button').addEventListener('click', () => { state.repVue = 'globale'; render(); });
+    wrap.appendChild(barreVg);
     const kpis = el(`
       <div class="kpis">
         <div class="kpi accent-amber"><div class="v">${enCours}</div><div class="l">OF en cours</div></div>
