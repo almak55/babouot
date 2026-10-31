@@ -7917,7 +7917,7 @@
       } catch (e) { if (num === suggestionNum) note.textContent = ''; }
     }
     // Proposition automatique du personnel (conducteur de la machine + aides disponibles).
-    let heureDebutProposee = null, persTouche = false, propNum = 0;
+    let heureDebutProposee = null, persTouche = false, propNum = 0, conducteurPropose = null;
     document.getElementById('m-personnel-list').addEventListener('change', () => { persTouche = true; });
     async function proposerPersonnel(auto) {
       const zone = document.getElementById('m-prop');
@@ -7939,7 +7939,7 @@
           majDispo(false);
         }
         // Étiquettes « conducteur » dans la liste des personnes
-        const badges = {}; (r.conducteurs || []).forEach(c => { badges[c.id] = c.rang === 1 ? 'conducteur titulaire' : 'conducteur suppléant'; });
+        const badges = {}; (r.conducteurs || []).forEach(c => { badges[c.id] = c.du_jour ? 'conducteur du jour' : c.rang === 1 ? 'conducteur titulaire' : 'conducteur suppléant'; });
         document.querySelectorAll('#m-personnel-list label').forEach(l => {
           const inp = l.querySelector('input'); if (!inp) return;
           let b = l.querySelector('.pf-badge'); if (b) b.remove();
@@ -7947,6 +7947,7 @@
         });
         const cases = Array.from(document.querySelectorAll('#m-personnel-list input'));
         cases.forEach(c => { c.checked = false; });
+        conducteurPropose = r.conducteur ? r.conducteur.id : null;
         const ids = [r.conducteur && r.conducteur.id, ...r.aides.map(a => a.id)].filter(Boolean);
         ids.forEach(pid => { const c = cases.find(x => x.value === pid); if (c) c.checked = true; });
         persTouche = false;
@@ -7955,12 +7956,12 @@
         if (r.debut_suggere && document.getElementById('m-date').value !== r.debut_suggere.date) { document.getElementById('m-date').value = r.debut_suggere.date; majDispo(false); }
         let h = noteJour + `<div>Équipe requise : <strong>${r.equipe_requise}</strong> personne(s)${r.prioritaire ? ' — OF prioritaire' : ''}.</div>`;
         if (machine) {
-          h += `<div style="margin-top:4px;"><strong>Conducteurs de la machine</strong> (seuls ceux-ci peuvent la conduire) :</div>`;
+          h += `<div style="margin-top:4px;"><strong>Conducteurs de la machine</strong> (un seul conducteur par jour : celui déjà prévu ce jour-là est repris) :</div>`;
           if (!(r.conducteurs || []).length) h += `<div style="color:var(--danger);">Aucun conducteur défini : renseignez-les dans la fiche de la machine.</div>`;
           (r.conducteurs || []).forEach(c => {
             const etat = c.statut === 'libre' ? 'libre' : c.statut === 'libre_apres' ? 'libre après sa tâche en cours' : (c.motif || 'indisponible');
             const choisi = r.conducteur && r.conducteur.id === c.id;
-            h += `<div style="padding-left:10px;">${choisi ? '✅' : '▫️'} ${esc(c.nom)} <span style="color:var(--muted);">(${c.rang === 1 ? 'titulaire' : 'suppléant ' + (c.rang - 1)})</span> — ${esc(etat)}</div>`;
+            h += `<div style="padding-left:10px;">${choisi ? '✅' : '▫️'} ${esc(c.nom)} <span style="color:var(--muted);">(${c.du_jour ? 'déjà conducteur de la machine ce jour-là' : c.rang === 1 ? 'titulaire' : 'suppléant ' + (c.rang - 1)})</span> — ${esc(etat)}</div>`;
           });
         }
         if (r.debut_suggere) h += `<div>⏱ Début le <strong>${esc(r.debut_suggere.date.split('-').reverse().slice(0, 2).join('/'))} à ${esc(r.debut_suggere.heure)}</strong> : dès que ${r.conducteur ? esc(r.conducteur.nom) : 'le conducteur'} a fini sa tâche en cours (non prioritaire).</div>`;
@@ -7986,6 +7987,7 @@
       const machine_id = document.getElementById('m-machine').value;
       const date = document.getElementById('m-date').value;
       const personnel_ids = Array.from(document.querySelectorAll('#m-personnel-list input:checked')).map(i => i.value);
+      if (conducteurPropose && personnel_ids.includes(conducteurPropose)) { personnel_ids.splice(personnel_ids.indexOf(conducteurPropose), 1); personnel_ids.unshift(conducteurPropose); }   // le conducteur est le référent du créneau
       const msg = document.getElementById('m-msg');
 
       if (statutChoisi() === 'planifié') {
@@ -8000,25 +8002,39 @@
       if (!machine_id && optChoisie && optChoisie.dataset.manuel === '0' && !confirm('Cette opération utilise normalement une machine. L\'affecter sans machine ?')) return;
       msg.innerHTML = `<div class="msg">Affectation en cours…</div>`;
       try {
-        const res = await fetch(`${API}/affecter-planning`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gamme_operatoire_id, machine_id: machine_id || null, date, personnel_ids, ...(heureDebutProposee ? { heure_debut: heureDebutProposee } : {}) }),
-        });
-        let data = await res.json();
-        if (res.status === 409 && data.conflit === 'dependance') {
-          if (!confirm(`${data.error}\n\nAffecter quand même à la date choisie ?`)) {
-            document.getElementById('m-date').value = data.date_suggeree;
-            msg.innerHTML = `<div class="msg">Date remplacée par le premier jour possible. Cliquez sur Affecter pour valider.</div>`;
-            return;
-          }
-          const res2 = await fetch(`${API}/affecter-planning`, {
+        const envoyer = async (extra) => {
+          const r = await fetch(`${API}/affecter-planning`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ gamme_operatoire_id, machine_id: machine_id || null, date, personnel_ids, forcer: true, ...(heureDebutProposee ? { heure_debut: heureDebutProposee } : {}) }),
+            body: JSON.stringify({ gamme_operatoire_id, machine_id: machine_id || null, date, personnel_ids, ...extra, ...(heureDebutProposee ? { heure_debut: heureDebutProposee } : {}) }),
           });
-          data = await res2.json();
-          if (!res2.ok) throw new Error(data.error || 'Erreur inconnue');
-        } else if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+          return { res: r, data: await r.json() };
+        };
+        const extra = {};
+        let { res, data } = await envoyer(extra);
+        for (let tour = 0; tour < 3; tour++) {
+          if (res.status === 409 && data.conflit === 'dependance' && !extra.forcer) {
+            if (!confirm(`${data.error}\n\nAffecter quand même à la date choisie ?`)) {
+              document.getElementById('m-date').value = data.date_suggeree;
+              msg.innerHTML = `<div class="msg">Date remplacée par le premier jour possible. Cliquez sur Affecter pour valider.</div>`;
+              return;
+            }
+            extra.forcer = true; ({ res, data } = await envoyer(extra)); continue;
+          }
+          if (res.status === 409 && data.conflit === 'conducteur' && !extra.forcer_conducteur) {
+            // Un seul conducteur par machine et par jour : on propose de reprendre celui du jour.
+            if (!confirm(`${data.error}\n\nOK = affecter quand même avec deux conducteurs différents.\nAnnuler = sélectionner ${data.conducteur_nom} comme conducteur.`)) {
+              const cases = Array.from(document.querySelectorAll('#m-personnel-list input'));
+              const ancien = personnel_ids[0];
+              cases.forEach(c => { if (c.value === ancien) c.checked = false; if (c.value === data.conducteur_id) c.checked = true; });
+              conducteurPropose = data.conducteur_id; persTouche = true;
+              msg.innerHTML = `<div class="msg">${esc(data.conducteur_nom)} est sélectionné comme conducteur du jour. Cliquez sur Affecter pour valider.</div>`;
+              return;
+            }
+            extra.forcer_conducteur = true; ({ res, data } = await envoyer(extra)); continue;
+          }
+          break;
+        }
+        if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
         msg.innerHTML = `<div class="msg ok">Affecté.</div>`;
         const c0 = data.creneaux && data.creneaux[0];
         toast(c0 && c0.heure_debut && !heureDebutProposee && c0.heure_debut.slice(0, 5) !== '08:00' ? `Affectation enregistrée — démarre à ${c0.heure_debut.slice(0, 5)} (après la tâche précédente).` : 'Affectation enregistrée.');
