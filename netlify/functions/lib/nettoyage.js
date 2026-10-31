@@ -30,21 +30,26 @@ function calendrier(cal) {
   return {
     heure_debut: String(cal.heure_debut || cal.debut || CAL_DEFAUT.heure_debut).slice(0, 5),
     heure_fin: String(cal.heure_fin || cal.fin || CAL_DEFAUT.heure_fin).slice(0, 5),
-    pause_debut: String(cal.pause_debut || CAL_DEFAUT.pause_debut).slice(0, 5),
-    pause_minutes: Number(cal.pause_minutes ?? CAL_DEFAUT.pause_minutes),
+    ...imposerPause({}),   // pause toujours 12h00-12h30 (lib/horaires.js)
   };
 }
 
 // Créneau(x) de nettoyage souhaité(s) pour un jour : [{ d, f }] en minutes, ou null si on ne peut pas le poser ce jour-là.
-function nettoyageSouhaite(jobs, date, cal, duree) {
+function nettoyageSouhaite(jobs, date, cal, duree, minDebut) {
   const fins = jobs.filter((r) => r.heure_fin).map((r) => mn(r.heure_fin));
   if (!fins.length) return null;
   const limite = mn(cal.heure_fin) - duree;
   let debut = Math.min(Math.max(...fins), Math.max(limite, mn(cal.heure_debut)));
+  if (Number.isFinite(minDebut)) debut = Math.max(debut, minDebut);
+  // Le nettoyage n'est jamais coupé par la pause déjeuner : s'il devait l'enjamber, il commence après la pause.
+  const pD = mn(cal.pause_debut), pF = pD + Number(cal.pause_minutes || 0);
+  const apresPause = (d) => (pF > pD && d < pD && d + duree > pD ? pF : d);
+  debut = apresPause(debut);
   // Un travail (ex. étape à durée manuelle d'un ancien planning) déborde sur la plage de nettoyage : on ne chevauche jamais,
   // le nettoyage suit alors le dernier travail s'il reste de la place avant la fermeture, sinon il n'est pas posé ce jour-là.
   const chevauche = (d) => jobs.some((r) => r.heure_debut && r.heure_fin && mn(r.heure_debut) < d + duree && mn(r.heure_fin) > d);
-  if (chevauche(debut)) { debut = Math.max(...fins); if (debut + duree > mn(cal.heure_fin)) return null; }
+  if (chevauche(debut)) { debut = apresPause(Math.max(debut, Math.max(...fins))); if (debut + duree > mn(cal.heure_fin)) return null; }
+  if (debut + duree > mn(cal.heure_fin)) return null;
   const morceaux = decouper(date, [{ nom: 'Nettoyage', duree_h: duree / 60 }], cal, debut);
   if (!morceaux.length || morceaux.some((m) => m.date !== date)) return null;
   return morceaux.map((m) => ({ d: mn(m.heure_debut), f: mn(m.heure_fin), m }));
@@ -117,7 +122,22 @@ async function traiterMER(supabase, machineId, date, cal) {
   return { deplace: change ? 1 : 0, rattache: !rattache };
 }
 
-async function traiterJour(supabase, machineId, date, cal, duree) {
+// Données qui ne changent pas pendant un appel : absences du jour, habilitations machine, personnel actif.
+async function chargerStatique(supabase, date, cache) {
+  const c = cache || {};
+  c.absences = c.absences || {};
+  try {
+    if (!c.absences[date]) {
+      const a = await supabase.from('personnel_planning_jour').select('personnel_id, statut, heure_debut, heure_fin').eq('date', date);
+      c.absences[date] = (a.data || []).filter((x) => x.statut && x.statut !== 'disponible');
+    }
+    if (!c.habilites) { const h = await supabase.from('personnel_machines').select('personnel_id, machine_id, rang'); c.habilites = h.data || []; }
+    if (!c.actifs) { const p = await supabase.from('personnel').select('id').eq('actif', true); c.actifs = (p.data || []).length ? new Set(p.data.map((x) => x.id)) : null; }
+  } catch (_) { /* tables facultatives : on s'en passe */ }
+  return { absences: c.absences[date] || [], habilites: c.habilites || [], actifs: c.actifs || null };
+}
+
+async function traiterJour(supabase, machineId, date, cal, duree, cache) {
   const { data: rows, error } = await supabase.from('planning_jour').select('*').eq('machine_id', machineId).eq('date', date).neq('statut', 'annulé');
   if (error) throw error;
   const toutes = rows || [];
@@ -133,13 +153,9 @@ async function traiterJour(supabase, machineId, date, cal, duree) {
   // Une machine sans phase « mise en route » mais avec un nettoyage suit la même règle : nettoyage après le dernier travail de la journée.
   if (!jobs.some((r) => MER.test(r.phase || '')) && !nets.length) return { supprimes: 0, crees: 0 };
   if (nets.some((r) => !modifiables(r))) return { supprimes: 0, crees: 0 };           // nettoyage déjà commencé / terminé : on n'y touche pas
-  const voulu = nettoyageSouhaite(jobs, date, cal, duree);
-  if (!voulu) return { supprimes: 0, crees: 0 };
+  const voulu0 = nettoyageSouhaite(jobs, date, cal, duree);
+  if (!voulu0) return { supprimes: 0, crees: 0 };
   const dernier = jobs.slice().sort((a, b) => mn(b.heure_fin) - mn(a.heure_fin) || mn(b.heure_debut) - mn(a.heure_debut))[0];
-  // Déjà en place (mêmes horaires, même travail) : rien à faire.
-  const actuels = nets.map((r) => ({ d: mn(r.heure_debut), f: mn(r.heure_fin) })).sort((a, b) => a.d - b.d);
-  if (actuels.length === voulu.length && actuels.every((x, i) => x.d === voulu[i].d && x.f === voulu[i].f)
-    && nets.every((r) => r.gamme_operatoire_id === dernier.gamme_operatoire_id)) return { supprimes: 0, crees: 0 };
 
   const ids = toutes.map((r) => r.id);
   const { data: liens, error: lErr } = ids.length ? await supabase.from('planning_jour_personnel').select('planning_jour_id, personnel_id').in('planning_jour_id', ids) : { data: [], error: null };
@@ -147,7 +163,46 @@ async function traiterJour(supabase, machineId, date, cal, duree) {
   const equipeDe = (r) => [...new Set([...(r.personnel_id ? [r.personnel_id] : []), ...(liens || []).filter((l) => l.planning_jour_id === r.id).map((l) => l.personnel_id)])];
   const dernierNet = nets.slice().sort((a, b) => mn(b.heure_fin) - mn(a.heure_fin))[0];
   const ancienne = dernierNet ? equipeDe(dernierNet) : [];   // équipe du dernier nettoyage connu ce jour-là
-  const equipe = ancienne.length ? ancienne : equipeDe(dernier).slice(0, 1);
+  const equipeParDefaut = ancienne.length ? ancienne : equipeDe(dernier).slice(0, 1);
+
+  // La personne du nettoyage doit être libre à ce moment-là (elle ne peut pas être ailleurs, sur une autre machine) :
+  // on prend d'abord l'équipe prévue, puis les autres personnes de la machine ce jour-là ; sinon on décale de 15 min en 15 min.
+  const { data: jourRows, error: jErr } = await supabase.from('planning_jour').select('id, personnel_id, heure_debut, heure_fin, statut').eq('date', date).neq('statut', 'annulé');
+  if (jErr) throw jErr;
+  const idsNets = new Set(nets.map((r) => r.id));
+  const autres = (jourRows || []).filter((r) => !idsNets.has(r.id));
+  const { data: liensJour, error: ljErr } = autres.length ? await supabase.from('planning_jour_personnel').select('planning_jour_id, personnel_id').in('planning_jour_id', autres.map((r) => r.id)) : { data: [], error: null };
+  if (ljErr) throw ljErr;
+  const membresJour = (r) => new Set([...(r.personnel_id ? [r.personnel_id] : []), ...(liensJour || []).filter((l) => l.planning_jour_id === r.id).map((l) => l.personnel_id)]);
+  const occupes = autres.map((r) => ({ membres: membresJour(r), d: r.heure_debut ? mn(r.heure_debut) : null, f: r.heure_fin ? mn(r.heure_fin) : null }));
+  const libre = (pid, voulu) => !occupes.some((o) => o.membres.has(pid) && (o.d === null || o.f === null || voulu.some((v) => o.d < v.f && o.f > v.d)));
+  // Absents / en arrêt ce jour-là : jamais choisis, et personnes habilitées sur la machine (titulaire d'abord) en dernier recours.
+  // (données chargées une seule fois par appel : `cache`)
+  const stat = await chargerStatique(supabase, date, cache);
+  const absences = stat.absences;
+  const habilites = stat.habilites.filter((h) => h.machine_id === machineId).sort((x, y) => (x.rang ?? 99) - (y.rang ?? 99)).map((x) => x.personnel_id).filter((id) => !stat.actifs || stat.actifs.has(id));
+  absences.forEach((x) => occupes.push({ membres: new Set([x.personnel_id]), d: x.heure_debut ? mn(x.heure_debut) : null, f: x.heure_fin ? mn(x.heure_fin) : null }));
+  const candidats = [...new Set([...equipeParDefaut, ...equipeDe(dernier), ...toutes.filter((r) => !NET.test(r.phase || '')).flatMap(equipeDe), ...habilites])];
+  let voulu = voulu0; let equipe = equipeParDefaut;
+  if (candidats.length) {
+    const premierLibre = (v) => candidats.find((x) => libre(x, v));
+    const c0 = premierLibre(voulu0);
+    if (c0) equipe = equipeParDefaut.length && equipeParDefaut.every((x) => libre(x, voulu0)) ? equipeParDefaut : [c0];
+    else {
+      for (let delai = 15; delai <= 8 * 60; delai += 15) {
+        const v = nettoyageSouhaite(jobs, date, cal, duree, voulu0[0].d + delai);
+        if (!v) break;
+        const c = premierLibre(v);
+        if (c) { voulu = v; equipe = [c]; break; }
+      }
+    }
+  }
+
+  // Déjà en place (mêmes horaires, même travail, même équipe) : rien à faire.
+  const actuels = nets.map((r) => ({ d: mn(r.heure_debut), f: mn(r.heure_fin) })).sort((a, b) => a.d - b.d);
+  const memeEquipe = (r) => { const e = equipeDe(r); return e.length === equipe.length && e.every((x) => equipe.includes(x)); };
+  if (actuels.length === voulu.length && actuels.every((x, i) => x.d === voulu[i].d && x.f === voulu[i].f)
+    && nets.every((r) => r.gamme_operatoire_id === dernier.gamme_operatoire_id && memeEquipe(r))) return { supprimes: 0, crees: 0 };
   const nom = (nets[0] && nets[0].phase) || 'Nettoyage';
 
   if (nets.length) { const { error: dErr } = await supabase.from('planning_jour').delete().in('id', nets.map((r) => r.id)); if (dErr) throw dErr; }
@@ -175,19 +230,82 @@ async function lireCalendrier(supabase) {
   } catch (_) { return null; }
 }
 
+// La pause déjeuner (12h00-12h30) coupe toujours : une ligne planifiée à partir d'aujourd'hui qui l'enjambe (ancien planning) est scindée
+// en deux (avant / après la pause) SANS changer son heure de fin : le travail réel est le même, seule la pause apparaît.
+async function scinderALaPause(supabase, cal, aujourdhui) {
+  const pD = mn(cal.pause_debut), pF = pD + Number(cal.pause_minutes || 0);
+  if (!(pF > pD)) return { scindees: 0 };
+  const { data, error } = await supabase.from('planning_jour').select('*').gte('date', aujourdhui).neq('statut', 'annulé');
+  if (error) throw error;
+  const aScinder = (data || []).filter((r) => (r.statut || 'planifié') === 'planifié' && r.heure_debut && r.heure_fin && mn(r.heure_debut) < pF && mn(r.heure_fin) > pD);
+  let n = 0;
+  for (const r of aScinder) {
+    const d = mn(r.heure_debut), f = mn(r.heure_fin);
+    if (d >= pD && f <= pF) continue;                                   // entièrement dans la pause : on n'y touche pas
+    if (d < pD && f > pF) {                                             // à cheval : avant + après
+      const { id, created_at, updated_at, ...copie } = r;
+      const { data: liens, error: lErr } = await supabase.from('planning_jour_personnel').select('planning_jour_id, personnel_id').eq('planning_jour_id', id);
+      if (lErr) throw lErr;
+      const { data: nouv, error: iErr } = await supabase.from('planning_jour').insert([{ ...copie, heure_debut: hh(pF), heure_fin: hh(f) }]).select('id');
+      if (iErr) throw iErr;
+      if (nouv && nouv[0] && (liens || []).length) {
+        const { error: pErr } = await supabase.from('planning_jour_personnel').insert(liens.map((l) => ({ planning_jour_id: nouv[0].id, personnel_id: l.personnel_id })));
+        if (pErr) throw pErr;
+      }
+      const { error: uErr } = await supabase.from('planning_jour').update({ heure_fin: hh(pD) }).eq('id', id);
+      if (uErr) throw uErr;
+    } else if (d < pD) {                                                // finit dans la pause : on la raccourcit à 12h00
+      const { error: uErr } = await supabase.from('planning_jour').update({ heure_fin: hh(pD) }).eq('id', r.id); if (uErr) throw uErr;
+    } else {                                                            // commence dans la pause : on la décale à 12h30
+      const { error: uErr } = await supabase.from('planning_jour').update({ heure_debut: hh(pF) }).eq('id', r.id); if (uErr) throw uErr;
+    }
+    n++;
+  }
+  return { scindees: n };
+}
+
 async function recalerNettoyages(supabase, cibles, calIn) {
-  if (!cibles || !cibles.length) return { traites: 0 };
   const cal = calendrier(calIn || await lireCalendrier(supabase));
   const duree = PL.NETTOYAGE_MIN;
   const aujourdhui = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Paris' }).slice(0, 10);
+  try { await scinderALaPause(supabase, cal, aujourdhui); } catch (e) { console.warn('scission à la pause ignorée :', e.message); }
+  if (!cibles || !cibles.length) return { traites: 0 };
+  const cache = {};
+  const toutes = (cibles || []).filter((c) => c && c.machine_id && c.date && c.date >= aujourdhui);
   const vus = new Set(); let traites = 0;
-  for (const c of cibles || []) {
-    if (!c || !c.machine_id || !c.date || c.date < aujourdhui) continue;
+  for (const c of toutes) {
     const cle = `${c.machine_id}|${c.date}`; if (vus.has(cle)) continue; vus.add(cle);
-    try { await traiterMER(supabase, c.machine_id, c.date, cal); await traiterJour(supabase, c.machine_id, c.date, cal, duree); traites++; }
+    try { await traiterMER(supabase, c.machine_id, c.date, cal); await traiterJour(supabase, c.machine_id, c.date, cal, duree, cache); traites++; }
     catch (e) { console.warn('nettoyage ignoré pour', cle, ':', e.message); }
   }
+  // Revérification ciblée : un nettoyage (d'une autre machine) dont la personne vient d'être affectée ailleurs au même moment est reprévu.
+  try {
+    const dates = [...new Set(toutes.map((c) => c.date))];
+    for (let passe = 0; passe < 2; passe++) {
+      const aRefaire = new Set();
+      for (const date of dates) {
+        const { data: rows, error } = await supabase.from('planning_jour').select('id, machine_id, personnel_id, heure_debut, heure_fin, phase, statut').eq('date', date).neq('statut', 'annulé');
+        if (error) throw error;
+        const avecH = (rows || []).filter((r) => r.heure_debut && r.heure_fin);
+        const nets = avecH.filter((r) => r.machine_id && NET.test(r.phase || '') && (r.statut || 'planifié') === 'planifié');
+        if (!nets.length) continue;
+        const { data: liens, error: lErr } = await supabase.from('planning_jour_personnel').select('planning_jour_id, personnel_id').in('planning_jour_id', avecH.map((r) => r.id));
+        if (lErr) throw lErr;
+        const membres = (r) => new Set([...(r.personnel_id ? [r.personnel_id] : []), ...(liens || []).filter((l) => l.planning_jour_id === r.id).map((l) => l.personnel_id)]);
+        for (const n of nets) {
+          const mem = membres(n);
+          const conflit = avecH.some((o) => o.id !== n.id && mn(o.heure_debut) < mn(n.heure_fin) && mn(o.heure_fin) > mn(n.heure_debut) && [...membres(o)].some((p) => mem.has(p)));
+          if (conflit) aRefaire.add(`${n.machine_id}|${date}`);
+        }
+      }
+      if (!aRefaire.size) break;
+      for (const cle of aRefaire) {
+        const [m, d] = cle.split('|');
+        try { await traiterJour(supabase, m, d, cal, duree, cache); } catch (e) { console.warn('nettoyage ignoré pour', cle, ':', e.message); }
+      }
+    }
+  } catch (e) { console.warn('revérification des nettoyages ignorée :', e.message); }
   return { traites };
 }
 
-module.exports = { recalerNettoyages, nettoyageSouhaite, traiterJour, traiterMER, reculer };
+module.exports = { recalerNettoyages, nettoyageSouhaite, traiterJour, traiterMER, reculer, scinderALaPause, chargerStatique };
