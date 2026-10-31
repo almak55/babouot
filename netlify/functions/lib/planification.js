@@ -277,7 +277,7 @@ function simulerJournee(etape, machineId, curseur, ctx, charge, sync) {
   const j = etape.journee;
   const travail = etape.phases.filter((p) => !p.mer && p.type_phase !== 'nettoyage');
   const merLen = {};
-  const avec = (occ) => ({ calendrier: cal, occupation: { machines: { ...ctx.occupation.machines, [machineId]: occ }, personnes: ctx.occupation.personnes } });
+  const avec = (occ) => ({ calendrier: cal, occupation: { machines: { ...ctx.occupation.machines, [machineId]: occ }, personnes: ctx.occupation.personnes }, conducteurs: ctx.conducteurs });
   let r = null; let merPhases = [];
   for (let tour = 0; tour < 4; tour++) {
     r = simulerEtape({ ...etape, phases: travail }, machineId, curseur, avec(occupationJournee(reelle, curseur, cal, merLen, j.mer_min)), charge, sync);
@@ -289,7 +289,10 @@ function simulerJournee(etape, machineId, curseur, ctx, charge, sync) {
       if (jourTravaille(reelle.filter((iv) => iv.tag !== 'net'), jour)) continue;
       const fen = fenetresDuJour(jour, cal); if (!fen.length) continue;
       const ouverture = fen[0][0];
-      const rm = simulerEtape({ ...etape, phases: [j.mer] }, machineId, ouverture, avec(reelle.filter((iv) => iv.tag !== 'net')), charge, null);
+      // La mise en route est faite par le conducteur du jour : celui déjà prévu sur la machine, sinon celui du premier travail de ce jour.
+      const premier = r.phases.filter((p) => p.besoin_machine && p.personnes && p.personnes.length && debutDeJour(p.brutes[0].d) === jour).sort((a, b) => a.brutes[0].d - b.brutes[0].d)[0];
+      const cond = (((ctx.conducteurs || {})[machineId] || {})[jour]) || (premier ? premier.personnes[0] : null);
+      const rm = simulerEtape({ ...etape, phases: [j.mer], personnes_imposees: cond ? [cond] : etape.personnes_imposees }, machineId, ouverture, avec(reelle.filter((iv) => iv.tag !== 'net')), charge, null);
       if (!rm || !rm.phases.length) continue;
       const fin = rm.phases[0].brutes[rm.phases[0].brutes.length - 1].f;
       if (fin - ouverture > (merLen[jour] || j.mer_min)) { merLen[jour] = fin - ouverture; stable = false; }   // personnel pris à l'ouverture : on laisse la place
@@ -326,7 +329,7 @@ function simulerEtape(etape, machineId, curseur, ctx, charge, sync) {
     const duree = phase.repartissable && Number.isFinite(effectifPrevu)
       ? dureeAvecEffectif(phase.duree_min, phase.nb_personnes, effectifPrevu) : phase.duree_min;
     const ph = { ...phase, duree_min: duree, duree_standard_min: phase.duree_min };
-    let choisis;
+    let choisis; let notes = null;
     if (imposees) {
       choisis = imposees;
     } else {
@@ -335,7 +338,7 @@ function simulerEtape(etape, machineId, curseur, ctx, charge, sync) {
         choisis = [];
         problemes.push({ type: 'sans_personnel', bloquant: false, detail: `Aucune personne compétente trouvée pour « ${ph.nom} » : personnel à affecter.` });
       } else {
-        const notes = pool.map((id) => {
+        notes = pool.map((id) => {
           const t = consommer(ph.duree_min, c, [].concat(occMach, occPers(id)), cal);
           return { id, fin: t ? t[t.length - 1].f : Infinity, charge: charge.get(id) || 0 };
         });
@@ -345,6 +348,24 @@ function simulerEtape(etape, machineId, curseur, ctx, charge, sync) {
           problemes.push({ type: 'effectif_incomplet', bloquant: false, detail: `« ${ph.nom} » demande ${k} personnes, ${pool.length} compétente(s) seulement.` });
         }
       }
+    }
+    // UN SEUL CONDUCTEUR par machine et par jour : si un conducteur est déjà prévu sur cette machine le jour où la phase démarre,
+    // c'est lui qui la conduit (en tête de l'équipe) ; les aides restent choisies librement. S'il est occupé, la phase attend qu'il soit libre.
+    if (!imposees && notes && machineId && ph.besoin_machine && choisis.length) {
+      const k = Math.max(1, ph.nb_personnes || 1);
+      let courant = choisis;
+      for (let essai = 0; essai < 8; essai++) {
+        const t0 = consommer(ph.duree_min, c, [].concat(occMach, ...courant.map(occPers)), cal);
+        if (!t0) break;
+        const cond = (((ctx.conducteurs || {})[machineId] || {})[debutDeJour(t0[0].d)]);
+        if (!cond || courant[0] === cond) break;
+        if (!pool.includes(cond)) {
+          problemes.push({ type: 'conducteurs_differents', bloquant: false, detail: `« ${ph.nom} » : un autre conducteur est déjà prévu sur cette machine ce jour-là mais il n'est pas habilité pour cette opération — deux conducteurs différents.` });
+          break;
+        }
+        courant = [cond, ...notes.filter((n) => n.id !== cond).slice(0, Math.max(0, k - 1)).map((n) => n.id)];
+      }
+      choisis = courant;
     }
     // Personnes à présence limitée en heures (relayées ensuite par d'autres).
     const quotas = etape.heures_max || {};
@@ -464,7 +485,11 @@ function inscrire(res, ctx, charge) {
   res.phases.forEach((ph) => {
     ph.tranches.forEach((t) => {
       const iv = ph.mer ? { d: t.d, f: t.f, tag: 'mer' } : { d: t.d, f: t.f };
-      if (ph.besoin_machine && res.machine_id) (ctx.occupation.machines[res.machine_id] ??= []).push(iv);
+      if (ph.besoin_machine && res.machine_id) {
+        (ctx.occupation.machines[res.machine_id] ??= []).push(iv);
+        const ref = ph.personnes && ph.personnes[0];   // premier conducteur posé ce jour-là sur la machine : il conduira tout le reste de la journée
+        if (ref) { const reg = ((ctx.conducteurs ??= {})[res.machine_id] ??= {}); const J = debutDeJour(t.d); if (!reg[J]) reg[J] = ref; }
+      }
       if (!ph.presences) ph.personnes.forEach((p) => (ctx.occupation.personnes[p] ??= []).push(iv));
     });
     if (ph.presences) {
@@ -549,7 +574,7 @@ function predecesseursEnPositions(etapes) {
 //   etape.liens         : { [indice du prédécesseur]: { mode: 'progressif', seuil_pct } }
 //                         sinon le lien est « attendre la fin ».
 function planifierAvant(entree, debutMin) {
-  const ctx = { calendrier: entree.calendrier, occupation: cloner(entree.occupation) };
+  const ctx = { calendrier: entree.calendrier, occupation: cloner(entree.occupation), conducteurs: JSON.parse(JSON.stringify(entree.conducteurs || {})) };
   const charge = new Map();
   const resultats = new Map();   // index -> { debut, fin, duree, brutes } : point de départ des suivantes
   const etapes = [];
