@@ -9,6 +9,11 @@
 // pour les journées touchées. Le créneau est rattaché au dernier travail du jour ; l'équipe est celle de l'ancien nettoyage, sinon la
 // première personne du dernier travail. Seules les journées « en mode journée » (une mise en route posée par le planificateur) sont
 // concernées, et seuls les créneaux « planifié » à venir sont modifiés. Jamais bloquant : les appelants ignorent les erreurs.
+//
+// La MISE EN ROUTE suit le même principe : elle se place juste AVANT le premier travail de la journée sur la machine (à 8h00 quand
+// la machine travaille dès l'ouverture) et elle est rattachée à ce premier travail. Une machine dont le premier travail du jour
+// commence à 12h25 n'est donc pas « mise en route » à 8h00. Si l'équipe de la mise en route n'est pas libre à ce nouvel horaire,
+// elle reste où elle est.
 
 const PL = require('./planification');
 const { decouper } = require('./decoupe');
@@ -38,6 +43,73 @@ function nettoyageSouhaite(jobs, date, cal, duree) {
   const morceaux = decouper(date, [{ nom: 'Nettoyage', duree_h: duree / 60 }], cal, debut);
   if (!morceaux.length || morceaux.some((m) => m.date !== date)) return null;
   return morceaux.map((m) => ({ d: mn(m.heure_debut), f: mn(m.heure_fin), m }));
+}
+
+// Recule de `d` minutes de travail depuis `fin` en sautant la pause ; retourne le début du créneau (en minutes).
+function reculer(fin, d, cal) {
+  const pD = mn(cal.pause_debut), pF = pD + Number(cal.pause_minutes || 0);
+  let t = fin, reste = d;
+  if (pF > pD) {
+    if (t > pD && t <= pF) t = pD;                       // la fin tombe dans la pause : la mise en route finit avant la pause
+    else if (t > pF) { const dispo = t - pF; if (reste <= dispo) return t - reste; reste -= dispo; t = pD; }
+  }
+  return t - reste;
+}
+
+// Place la mise en route de la journée juste avant le premier travail de la machine et la rattache à ce travail.
+async function traiterMER(supabase, machineId, date, cal) {
+  const { data: rows, error } = await supabase.from('planning_jour').select('*').eq('machine_id', machineId).eq('date', date).neq('statut', 'annulé');
+  if (error) throw error;
+  const toutes = rows || [];
+  const modifiables = (r) => (r.statut || 'planifié') === 'planifié';
+  const mers = toutes.filter((r) => MER.test(r.phase || ''));
+  if (!mers.length) return { deplace: 0 };
+  const travail = toutes.filter((r) => !MER.test(r.phase || '') && !NET.test(r.phase || ''));
+  if (!mers.every(modifiables)) return { deplace: 0 };
+  if (!travail.length) {                                   // une mise en route sans aucun travail ce jour-là n'a pas lieu d'être
+    const { error: e } = await supabase.from('planning_jour').delete().in('id', mers.map((r) => r.id)); if (e) throw e;
+    return { deplace: 0, supprimes: mers.length };
+  }
+  const avecHeures = travail.filter((r) => r.heure_debut && r.heure_fin);
+  if (!avecHeures.length || mers.length !== 1) return { deplace: 0 };   // travail sans heures, ou mise en route déjà scindée : inchangé
+  const mer = mers[0];
+  if (!mer.heure_debut || !mer.heure_fin) return { deplace: 0 };
+  const premier = avecHeures.slice().sort((a, b) => mn(a.heure_debut) - mn(b.heure_debut) || mn(a.heure_fin) - mn(b.heure_fin))[0];
+  const s = mn(premier.heure_debut);
+  const d = mn(mer.heure_fin) - mn(mer.heure_debut);
+  if (d <= 0) return { deplace: 0 };
+  const memeJob = (r) => r.gamme_operatoire_id === premier.gamme_operatoire_id && r.of_id === premier.of_id;
+  let ndeb = mn(mer.heure_debut), nfin = mn(mer.heure_fin);
+  const voulDeb = reculer(s, d, cal);
+  const voulFin = (() => { const pD = mn(cal.pause_debut), pF = pD + Number(cal.pause_minutes || 0); return (s > pD && s <= pF && pF > pD) ? pD : s; })();
+  if (voulDeb >= mn(cal.heure_debut) && (voulDeb !== ndeb || voulFin !== nfin)) {
+    // Aucun autre créneau de la machine ne doit gêner, et l'équipe de la mise en route doit être libre à ce nouvel horaire.
+    const gene = toutes.some((r) => r.id !== mer.id && r.heure_debut && r.heure_fin && mn(r.heure_debut) < voulFin && mn(r.heure_fin) > voulDeb);
+    let libre = !gene;
+    if (libre) {
+      const { data: jour, error: jErr } = await supabase.from('planning_jour').select('id, personnel_id, heure_debut, heure_fin, statut').eq('date', date).neq('statut', 'annulé');
+      if (jErr) throw jErr;
+      const autres = (jour || []).filter((r) => r.id !== mer.id);
+      const { data: liens, error: lErr } = autres.length ? await supabase.from('planning_jour_personnel').select('planning_jour_id, personnel_id').in('planning_jour_id', [mer.id, ...autres.map((r) => r.id)]) : { data: [], error: null };
+      if (lErr) throw lErr;
+      const equipe = new Set([...(mer.personnel_id ? [mer.personnel_id] : []), ...(liens || []).filter((l) => l.planning_jour_id === mer.id).map((l) => l.personnel_id)]);
+      const prises = autres.filter((r) => {
+        const membres = new Set([...(r.personnel_id ? [r.personnel_id] : []), ...(liens || []).filter((l) => l.planning_jour_id === r.id).map((l) => l.personnel_id)]);
+        if (![...membres].some((m) => equipe.has(m))) return false;
+        return !r.heure_debut || !r.heure_fin || (mn(r.heure_debut) < voulFin && mn(r.heure_fin) > voulDeb);
+      });
+      libre = prises.length === 0;
+    }
+    if (libre) { ndeb = voulDeb; nfin = voulFin; }
+  }
+  const change = ndeb !== mn(mer.heure_debut) || nfin !== mn(mer.heure_fin);
+  const rattache = memeJob(mer);
+  if (!change && rattache) return { deplace: 0 };
+  const maj = { heure_debut: hh(ndeb), heure_fin: hh(nfin) };
+  if (!rattache) Object.assign(maj, { of_id: premier.of_id, gamme_operatoire_id: premier.gamme_operatoire_id, operation_id: premier.operation_id, couleur_code: premier.couleur_code || null });
+  const { error: uErr } = await supabase.from('planning_jour').update(maj).eq('id', mer.id);
+  if (uErr) throw uErr;
+  return { deplace: change ? 1 : 0, rattache: !rattache };
 }
 
 async function traiterJour(supabase, machineId, date, cal, duree) {
@@ -105,10 +177,10 @@ async function recalerNettoyages(supabase, cibles, calIn) {
   for (const c of cibles || []) {
     if (!c || !c.machine_id || !c.date || c.date < aujourdhui) continue;
     const cle = `${c.machine_id}|${c.date}`; if (vus.has(cle)) continue; vus.add(cle);
-    try { await traiterJour(supabase, c.machine_id, c.date, cal, duree); traites++; }
+    try { await traiterMER(supabase, c.machine_id, c.date, cal); await traiterJour(supabase, c.machine_id, c.date, cal, duree); traites++; }
     catch (e) { console.warn('nettoyage ignoré pour', cle, ':', e.message); }
   }
   return { traites };
 }
 
-module.exports = { recalerNettoyages, nettoyageSouhaite, traiterJour };
+module.exports = { recalerNettoyages, nettoyageSouhaite, traiterJour, traiterMER, reculer };
