@@ -155,12 +155,14 @@ async function calculerEtapes(supabase, ofId) {
         // Cadence sur une autre unité que l'exemplaire (cahiers cousus/pliés, coupes au massicot…) :
         // la quantité de travail se calcule d'après la fiche (ex. quantite * nb_cahiers).
         const unite = p.unite_cadence || 'unités';
-        if (!uniteQte) uniteQte = { unite, formule: String(p.quantite_formule).trim(), valeur: null };
         const a = analyser(p.quantite_formule);
         if (!a.ok) {
           erreursFormule.push({ phase: p.nom, message: `quantité à traiter : ${a.erreur}` });
           detail = `formule invalide : ${a.erreur}`;
         } else {
+          // L'affichage « en cahiers » n'a de sens que si la quantité dépend des exemplaires (quantite * nb_cahiers) ;
+          // une formule sans « quantite » (massicot : feuilles × coupes) ne se convertit pas en exemplaires.
+          if (!uniteQte && a.variables.includes('quantite')) uniteQte = { unite, formule: String(p.quantite_formule).trim(), valeur: null };
           const valeurs = {};
           a.variables.forEach((v) => {
             const info = v === 'quantite' ? { libelle: 'Quantité (exemplaires)', type: 'nombre', unite: null } : (parCle[v] || { libelle: v, type: 'nombre', unite: null });
