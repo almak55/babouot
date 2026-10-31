@@ -8,7 +8,10 @@
 //   'preparer'  { mode? }                 libère les créneaux à venir des étapes non commencées (avec sauvegarde)
 //                                          mode 'actualiser' (« Recalculer tous les OF ») : mêmes OF, mais l'ordre actuel du planning est
 //                                          conservé (au lieu du classement par priorité) et les OF jamais lancés ne sont pas touchés
-//                                          -> { session_id, ordre: [ { of_id, numero, titre, delai, groupe, ... } ] }
+//                                          depuis_date 'AAAA-MM-JJ' (« Replanifier à partir d'une date », avec mode 'actualiser') : libère tout ce qui est planifié
+//                                          à partir de ce jour, même déjà passé (les étapes qui commencent avant restent ; celles dont la production
+//                                          est saisie ne sont jamais libérées) ; inclure_en_cours libère aussi les étapes « en cours »
+//                                          -> { session_id, ordre: [ { of_id, numero, titre, delai, groupe, ... } ], proteges, depuis }
 //   'planifier' { session_id, of_id, refaire_liens? }  replanifie un OF (refaire_liens : refait d'abord ses dépendances d'après le modèle) (au plus tôt, horaires normaux), dans l'ordre fourni
 //                                          -> { fin, delai, respecte_delai, retard_min, heures_sup, renforts, bloquants }
 //   'valider'   { session_id }            garde la nouvelle organisation
@@ -74,9 +77,24 @@ const handlerProtege = async (event) => {
         : { data: [] };
 
       const debute = (c) => c.date < aujourdhui || (c.date === aujourdhui && String(c.heure_debut || '00:00').slice(0, 5) < heure);
-      // Étapes à libérer : « planifié », dont aucun créneau n'a commencé.
-      const liberables = gammes.filter((g) => g.statut === 'planifié'
-        && !creneaux.some((c) => c.gamme_operatoire_id === g.id && debute(c)));
+      // « Replanifier à partir d'une date » (depuis_date) : tout ce qui est planifié à partir de ce jour est libéré, même si le jour
+      // est déjà passé ; ce qui commence avant reste en place. inclure_en_cours : libère aussi les étapes « en cours ».
+      // Une étape dont la production a été saisie (production_jour) n'est jamais libérée : c'est de l'historique réel.
+      const depuis = /^\d{4}-\d{2}-\d{2}$/.test(String(b.depuis_date || '')) ? String(b.depuis_date) : null;
+      const verrouille = (c) => (depuis ? c.date < depuis : debute(c));
+      let avecProduction = new Set();
+      if (depuis && gammes.length) {
+        try {
+          const { data: prods, error: eP } = await supabase.from('production_jour').select('gamme_operatoire_id').in('gamme_operatoire_id', gammes.map((g) => g.id));
+          if (!eP) avecProduction = new Set((prods || []).map((x) => x.gamme_operatoire_id));
+        } catch (_) { /* table facultative */ }
+      }
+      const statutsLiberables = depuis && b.inclure_en_cours ? ['planifié', 'en cours'] : ['planifié'];
+      // Étapes à libérer : « planifié » (ou « en cours » sur demande), dont aucun créneau n'est verrouillé.
+      const candidates = gammes.filter((g) => statutsLiberables.includes(g.statut)
+        && !creneaux.some((c) => c.gamme_operatoire_id === g.id && verrouille(c)));
+      const proteges = candidates.filter((g) => avecProduction.has(g.id)).length;
+      const liberables = candidates.filter((g) => !avecProduction.has(g.id));
       const idsLib = new Set(liberables.map((g) => g.id));
       const aSupprimer = creneaux.filter((c) => idsLib.has(c.gamme_operatoire_id));
       const actualiser = b.mode === 'actualiser';
@@ -119,7 +137,7 @@ const handlerProtege = async (event) => {
         groupe: estPrioritaire(o) ? 'prioritaire' : 'standard', type_production: o.type_production, priorite: o.priorite,
         etapes: gammes.filter((g) => g.of_id === o.id && (g.statut === 'à planifier' || idsLib.has(g.id))).length,
       }));
-      return rep(200, { session_id: sauv.session_id, ordre });
+      return rep(200, { session_id: sauv.session_id, ordre, proteges, depuis });
     }
 
     if (b.action === 'planifier') {
