@@ -6878,7 +6878,19 @@
         const lues = [];
         resultats.filter(r => r.ok).forEach(r => r.fiches.forEach(f => {
           if (f.fiche === false) return;
-          if (f.suite && lues.length) { const p = lues[lues.length - 1]; p.operation_codes = [...new Set([...p.operation_codes, ...f.operation_codes])]; p.notes = [p.notes, f.notes].filter(Boolean).join(' '); return; }
+          if (f.suite && lues.length) {
+            const p = lues[lues.length - 1]; p.operation_codes = [...new Set([...p.operation_codes, ...f.operation_codes])]; p.notes = [p.notes, f.notes].filter(Boolean).join(' ');
+            // Fiche sur plusieurs pages : l'emboîtage par défaut se décide sur l'ensemble (tranchefile/signet sur une page, finitions sur l'autre).
+            const sg = p.signes_emboitage || {}, sf = f.signes_emboitage || {};
+            const ts = !!(sg.ts || sf.ts), fin = !!(sg.fin || sf.fin), emb = !!(sg.emb || sf.emb);
+            p.signes_emboitage = { ts, fin, emb };
+            const ce = p.emboitage_code || f.emboitage_code;
+            if (ts && fin && !emb && ce && !p.operation_codes.includes(ce) && p.type_production !== 'pleiade' && p.type_production !== 'coffret') {
+              p.operation_codes.push(ce); p.signes_emboitage.emb = true;
+              p.notes = [p.notes, 'Emboîtage ajouté automatiquement (tranchefile / signet et opérations de finition sur la fiche).'].filter(Boolean).join(' ');
+            }
+            return;
+          }
           lues.push({ ...f, creer: true });
         }));
         fiches = classerFiches(lues, aujourdhui);
