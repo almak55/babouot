@@ -136,7 +136,7 @@ async function remplacer(supabase, l, ancienId, nouveauId, portee) {
 
 async function calendrierNormal(supabase) {
   const { data } = await supabase.from('calendrier_travail').select('*').eq('code', 'normal').maybeSingle();
-  return data ? { debut: hm(data.heure_debut), fin: hm(data.heure_fin), pause: hm(data.pause_debut), pauseFin: hm(data.pause_debut) + Number(data.pause_minutes) }
+  return data ? { debut: hm(data.heure_debut), fin: hm(data.heure_fin), pause: 720, pauseFin: 750 }   // pause toujours 12h00-12h30 (lib/horaires.js)
     : { debut: 480, fin: 990, pause: 720, pauseFin: 750 };
 }
 
