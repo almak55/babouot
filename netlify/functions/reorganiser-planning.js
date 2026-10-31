@@ -5,9 +5,11 @@
 // Ce qui est déjà commencé (étape en cours, ou dont un créneau a déjà débuté) est terminé tel quel.
 //
 // POST { action, ... } — le travail est découpé en appels courts (limite Netlify de 10 s) :
-//   'preparer'  { }                       libère les créneaux à venir des étapes non commencées (avec sauvegarde)
+//   'preparer'  { mode? }                 libère les créneaux à venir des étapes non commencées (avec sauvegarde)
+//                                          mode 'actualiser' (« Recalculer tous les OF ») : mêmes OF, mais l'ordre actuel du planning est
+//                                          conservé (au lieu du classement par priorité) et les OF jamais lancés ne sont pas touchés
 //                                          -> { session_id, ordre: [ { of_id, numero, titre, delai, groupe, ... } ] }
-//   'planifier' { session_id, of_id }     replanifie un OF (au plus tôt, horaires normaux), dans l'ordre fourni
+//   'planifier' { session_id, of_id, refaire_liens? }  replanifie un OF (refaire_liens : refait d'abord ses dépendances d'après le modèle) (au plus tôt, horaires normaux), dans l'ordre fourni
 //                                          -> { fin, delai, respecte_delai, retard_min, heures_sup, renforts, bloquants }
 //   'valider'   { session_id }            garde la nouvelle organisation
 //   'annuler'   { session_id }            remet le planning exactement comme avant 'preparer'
@@ -77,6 +79,10 @@ const handlerProtege = async (event) => {
         && !creneaux.some((c) => c.gamme_operatoire_id === g.id && debute(c)));
       const idsLib = new Set(liberables.map((g) => g.id));
       const aSupprimer = creneaux.filter((c) => idsLib.has(c.gamme_operatoire_id));
+      const actualiser = b.mode === 'actualiser';
+      // Début actuel du planning à venir de chaque OF (sert à garder l'ordre en mode « actualiser »).
+      const debutActuel = new Map();
+      aSupprimer.forEach((c) => { const t = `${c.date}T${String(c.heure_debut || '00:00').slice(0, 5)}`; if (!debutActuel.has(c.of_id) || t < debutActuel.get(c.of_id)) debutActuel.set(c.of_id, t); });
 
       const payload = {
         gammes: liberables.map((g) => ({ id: g.id, statut: g.statut, machine_id: g.machine_id })),
@@ -99,9 +105,13 @@ const handlerProtege = async (event) => {
       // Un OF jamais planifié n'est repris que s'il est prioritaire (nouvelle commande Pléiade / urgente).
       const dejaLance = (ofId) => gammes.some((g) => g.of_id === ofId && ['planifié', 'en cours', 'terminé'].includes(g.statut));
       const aPlanifier = new Set(gammes.filter((g) => g.statut === 'à planifier' || idsLib.has(g.id))
-        .filter((g) => idsLib.has(g.id) || dejaLance(g.of_id) || estPrioritaire(ofs.find((o) => o.id === g.of_id)))
+        .filter((g) => idsLib.has(g.id) || dejaLance(g.of_id) || (!actualiser && estPrioritaire(ofs.find((o) => o.id === g.of_id))))
         .map((g) => g.of_id));
-      const ordre = trier(ofs.filter((o) => aPlanifier.has(o.id))).map((o) => ({
+      const aReplanifier = ofs.filter((o) => aPlanifier.has(o.id));
+      const classes = actualiser
+        ? aReplanifier.slice().sort((a, c) => { const x = debutActuel.get(a.id) || '9999', y = debutActuel.get(c.id) || '9999'; if (x !== y) return x < y ? -1 : 1; return trier([a, c])[0] === a ? -1 : 1; })
+        : trier(aReplanifier);
+      const ordre = classes.map((o) => ({
         of_id: o.id, numero: o.numero, titre: o.titres ? o.titres.nom : '', delai: o.delai, quantite: o.quantite,
         groupe: estPrioritaire(o) ? 'prioritaire' : 'standard', type_production: o.type_production, priorite: o.priorite,
         etapes: gammes.filter((g) => g.of_id === o.id && (g.statut === 'à planifier' || idsLib.has(g.id))).length,
@@ -111,6 +121,7 @@ const handlerProtege = async (event) => {
 
     if (b.action === 'planifier') {
       if (!b.of_id) return rep(400, { error: 'of_id requis.' });
+      if (b.refaire_liens) { try { await require('./lib/ordre-gamme').normaliserGamme(supabase, b.of_id, { tout: true }); } catch (_) { /* les liens actuels sont conservés */ } }
       const res = await planifierOf.handler({ httpMethod: 'POST', body: JSON.stringify({ of_id: b.of_id, mode: 'avant', appliquer: true, maintenant }) });
       const d = JSON.parse(res.body);
       if (res.statusCode === 409) return rep(200, { ok: false, bloquants: d.bloquants || [], erreur: d.error });
