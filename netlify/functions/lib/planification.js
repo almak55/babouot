@@ -271,6 +271,23 @@ function occupationJournee(reelle, curseur, cal, merLen, merMin) {
   return base.concat(res);
 }
 
+// Un travail SANS mise en route propre (ex. étape à durée manuelle) posé sur une machine « en journée » s'arrête lui aussi à
+// (fermeture − durée de nettoyage) : la fin de journée est réservée au nettoyage de la machine (il reprend le lendemain).
+function occupationAvecNettoyage(reelle, curseur, cal) {
+  const base = reelle.filter((iv) => iv.tag !== 'net');
+  const res = [];
+  const debut = debutDeJour(curseur);
+  for (let k = 0; k < JOURS_RESERVES; k++) {
+    const jour = debut + k * MIN_JOUR;
+    if (!estOuvre(jour, cal)) continue;
+    const fen = fenetresDuJour(jour, cal);
+    if (!fen.length) continue;
+    const ouverture = fen[0][0]; const fermeture = fen[fen.length - 1][1];
+    res.push({ d: Math.max(ouverture, fermeture - NETTOYAGE_MIN), f: fermeture, tag: 'virt' });
+  }
+  return base.concat(res);
+}
+
 function simulerJournee(etape, machineId, curseur, ctx, charge, sync) {
   const cal = ctx.calendrier;
   const reelle = ctx.occupation.machines[machineId] || [];
@@ -290,7 +307,9 @@ function simulerJournee(etape, machineId, curseur, ctx, charge, sync) {
       const fen = fenetresDuJour(jour, cal); if (!fen.length) continue;
       const ouverture = fen[0][0];
       // La mise en route est faite par le conducteur du jour : celui déjà prévu sur la machine, sinon celui du premier travail de ce jour.
-      const premier = r.phases.filter((p) => p.besoin_machine && p.personnes && p.personnes.length && debutDeJour(p.brutes[0].d) === jour).sort((a, b) => a.brutes[0].d - b.brutes[0].d)[0];
+      // (une phase qui continue d'un jour sur l'autre garde son conducteur : on regarde les tranches du jour, pas seulement le début de la phase)
+      const duJour = (p) => p.brutes.filter((t) => debutDeJour(t.d) === jour);
+      const premier = r.phases.filter((p) => p.besoin_machine && p.personnes && p.personnes.length && duJour(p).length).sort((a, b) => duJour(a)[0].d - duJour(b)[0].d)[0];
       const cond = (((ctx.conducteurs || {})[machineId] || {})[jour]) || (premier ? premier.personnes[0] : null);
       const rm = simulerEtape({ ...etape, phases: [j.mer], personnes_imposees: cond ? [cond] : etape.personnes_imposees }, machineId, ouverture, avec(reelle.filter((iv) => iv.tag !== 'net')), charge, null);
       if (!rm || !rm.phases.length) continue;
@@ -461,6 +480,9 @@ function planifierEtape(etape, curseur, ctx, charge, sync) {
         const suite = Math.min(...gene.map((iv) => iv.f));
         cur = Math.max(cur + 1, suite);
       }
+    } else if (m && ctx.machinesJournee && ctx.machinesJournee.has(m)) {
+      const occ = occupationAvecNettoyage(ctx.occupation.machines[m] || [], curseur, ctx.calendrier);
+      essai = simulerEtape(etape, m, curseur, { ...ctx, occupation: { machines: { ...ctx.occupation.machines, [m]: occ }, personnes: ctx.occupation.personnes } }, charge, sync);
     } else essai = simulerEtape(etape, m, curseur, ctx, charge, sync);
     if (essai && (!meilleur || essai.fin_min < meilleur.fin_min)) meilleur = essai;
   }
@@ -575,6 +597,10 @@ function predecesseursEnPositions(etapes) {
 //                         sinon le lien est « attendre la fin ».
 function planifierAvant(entree, debutMin) {
   const ctx = { calendrier: entree.calendrier, occupation: cloner(entree.occupation), conducteurs: JSON.parse(JSON.stringify(entree.conducteurs || {})) };
+  // Machines « en journée » : celles où passe un travail avec mise en route (cet OF ou d'autres déjà planifiés).
+  ctx.machinesJournee = new Set();
+  (entree.etapes || []).forEach((e) => { if (e.journee) (e.machine_imposee ? [e.machine_imposee] : (e.machines_candidates || [])).forEach((m) => ctx.machinesJournee.add(m)); });
+  Object.entries(entree.occupation.machines || {}).forEach(([m, ivs]) => { if (ivs.some((iv) => iv.tag === 'mer')) ctx.machinesJournee.add(m); });
   const charge = new Map();
   const resultats = new Map();   // index -> { debut, fin, duree, brutes } : point de départ des suivantes
   const etapes = [];

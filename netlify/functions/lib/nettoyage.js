@@ -39,7 +39,11 @@ function nettoyageSouhaite(jobs, date, cal, duree) {
   const fins = jobs.filter((r) => r.heure_fin).map((r) => mn(r.heure_fin));
   if (!fins.length) return null;
   const limite = mn(cal.heure_fin) - duree;
-  const debut = Math.min(Math.max(...fins), Math.max(limite, mn(cal.heure_debut)));
+  let debut = Math.min(Math.max(...fins), Math.max(limite, mn(cal.heure_debut)));
+  // Un travail (ex. étape à durée manuelle d'un ancien planning) déborde sur la plage de nettoyage : on ne chevauche jamais,
+  // le nettoyage suit alors le dernier travail s'il reste de la place avant la fermeture, sinon il n'est pas posé ce jour-là.
+  const chevauche = (d) => jobs.some((r) => r.heure_debut && r.heure_fin && mn(r.heure_debut) < d + duree && mn(r.heure_fin) > d);
+  if (chevauche(debut)) { debut = Math.max(...fins); if (debut + duree > mn(cal.heure_fin)) return null; }
   const morceaux = decouper(date, [{ nom: 'Nettoyage', duree_h: duree / 60 }], cal, debut);
   if (!morceaux.length || morceaux.some((m) => m.date !== date)) return null;
   return morceaux.map((m) => ({ d: mn(m.heure_debut), f: mn(m.heure_fin), m }));
