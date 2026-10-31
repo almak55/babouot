@@ -20,6 +20,7 @@
 // Valeur d'une caractéristique : celle de l'étape si elle en a une, sinon celle de l'OF.
 // Une durée manuelle sur l'étape remplace le total calculé.
 
+const { imposerPause } = require('./horaires');
 const { analyser, evaluer } = require('./formules');
 const EL = require('./en-ligne');
 const DL = require('./delais');
@@ -263,7 +264,7 @@ async function calculerEtapes(supabase, ofId) {
   const delais = DL.delaisMinimaux(modeleDelais, reglesEL, etapes);
   etapes.forEach((e) => { e.delais_min = delais[e.sequence] || {}; });
 
-  const calendrier = calRes.data.map((c) => {
+  const calendrier = calRes.data.map(imposerPause).map((c) => {
     const utiles = heures(c.heure_fin) - heures(c.heure_debut) - c.pause_minutes / 60;
     return {
       code: c.code, libelle: c.libelle,

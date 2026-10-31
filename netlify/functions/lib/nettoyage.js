@@ -15,6 +15,7 @@
 // commence à 12h25 n'est donc pas « mise en route » à 8h00. Si l'équipe de la mise en route n'est pas libre à ce nouvel horaire,
 // elle reste où elle est.
 
+const { imposerPause } = require('./horaires');
 const PL = require('./planification');
 const { decouper } = require('./decoupe');
 
@@ -168,7 +169,7 @@ async function lireCalendrier(supabase) {
   try {
     const { data, error } = await supabase.from('calendrier_travail').select('*');
     const n = !error && (data || []).find((c) => c.code === 'normal');
-    return n ? { heure_debut: n.heure_debut, heure_fin: n.heure_fin, pause_debut: n.pause_debut, pause_minutes: n.pause_minutes } : null;
+    return n ? { heure_debut: n.heure_debut, heure_fin: n.heure_fin, ...imposerPause({}) } : null;
   } catch (_) { return null; }
 }
 

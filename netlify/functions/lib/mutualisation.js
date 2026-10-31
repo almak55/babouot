@@ -9,6 +9,7 @@
 // ou supprimé, la phase est rétablie au bon endroit. Le calcul est idempotent : le relancer ne change rien tant que le planning ne bouge pas.
 // Jamais bloquant : toute erreur est ignorée par les appelants (le planning reste tel quel).
 
+const { imposerPause } = require('./horaires');
 const PL = require('./planification');
 const { decouper } = require('./decoupe');
 
@@ -23,7 +24,7 @@ const CAL_DEFAUT = { heure_debut: '08:00', heure_fin: '16:30', pause_debut: '12:
 async function lireCalendrier(supabase) {
   const { data, error } = await supabase.from('calendrier_travail').select('*');
   const n = !error && (data || []).find((c) => c.code === 'normal');
-  return n ? { heure_debut: String(n.heure_debut).slice(0, 5), heure_fin: String(n.heure_fin).slice(0, 5), pause_debut: String(n.pause_debut).slice(0, 5), pause_minutes: Number(n.pause_minutes) } : CAL_DEFAUT;
+  return n ? { heure_debut: String(n.heure_debut).slice(0, 5), heure_fin: String(n.heure_fin).slice(0, 5), ...imposerPause({}) } : CAL_DEFAUT;
 }
 // Minutes de travail entre a et b (même jour), pause déduite.
 function travailEntre(a, b, cal) {
