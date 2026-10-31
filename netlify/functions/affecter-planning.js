@@ -9,6 +9,7 @@
 //   personnel_ids: ["uuid", ...]   // une ou plusieurs personnes (optionnel)
 //   personnel_id: "uuid"           // ancien format, toujours accepté
 //   heure_debut?: "HH:MM"          // démarrer le 1er jour à cette heure (étape chiffrée)
+//   forcer_conducteur?: true       // accepter un 2e conducteur différent sur la machine ce jour-là
 // }
 //
 // Affecte une étape de gamme opératoire à une machine, à UNE ou
@@ -169,6 +170,29 @@ const handlerProtege = async (event) => {
         statusCode: 409,
         body: JSON.stringify({ error: 'Cette machine est déjà affectée sur ce créneau horaire.', conflit: 'machine' }),
       };
+    }
+
+    // UN SEUL CONDUCTEUR par machine et par jour : celui déjà prévu ce jour-là sur la machine conduit aussi ce travail.
+    //   - aucune personne choisie : il est sélectionné automatiquement ;
+    //   - il fait partie de la sélection : il passe en tête (référent) ;
+    //   - un autre conducteur est choisi : refus 409 (conflit « conducteur »), sauf `forcer_conducteur`.
+    if (machineId) {
+      const jour1 = morceaux[0].date;
+      const { data: prisesJour, error: cdErr } = await supabase.from('planning_jour')
+        .select('id, date, heure_debut, phase, personnel_id, machine_id, statut, planning_jour_personnel(personnel_id)')
+        .eq('machine_id', machineId).eq('date', jour1).neq('statut', 'annulé').neq('gamme_operatoire_id', gamme.id);
+      if (cdErr) throw cdErr;
+      const cd = require('./lib/conducteur').conducteursDuJour(prisesJour || [], []).get(`${machineId}|${jour1}`);
+      if (cd) {
+        const X = cd.personnel_id;
+        if (personnelIds.length === 0) personnelIds.push(X);
+        else if (personnelIds.includes(X)) { personnelIds.splice(personnelIds.indexOf(X), 1); personnelIds.unshift(X); }
+        else if (!body.forcer_conducteur) {
+          const { data: px } = await supabase.from('personnel').select('nom').eq('id', X).maybeSingle();
+          const nomX = px && px.nom ? px.nom : 'Un autre conducteur';
+          return { statusCode: 409, body: JSON.stringify({ error: `${nomX} est déjà le conducteur de cette machine le ${jour1.split('-').reverse().slice(0, 2).join('/')} : une machine n'a pas deux conducteurs différents le même jour.`, conflit: 'conducteur', conducteur_id: X, conducteur_nom: nomX }) };
+        }
+      }
     }
 
     if (personnelIds.length > 0) {

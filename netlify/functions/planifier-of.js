@@ -162,7 +162,14 @@ const handlerProtege = async (event) => {
       if (l.machine_id) ajouter('machines', l.machine_id, iv);
       const personnes = new Set((l.planning_jour_personnel || []).map((x) => x.personnel_id));
       if (l.personnel_id) personnes.add(l.personnel_id);
+      // Un nettoyage « planifié » est recalculé après chaque planification (fin de journée, voir lib/nettoyage.js) : il ne retient pas son équipe.
+      if (iv.tag === 'net' && (l.statut || 'planifié') === 'planifié') return;
       personnes.forEach((p) => ajouter('personnes', p, iv));
+    });
+    // Conducteur de chaque machine et de chaque jour (un seul par jour) d'après ce qui est déjà planifié et ne bouge pas.
+    const conducteurs = {};
+    require('./lib/conducteur').conducteursDuJour(planRes.data.filter((l) => !idsARemplacer.has(l.id)), []).forEach((v, cle) => {
+      const [mId, jour] = cle.split('|'); (conducteurs[mId] ??= {})[enMinutes(jour, '00:00')] = v.personnel_id;
     });
     maintRes.data.filter((m) => m.bloquant !== false).forEach((m) => {   // marche dégradée (bloquant = false) : la machine reste utilisable
       const hm = (t) => (t ? String(t).slice(0, 5) : null);
@@ -268,7 +275,7 @@ const handlerProtege = async (event) => {
     });
 
     const lancer = (calendrier) => {
-      const entree = { calendrier, occupation, etapes: etapesMoteur };
+      const entree = { calendrier, occupation, conducteurs, etapes: etapesMoteur };
       return mode === 'avant' ? PL.planifierAvant(entree, debutMin) : PL.planifierArriere(entree, delaiMin, maintenantMin);
     };
     const plan = lancer(cal);

@@ -16,12 +16,14 @@
 //    }
 //
 // Règles :
-//  • conducteur : d'abord le titulaire (rang 1), puis les suppléants, s'ils sont libres sur les créneaux ;
+//  • conducteur : celui déjà prévu ce jour-là sur la machine (un seul conducteur par machine et par jour), sinon le titulaire (rang 1),
+//    puis les suppléants, s'ils sont libres sur les créneaux ;
 //  • OF prioritaire : un conducteur occupé sur une tâche NON prioritaire est proposé « dès la fin de sa tâche » (sans rien déplacer) ;
 //  • aides : personnes libres qui ne sont conductrices d'aucune machine, compétentes pour l'opération d'abord, puis les moins chargées ;
 //    à défaut, des conducteurs d'autres machines sont proposés en dernier recours (signalé).
 
 const { getSupabase } = require('./lib/supabaseclient');
+const INT = require('./lib/interventions');
 const PL = require('./lib/planification');
 const { calculerEtapes } = require('./lib/durees');
 const { decouper } = require('./lib/decoupe');
@@ -95,8 +97,8 @@ const handlerProtege = async (event) => {
     for (const r of [persRes, pmRes, compRes, absRes, lignesRes]) if (r.error) throw r.error;
     let maintenances = [];
     if (machineId) {
-      const { data: mt, error: eMt } = await supabase.from('maintenance_machine').select('date_debut, date_fin, statut').eq('machine_id', machineId).neq('statut', 'terminé');
-      if (!eMt) maintenances = mt || [];   // table facultative
+      const { data: mt, error: eMt } = await supabase.from('maintenance_machine').select('*').eq('machine_id', machineId).neq('statut', 'terminé');
+      if (!eMt) maintenances = (mt || []).filter((x) => x.bloquant !== false);   // table facultative
     }
     const ids = lignesRes.data.map((l) => l.id);
     const [liensRes, ofsRes] = await Promise.all([
@@ -116,6 +118,13 @@ const handlerProtege = async (event) => {
     const equipeDe = (l) => new Set([l.personnel_id, ...liensRes.data.filter((x) => x.planning_jour_id === l.id).map((x) => x.personnel_id)].filter(Boolean));
     const lignes = lignesRes.data.filter((l) => l.gamme_operatoire_id !== gamme.id);
 
+    // Conducteur déjà prévu ce jour-là sur la machine (un seul conducteur par machine et par jour), d'après le 1er créneau du jour.
+    const conducteurJour = () => {
+      if (!machineId) return null;
+      const x = require('./lib/conducteur').conducteursDuJour(lignes.filter((l) => l.machine_id === machineId), liensRes.data).get(`${machineId}|${creneaux[0] ? creneaux[0].date : date}`);
+      return x ? x.personnel_id : null;
+    };
+
     const chargeMin = (pid) => lignes.filter((l) => equipeDe(l).has(pid)).reduce((t, l) => { const [s, e] = bornes(l); return t + Math.max(0, e - s - Math.max(0, Math.min(e, 750) - Math.max(s, 720))); }, 0);
 
     // Statut d'une personne sur les créneaux de l'étape
@@ -134,7 +143,9 @@ const handlerProtege = async (event) => {
       if (!blocages.length) return { statut: 'libre' };
       const of0 = ofDe(blocages[0].of_id);
       const libelle = `déjà affecté(e) sur ${of0 ? of0.numero : 'une autre tâche'} le ${jjmm(blocages[0].date)}`;
-      if (prioritaire && blocages.every((l) => !estPrioritaire(ofDe(l.of_id)))) {
+      // Le conducteur du jour, pris sur la machine par ses propres créneaux, enchaîne simplement derrière eux.
+      const enchaineDerriere = pid === conducteurJour() && blocages.every((l) => l.machine_id === machineId);
+      if (enchaineDerriere || (prioritaire && blocages.every((l) => !estPrioritaire(ofDe(l.of_id))))) {
         // Fin de la dernière tâche normale qui gêne : le conducteur pourra démarrer juste après.
         const fin = blocages.map((l) => ({ date: l.date, min: l.heure_fin ? hm(l.heure_fin) : hm(cal.heure_fin) }))
           .sort((x, y) => (x.date < y.date ? 1 : x.date > y.date ? -1 : y.min - x.min))[0];
@@ -175,7 +186,7 @@ const handlerProtege = async (event) => {
     }));
     const machineOccupee = () => !!machineId && (
       lignes.some((l) => l.machine_id === machineId && creneaux.some((m) => m.date === l.date && chevauche(bornes(m), bornes(l))))
-      || maintenances.some((mt) => creneaux.some((m) => mt.date_debut <= m.date && (!mt.date_fin || mt.date_fin >= m.date))));
+      || maintenances.some((mt) => creneaux.some((m) => INT.touche(mt, m))));
     // Recherche du premier jour où la machine ET un conducteur sont disponibles.
     let jourPropose = null;
     if (chercherJour && machineId) {
@@ -190,7 +201,19 @@ const handlerProtege = async (event) => {
       else { creneaux = initial; avertissements.push('Aucun jour disponible (machine + conducteur) dans les 90 prochains jours.'); }
     }
     const conducteurs = calcConducteurs();
-    let conducteur = conducteurs.find((c) => c.statut === 'libre') || null;
+    // UN SEUL CONDUCTEUR par machine et par jour : celui déjà prévu ce jour-là sur la machine conduit aussi ce travail.
+    let conducteur = null;
+    if (machineId) {
+      const x = conducteurJour() ? { personnel_id: conducteurJour() } : null;
+      if (x) {
+        let e = conducteurs.find((c) => c.id === x.personnel_id);
+        if (!e) { e = { id: x.personnel_id, nom: nomDe(x.personnel_id), rang: null, titulaire: false, ...evaluerEnchaine(x.personnel_id) }; conducteurs.unshift(e); }
+        e.du_jour = true;
+        if (e.statut === 'libre' || e.statut === 'libre_apres') conducteur = e;
+        else avertissements.push(`${e.nom} est déjà le conducteur de cette machine ce jour-là mais n'est pas libre sur ce créneau (${e.motif || 'indisponible'}) : deux conducteurs différents ce jour-là.`);
+      }
+    }
+    if (!conducteur) conducteur = conducteurs.find((c) => c.statut === 'libre') || null;
     if (!conducteur) {
       const apres = conducteurs.filter((c) => c.statut === 'libre_apres')
         .sort((a, b) => (a.libre_des.date + a.libre_des.heure).localeCompare(b.libre_des.date + b.libre_des.heure));
@@ -199,7 +222,7 @@ const handlerProtege = async (event) => {
     if (conducteur && conducteur.statut === 'libre_apres') creneaux = faireCreneaux(conducteur.libre_des.date, PL.hhmm(conducteur.libre_des.heure));   // aides évaluées sur le créneau réellement décalé
     if (machineId && !conducteurs.length) avertissements.push('Aucun conducteur défini pour cette machine : renseignez-les dans la fiche de la machine.');
     if (machineId && conducteurs.length && !conducteur) avertissements.push('Aucun conducteur de cette machine n\'est disponible sur ces créneaux.');
-    if (conducteur) conducteur.raison = conducteur.statut === 'libre'
+    if (conducteur) conducteur.raison = conducteur.du_jour ? 'conducteur déjà prévu sur cette machine ce jour-là' : conducteur.statut === 'libre'
       ? (conducteur.rang === 1 ? 'conducteur titulaire, libre' : 'suppléant, libre (titulaire indisponible)')
       : conducteur.motif;
 
@@ -228,7 +251,7 @@ const handlerProtege = async (event) => {
     return rep(200, {
       equipe_requise: equipeRequise, prioritaire, jour_propose: jourPropose ? { ...jourPropose, libelle: libelleJour(creneaux[0].date) } : null, date: creneaux[0].date, creneaux: creneaux.map((c) => ({ date: c.date, heure_debut: c.heure_debut, heure_fin: c.heure_fin })),
       conducteur: conducteur ? { id: conducteur.id, nom: conducteur.nom, rang: conducteur.rang, statut: conducteur.statut, libre_des: conducteur.libre_des || null, raison: conducteur.raison } : null,
-      conducteurs: conducteurs.map((c) => ({ id: c.id, nom: c.nom, rang: c.rang, statut: c.statut, motif: c.motif || null, libre_des: c.libre_des || null })),
+      conducteurs: conducteurs.map((c) => ({ id: c.id, nom: c.nom, rang: c.rang, du_jour: !!c.du_jour, statut: c.statut, motif: c.motif || null, libre_des: c.libre_des || null })),
       aides, manque_aides: manqueAides,
       debut_suggere: conducteur && conducteur.statut === 'libre_apres' ? conducteur.libre_des : null,
       avertissements,
