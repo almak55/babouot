@@ -2781,7 +2781,7 @@
         <div class="field" style="flex:1;"><label>De</label><input id="dp-d" type="time" value="${a.debut || '08:00'}"></div>
         <div class="field" style="flex:1;"><label>À</label><input id="dp-f" type="time" value="${a.fin || '16:30'}"></div>
       </div>
-      <small style="color:var(--ink-500); font-size:11.5px;">Horaires de l'atelier 08:00–16:30, pause déjeuner 12:00–12:30 (un créneau ne la chevauche pas : scindez-le). Le logiciel vérifie la machine, les personnes affectées et les absences.</small>
+      <small style="color:var(--ink-500); font-size:11.5px;">Horaires de l'atelier : lun–ven 08:00–16:30 (heures supplémentaires : 07:00–17:30), pause déjeuner 12:00–12:30 (un créneau ne la chevauche pas : scindez-le) ; samedi exceptionnel 06:00–12:00 ; jamais le dimanche. Le logiciel vérifie la machine, les personnes affectées et les absences.</small>
       <div id="m-msg"></div>
       <div class="actions"><button class="btn" id="m-cancel">Retour</button><button class="btn primary" id="dp-ok">Enregistrer</button></div>`);
     document.getElementById('m-cancel').addEventListener('click', retour);
@@ -2905,7 +2905,12 @@
     const rouvrir = async () => { occCache = null; try { await chargerDonneesReelles(); } catch (_) { /* affichage de démo */ } ouvrirOccupationPersonne(persId, true); };
     const retour = () => ouvrirOccupationPersonne(persId, true);
 
-    const pctJour = (j) => Math.round(j.min / 480 * 100);
+    // Capacité d'un jour : 8 h (lun-ven), 10 h si heures supplémentaires (créneau avant 8h ou après 16h30), 6 h un samedi travaillé, 0 le dimanche.
+    const capJour = (j) => {
+      const d = isoDow(j.iso), sup = j.affs.some(a => a.debut && (a.debut < '08:00' || a.fin > '16:30'));
+      return d < 5 ? (sup ? 600 : 480) : (d === 5 && j.affs.length ? 360 : 0);
+    };
+    const pctJour = (j) => Math.round(j.min / (capJour(j) || 480) * 100);
     const teinte = (j) => {
       if (j.indispo) return { bg: 'repeating-linear-gradient(45deg,#FBE9E7,#FBE9E7 5px,#F6D6D2 5px,#F6D6D2 10px)', fg: '#8E2A1F' };
       const q = pctJour(j);
@@ -2918,7 +2923,7 @@
     const stats = (jours) => {
       const w = jours.filter(ouvre);
       const indispoJ = w.filter(j => j.indispo).length;
-      const capa = (w.length - indispoJ) * 480;
+      const capa = jours.reduce((t, j) => t + (j.indispo ? 0 : capJour(j)), 0);
       const total = jours.reduce((t, j) => t + j.min, 0);
       const affs = jours.flatMap(j => j.affs);
       return { indispoJ, capa, total, taux: capa > 0 ? Math.round(total / capa * 100) : 0, affs, ofs: new Set(affs.map(a => a.of).filter(x => x !== '—')).size, machines: new Set(affs.map(a => a.machine)).size };
@@ -3062,7 +3067,7 @@
       <h3>Occupation — ${esc(p.name)}</h3>
       <div style="font-size:12.5px; color:var(--ink-700); margin:-4px 0 10px;">${esc(p.role || '')}</div>
       <div id="occ-corps"></div>
-      <div class="plan-note" style="margin-top:6px;">Durées en travail effectif (pause 12h00–12h30 déduite). Sans horaire précis : journée de 8 h. Capacité : 8 h par jour ouvré (lundi–vendredi), hors absences.</div>
+      <div class="plan-note" style="margin-top:6px;">Durées en travail effectif (pause 12h00–12h30 déduite). Sans horaire précis : journée de 8 h. Capacité : 8 h par jour du lundi au vendredi (10 h les jours de heures supplémentaires 7h–17h30, 6 h un samedi exceptionnel travaillé 6h–12h), hors absences.</div>
       <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="occ-pdf">Télécharger en PDF</button></div>`, 'xlarge');
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
     rendre();
@@ -3289,10 +3294,25 @@
     data.sans_personnel.forEach(c => { (parMachine[c.machine] = parMachine[c.machine] || []).push(c); });
     Object.entries(parMachine).forEach(([mach, cs]) => gens.push({ nom: 'NON AFFECTE', poste: mach.replace(/\s*\(.*\)$/, ''), statut: 'présent', plage: '', commentaire: '', creneaux: cs, sansPers: true }));
 
-    // Axe horaire : 7h-17h au minimum, élargi si besoin
-    let h0 = 7 * 60, h1 = 17 * 60;
+    // Horaires de l'atelier : lun-ven 8h00-12h00 / 12h30-16h30 (pause 12h00-12h30) ; heures supplémentaires 7h00-12h00 / 12h30-17h30 ;
+    // samedi exceptionnel 6h00-12h00 sans pause. Le mode du jour se déduit de la date et des créneaux planifiés.
+    const jourSemaine = new Date(date + 'T12:00:00Z').getUTCDay();
+    const horsNormal = gens.some(g => g.creneaux.some(c => (c.debut && c.debut < '08:00') || (c.fin && c.fin > '16:30')));
+    const MODE = jourSemaine === 6 ? 'samedi' : (horsNormal ? 'heures_sup' : 'normal');
+    const J = MODE === 'samedi' ? { d: 6 * 60, pd: 12 * 60, pf: 12 * 60, f: 12 * 60 }
+      : (MODE === 'heures_sup' ? { d: 7 * 60, pd: 12 * 60, pf: 12 * 60 + 30, f: 17 * 60 + 30 } : { d: 8 * 60, pd: 12 * 60, pf: 12 * 60 + 30, f: 16 * 60 + 30 });
+    const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    // Axe horaire : exactement la journée de l'atelier ; élargi seulement si un créneau sort de ces horaires.
+    let h0 = J.d, h1 = J.f;
     gens.forEach(g => g.creneaux.forEach(c => { if (c.debut) h0 = Math.min(h0, mn(c.debut)); if (c.fin) h1 = Math.max(h1, mn(c.fin)); }));
-    h0 = Math.floor(h0 / 60) * 60; h1 = Math.ceil(h1 / 60) * 60;
+    h0 = Math.floor(h0 / 30) * 30; h1 = Math.ceil(h1 / 30) * 30;
+    // Un créneau est enregistré d'un seul tenant même s'il enjambe la pause : on le dessine en deux morceaux (avant / après la pause).
+    const morceauxDe = (d, f) => {
+      if (d < J.pd && f > J.pf) return [[d, J.pd], [J.pf, f]];
+      if (d < J.pd && f > J.pd && f <= J.pf) return [[d, J.pd]];
+      if (d >= J.pd && d < J.pf && f > J.pf) return [[J.pf, f]];
+      return [[d, f]];
+    };
 
     // Couleur par OF
     const PALETTE = [[200,230,225],[250,220,190],[210,220,245],[245,210,225],[225,240,190],[235,215,250],[255,240,170],[200,235,245],[250,205,200],[215,235,215],[240,225,205],[220,220,235]];
@@ -3318,7 +3338,7 @@
       const tri = g.creneaux.slice().sort((a, b) => (a.debut ? mn(a.debut) : h0) - (b.debut ? mn(b.debut) : h0));
       const fins = [];
       tri.forEach(c => {
-        const d = c.debut ? mn(c.debut) : h0, f = c.fin ? mn(c.fin) : h1;
+        const d = c.debut ? mn(c.debut) : J.d, f = c.fin ? mn(c.fin) : J.f;   // sans horaire : toute la journée de l'atelier
         let l = fins.findIndex(x => x <= d); if (l < 0) { l = fins.length; fins.push(0); }
         fins[l] = f; c._l = l; c._d = d; c._f = f;
       });
@@ -3335,21 +3355,23 @@
     doc.setFillColor(30, 90, 100); doc.rect(M, yHead, W - 2 * M, hHead, 'F');
     doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
     doc.text('Personnel', M + 2, yHead + 4.8);
-    for (let t = h0; t <= h1; t += 60) {
-      const x = px(t);
-      if (t < h1) doc.text(`${String(t / 60).padStart(2, '0')}h`, x + 1.5, yHead + 4.8);
-    }
+    for (let t = Math.ceil(h0 / 60) * 60; t < h1; t += 60) doc.text(`${String(t / 60).padStart(2, '0')}h`, px(t) + 1.5, yHead + 4.8);
+    doc.setFontSize(7.5);
+    if (J.pf > J.pd) doc.text('12h30', px(J.pf) + 1.5, yHead + 4.8);      // reprise après la pause
     doc.setTextColor(0);
 
     let y = yHead + hHead;
     gens.forEach((g, i) => {
       const hRow = g.lanes * hLane;
       if (i % 2 === 0) { doc.setFillColor(247, 248, 249); doc.rect(M, y, W - 2 * M, hRow, 'F'); }
-      // pause
-      doc.setFillColor(232, 232, 232); doc.rect(px(12 * 60), y, px(12 * 60 + 30) - px(12 * 60), hRow, 'F');
+      // hors horaires de l'atelier (seulement si l'axe a dû être élargi) puis pause
+      doc.setFillColor(238, 238, 238);
+      if (h0 < J.d) doc.rect(px(h0), y, px(J.d) - px(h0), hRow, 'F');
+      if (h1 > J.f) doc.rect(px(J.f), y, px(h1) - px(J.f), hRow, 'F');
+      if (J.pf > J.pd) { doc.setFillColor(222, 222, 222); doc.rect(px(J.pd), y, px(J.pf) - px(J.pd), hRow, 'F'); }
       // grille verticale
       doc.setDrawColor(215); doc.setLineWidth(0.15);
-      for (let t = h0; t <= h1; t += 60) doc.line(px(t), y, px(t), y + hRow);
+      for (let t = Math.ceil(h0 / 60) * 60; t <= h1; t += 60) doc.line(px(t), y, px(t), y + hRow);
       doc.line(M, y + hRow, W - M, y + hRow);
 
       // nom
@@ -3365,8 +3387,9 @@
         doc.text(pdfTxt(indispo ? `${g.statut.toUpperCase()}${g.plage ? ' ' + g.plage : ''}${g.commentaire ? ' - ' + g.commentaire : ''}` : 'Disponible - sans affectation'), x0 + 3, y + hRow / 2 + 1);
         doc.setTextColor(0);
       }
-      g.creneaux.forEach(c => {
-        const bx = px(c._d), bw = px(c._f) - bx - 0.4, by = y + c._l * hLane + 0.8, bh = hLane - 1.6;
+      g.creneaux.forEach(cr => morceauxDe(cr._d, cr._f).forEach(([ma, mb]) => {
+        const c = Object.assign({}, cr, { debut: hm(ma), fin: hm(mb) });   // horaire propre à ce morceau
+        const bx = px(ma), bw = px(mb) - bx - 0.4, by = y + cr._l * hLane + 0.8, bh = hLane - 1.6;
         const col = couleurOf[c.of] || [230, 230, 230];
         doc.setFillColor(...col); doc.setDrawColor(90); doc.setLineWidth(0.25);
         if (g.sansPers) { doc.setDrawColor(180, 60, 30); doc.setLineDashPattern([1.2, 0.8], 0); }
@@ -3378,7 +3401,7 @@
         const fs = Math.max(5.8, Math.min(base, (bh - 1.2) / (nbL * 0.43)));
         const pas = fs * 0.43;
         const nomMachine = c.machine.replace(/\s*\(.*\)$/, '');
-        const horaire = c.debut ? `${c.debut}-${c.fin}` : '';
+        const horaire = `${c.debut}-${c.fin}`;
         const titre = [c.titre, c.client].filter(Boolean).join(' - ') || c.of;
         const items = grandBloc
           ? [['b', c.operation], ['bi', titre], ['n', nomMachine], ['n', `${c.of}  ${horaire}`]]
@@ -3389,7 +3412,7 @@
           const l = doc.splitTextToSize(pdfTxt(txt), bw - 2)[0] || '';
           doc.text(l, bx + 1.2, by + 0.8 + (k + 1) * pas);
         });
-      });
+      }));
       y += hRow;
     });
     doc.setDrawColor(150); doc.setLineWidth(0.3); doc.rect(M, yHead, W - 2 * M, y - yHead);
@@ -3412,7 +3435,7 @@
       doc.setTextColor(0);
     }
     doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(110);
-    doc.text('Zone grisee : pause', M, H - 7); doc.setTextColor(0);
+    doc.text(MODE === 'samedi' ? 'Samedi exceptionnel : 6h00-12h00, sans pause.' : (MODE === 'heures_sup' ? 'Heures supplementaires : 7h00-12h00 et 12h30-17h30 - zone grisee : pause 12h00-12h30.' : 'Horaires atelier : 8h00-12h00 et 12h30-16h30 - zone grisee : pause 12h00-12h30.'), M, H - 7); doc.setTextColor(0);
     doc.save(`affichage-personnel-${date}.pdf`);
   }
 
@@ -4960,8 +4983,10 @@
         <div class="field" id="pl-fin-wrap"><label>Fin au plus tard <span style="font-weight:400">${livraison ? `(livraison de la fiche : ${livraison.slice(8)}/${livraison.slice(5, 7)}/${livraison.slice(0, 4)})` : "(vide = délai de l'OF)"}</span></label><input id="pl-fin" type="datetime-local" value="${etat.fin}"></div>
         <div class="field"><label>Horaires</label>
           <select id="pl-horaires">
-            <option value="normal" ${etat.horaires === 'normal' ? 'selected' : ''}>Normaux</option>
-            <option value="heures_sup" ${etat.horaires === 'heures_sup' ? 'selected' : ''}>Avec heures supplémentaires</option>
+            <option value="normal" ${etat.horaires === 'normal' ? 'selected' : ''}>Normaux — lun-ven 8h-12h / 12h30-16h30</option>
+            <option value="normal_samedi" ${etat.horaires === 'normal_samedi' ? 'selected' : ''}>Normaux + samedi exceptionnel (6h-12h)</option>
+            <option value="heures_sup" ${etat.horaires === 'heures_sup' ? 'selected' : ''}>Heures supplémentaires — lun-ven 7h-12h / 12h30-17h30</option>
+            <option value="heures_sup_samedi" ${etat.horaires === 'heures_sup_samedi' ? 'selected' : ''}>Heures supplémentaires + samedi exceptionnel (6h-12h)</option>
           </select></div>
         <div class="field plan-check"><label><input type="checkbox" id="pl-replan" ${etat.replanifier ? 'checked' : ''}> Replanifier aussi les étapes déjà planifiées</label></div>
         <div class="field plan-go"><button class="btn primary" id="pl-calc">Calculer</button></div>
@@ -5567,8 +5592,8 @@
     if (vg.erreur) { g('vg-cal').innerHTML = `<div class="msg error">${esc(vg.erreur)}</div>`; }
     else if (!cal) { g('vg-cal').innerHTML = '<div class="empty">Chargement…</div>'; }
     else { vgTuiles(cal, p); vgCalendrier(cal, p); vgMachines(cal, p); vgAttention(cal, p); }
-    g('vg-leg').innerHTML = [['vg-c0', 'Rien de planifié'], ['vg-c1', 'Moins de 50 %'], ['vg-c2', '50 à 85 %'], ['vg-c3', '85 à 100 %'], ['vg-c4', 'Surcharge (plus de 100 %)'], ['vg-cna', 'Week-end / sans capacité']].map(([c, l]) => `<span><i class="${c}"></i>${l}</span>`).join('')
-      + `<span style="flex-basis:100%;">Charge d'un jour = le plus élevé de : heures-personnes planifiées ÷ capacité de l'équipe (présents × 8 h) et heures-machines planifiées ÷ capacité du parc (machines actives, hors arrêt, × 8 h).</span>`;
+    g('vg-leg').innerHTML = [['vg-c0', 'Rien de planifié'], ['vg-c1', 'Moins de 50 %'], ['vg-c2', '50 à 85 %'], ['vg-c3', '85 à 100 %'], ['vg-c4', 'Surcharge (plus de 100 %)'], ['vg-cna', 'Week-end fermé / sans capacité']].map(([c, l]) => `<span><i class="${c}"></i>${l}</span>`).join('')
+      + `<span style="flex-basis:100%;">Charge d'un jour = le plus élevé de : heures-personnes planifiées ÷ capacité de l'équipe (présents × heures ouvertes du jour) et heures-machines planifiées ÷ capacité du parc (machines actives, hors arrêt, × heures ouvertes). Heures ouvertes : 8 h du lundi au vendredi, 10 h un jour de heures supplémentaires, 6 h un samedi exceptionnel travaillé.</span>`;
     vgOf();
   }
 
@@ -5627,10 +5652,10 @@
     } else if (vg.mode === 'semaine') {
       const jours = Array.from({ length: 7 }, (_, i) => vgAdd(p.debut, i));
       const arret = (nom, d) => (cal.interventions || []).some(x => x.machine === nom && x.bloquant && x.date_debut <= d && (!x.date_fin || x.date_fin >= d));
-      const celClasse = (hh) => vgClasse(hh <= 0 ? 0 : hh / 8);
-      let h = `<table class="vg-sem"><thead><tr><th>Machine</th>${jours.map(d => `<th data-j="${d}">${VG_JOURS[(vgDate(d).getDay() + 6) % 7]}<br>${vgJJMM(d)}</th>`).join('')}<th>Total</th></tr></thead><tbody>`;
+      const celClasse = (hh, d) => vgClasse(hh <= 0 ? 0 : hh / ((cal.jours[d] && cal.jours[d].heures_jour) || 8));
+      let h = `<table class="vg-sem"><thead><tr><th>Machine</th>${jours.map(d => { const md = cal.jours[d] && cal.jours[d].mode; return `<th data-j="${d}">${VG_JOURS[(vgDate(d).getDay() + 6) % 7]}<br>${vgJJMM(d)}${md === 'heures_sup' ? '<br><span class="plan-note">heures sup</span>' : (md === 'samedi' ? '<br><span class="plan-note">exceptionnel</span>' : '')}</th>`; }).join('')}<th>Total</th></tr></thead><tbody>`;
       cal.par_machine.forEach(m => {
-        h += `<tr><td>${esc(m.nom)}</td>${jours.map(d => { const x = (m.par_jour || {})[d] || 0, st = arret(m.nom, d); return `<td class="${celClasse(x)}" data-j="${d}" title="${esc(m.nom + ' — ' + vgFmt(d, { weekday: 'long', day: 'numeric', month: 'long' }) + (st ? ' — à l\'arrêt' : ''))}">${st ? '🔧 ' : ''}${x ? vgH(x) + ' h' : ''}</td>`; }).join('')}<td class="mono">${vgH(m.heures)} h</td></tr>`;
+        h += `<tr><td>${esc(m.nom)}</td>${jours.map(d => { const x = (m.par_jour || {})[d] || 0, st = arret(m.nom, d); return `<td class="${celClasse(x, d)}" data-j="${d}" title="${esc(m.nom + ' — ' + vgFmt(d, { weekday: 'long', day: 'numeric', month: 'long' }) + (st ? ' — à l\'arrêt' : ''))}">${st ? '🔧 ' : ''}${x ? vgH(x) + ' h' : ''}</td>`; }).join('')}<td class="mono">${vgH(m.heures)} h</td></tr>`;
       });
       h += `</tbody><tfoot><tr><td><strong>Équipe</strong> <span class="plan-note">heures-personnes</span></td>${jours.map(d => { const j = cal.jours[d]; return `<td class="${j.cap_pers_h ? vgClasse(j.pers_h / j.cap_pers_h) : 'vg-cna'}" data-j="${d}">${j.pers_h ? vgH(j.pers_h) + ' h' : ''}${j.cap_pers_h ? `<br><span class="plan-note">/ ${vgH(j.cap_pers_h)} h</span>` : ''}</td>`; }).join('')}<td></td></tr>
         <tr><td><strong>Charge du jour</strong></td>${jours.map(d => { const j = cal.jours[d], pc = vgPct(j.charge); return `<td class="${vgClasse(j.charge)}" data-j="${d}"><strong>${pc !== null ? pc + ' %' : ''}</strong></td>`; }).join('')}<td></td></tr>
@@ -5641,7 +5666,7 @@
       const parMachine = {};
       (cal.creneaux || []).forEach(c => { (parMachine[c.machine || '—'] ??= []).push(c); });
       const arretM = (nom) => (cal.interventions || []).find(x => x.machine === nom && x.bloquant && x.date_debut <= vg.ref && (!x.date_fin || x.date_fin >= vg.ref));
-      let h = `<div style="margin-bottom:12px;font-size:13px;"><span class="tag ${pc !== null && pc > 100 ? 'danger' : (pc !== null && pc > 85 ? 'warn' : 'ok')}">Charge ${pc !== null ? pc + ' %' : '—'}</span> ${vgH(j.machine_h)} h machine · ${vgH(j.pers_h)} h-personnes (capacité équipe ${vgH(j.cap_pers_h)} h)</div>`;
+      let h = `<div style="margin-bottom:12px;font-size:13px;"><span class="tag ${pc !== null && pc > 100 ? 'danger' : (pc !== null && pc > 85 ? 'warn' : 'ok')}">Charge ${pc !== null ? pc + ' %' : '—'}</span>${j.mode === 'heures_sup' ? ' <span class="tag warn">Heures supplémentaires 7h–17h30</span>' : (j.mode === 'samedi' ? ' <span class="tag warn">Samedi exceptionnel 6h–12h</span>' : '')} ${vgH(j.machine_h)} h machine · ${vgH(j.pers_h)} h-personnes (capacité équipe ${vgH(j.cap_pers_h)} h)</div>`;
       const noms = cal.par_machine.map(m => m.nom);
       noms.concat(parMachine['—'] ? ['—'] : []).forEach(nom => {
         const liste = parMachine[nom] || [], inter = nom === '—' ? null : arretM(nom);
@@ -5683,13 +5708,14 @@
   function vgMachines(cal, p) {
     const zone = document.getElementById('vg-mach'); if (!zone) return;
     const debut = vg.mode === 'mois' ? p.premier : p.debut, fin = vg.mode === 'mois' ? p.dernier : p.fin;
-    const ouvres = Object.keys(cal.jours).filter(d => d >= debut && d <= fin && cal.jours[d].cap_machine_h > 0).length;
-    const cap = Math.max(1, ouvres) * cal.capacite.heures_jour;
+    const joursOuverts = Object.keys(cal.jours).filter(d => d >= debut && d <= fin && cal.jours[d].heures_jour > 0);
+    const ouvres = joursOuverts.length;
+    const cap = Math.max(cal.capacite.heures_jour, joursOuverts.reduce((t, d) => t + cal.jours[d].heures_jour, 0));
     const lignes = cal.par_machine.filter(m => m.heures > 0 || vg.mode === 'jour' || vg.mode === 'semaine').slice(0, 15);
     zone.innerHTML = lignes.length ? lignes.map(m => {
       const pc = Math.round(m.heures / cap * 100), cls = pc > 100 ? 'danger' : (pc >= 85 ? 'warn' : '');
       return `<div><div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;margin-bottom:4px;"><span>${esc(m.nom)}</span><span class="mono">${vgH(m.heures)} h sur ${m.jours_actifs} j · ${pc}%</span></div><div class="bar-track"><div class="bar-fill ${cls}" style="width:${Math.min(100, pc)}%"></div></div></div>`;
-    }).join('') + `<div class="plan-note">Taux = heures planifiées ÷ (jours ouvrés de la période × 8 h) ; ${ouvres} jour(s) ouvré(s) sur la période.</div>` : '<div class="plan-note">Aucune machine planifiée sur cette période.</div>';
+    }).join('') + `<div class="plan-note">Taux = heures planifiées ÷ (heures ouvertes de la période : 8 h par jour ouvré, 10 h en heures sup, 6 h un samedi travaillé) ; ${ouvres} jour(s) ouvert(s) sur la période.</div>` : '<div class="plan-note">Aucune machine planifiée sur cette période.</div>';
   }
 
   function vgAttention(cal, p) {
@@ -5780,7 +5806,7 @@
     `);
     wrap.appendChild(donutPanel);
 
-    // ---- Charge des machines : heures planifiées sur la semaine affichée ÷ 40 h (5 jours × 8 h), comme la charge du personnel ----
+    // ---- Charge des machines : heures planifiées sur la semaine affichée ÷ capacité de la semaine (40 h ; 10 h par jour de heures sup, 6 h un samedi travaillé) ----
     const minutesDe = (t) => { const [h, m] = String(t).split(':'); return Number(h) * 60 + Number(m); };
     const heuresCreneau = (c) => {
       if (!c.heure_debut || !c.heure_fin) return 8;   // sans horaire = journée entière
@@ -5789,27 +5815,28 @@
     };
     const planifie = (state.brut && state.brut.planning) || [];
     const lignesMachines = machines.map(m => {
-      const h = planifie.filter(c => c.machine_id === m.uuid).reduce((t, c) => t + heuresCreneau(c), 0);
-      return { m, h, pct: Math.round(h / 40 * 100), arret: alArret(m), etat: etatDe(m) };
+      const cr = planifie.filter(c => c.machine_id === m.uuid);
+      const h = cr.reduce((t, c) => t + heuresCreneau(c), 0), cap = capaciteHeuresSemaine(cr);
+      return { m, h, cap, pct: Math.round(h / cap * 100), arret: alArret(m), etat: etatDe(m) };
     }).sort((x, y) => (x.arret - y.arret) || (y.h - x.h) || x.m.name.localeCompare(y.m.name, 'fr'));
     const jjmm = (iso) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
     const periode = state.brut && state.brut.jours && state.brut.jours.length ? `du ${jjmm(state.brut.jours[0])} au ${jjmm(state.brut.jours[6])}` : '';
     const panel = el(`<div class="panel"><div class="panel-head"><h2>Charge des machines — semaine ${periode}</h2></div></div>`);
     const body = el(`<div style="padding:16px; display:flex; flex-direction:column; gap:12px;"></div>`);
     if (!lignesMachines.length) body.appendChild(el(`<div class="empty">Aucune machine active. Créez vos machines dans l'onglet « Machines ».</div>`));
-    lignesMachines.forEach(({ m, h, pct, arret, etat }) => {
+    lignesMachines.forEach(({ m, h, cap, pct, arret, etat }) => {
       const cls = pct > 100 ? 'danger' : (pct >= 85 ? 'warn' : '');
       const hTxt = Math.round(h * 10) / 10;
       body.appendChild(el(`
         <div style="${arret ? 'opacity:.7;' : ''}">
           <div style="display:flex; justify-content:space-between; gap:10px; font-size:12.5px; margin-bottom:4px;">
-            <span>${esc(m.name)} ${etat.etat !== 'ok' ? tagEtatMachine(etat) : ''}</span><span class="mono">${hTxt} h / 40 h · ${pct}%</span>
+            <span>${esc(m.name)} ${etat.etat !== 'ok' ? tagEtatMachine(etat) : ''}</span><span class="mono">${hTxt} h / ${cap} h · ${pct}%</span>
           </div>
           <div class="bar-track"><div class="bar-fill ${cls}" style="width:${Math.min(100, pct)}%"></div></div>
         </div>
       `));
     });
-    if (lignesMachines.length) body.appendChild(el(`<div class="plan-note">Charge = heures planifiées sur la semaine ÷ 40 h (5 jours × 8 h). Les machines à l'arrêt (hors service ou intervention en cours) sont signalées et placées en fin de liste.</div>`));
+    if (lignesMachines.length) body.appendChild(el(`<div class="plan-note">Charge = heures planifiées sur la semaine ÷ capacité de la semaine : 40 h (5 jours × 8 h), 10 h un jour de heures supplémentaires, 6 h un samedi travaillé. Les machines à l'arrêt (hors service ou intervention en cours) sont signalées et placées en fin de liste.</div>`));
     panel.appendChild(body);
     wrap.appendChild(panel);
 
@@ -6172,6 +6199,19 @@
   // Limites actuelles de ce branchement (à lever plus tard si besoin) :
   //  - la charge du personnel est approximée (créneaux de la semaine
   //    affichée / 5 jours), pas une vraie moyenne glissante.
+  // Capacité d'une semaine (une personne ou une machine) d'après ses créneaux : 8 h par jour du lundi au vendredi,
+  // 10 h un jour de heures supplémentaires (créneau avant 8h00 ou après 16h30 : ouverture 7h-17h30), 6 h un samedi travaillé (exceptionnel, 6h-12h).
+  function capaciteHeuresSemaine(creneaux) {
+    const parJour = {};
+    creneaux.forEach(c => { (parJour[c.date] = parJour[c.date] || []).push(c); });
+    return DAYS_ISO.reduce((cap, iso) => {
+      const l = parJour[iso] || [], dow = new Date(iso + 'T12:00:00Z').getUTCDay();
+      if (dow >= 1 && dow <= 5) return cap + (l.some(c => (c.heure_debut && String(c.heure_debut).slice(0, 5) < '08:00') || (c.heure_fin && String(c.heure_fin).slice(0, 5) > '16:30')) ? 10 : 8);
+      if (dow === 6 && l.length) return cap + 6;
+      return cap;
+    }, 0);
+  }
+
   async function chargerDonneesReelles() {
     try {
       const url = `/.netlify/functions/lecture-planning?date_debut=${DAYS_ISO[0]}&date_fin=${DAYS_ISO[6]}`;
@@ -6185,9 +6225,11 @@
       if (data.planning.some(c => !c.machine_id)) state.machines.push({ id: 'MANUEL', uuid: null, name: 'Travail manuel (sans machine)', code: 'MANUEL', manuel: true });
 
       state.personnel = data.personnel.map(p => {
-        // Charge = heures affectées / 40 h (5 j × 8 h). Une ligne sans heures = journée entière (8 h).
+        // Charge = heures affectées / capacité de la semaine (40 h = 5 j × 8 h ; 10 h un jour de heures sup, 6 h un samedi travaillé). Une ligne sans heures = journée entière (8 h).
         const minutesDe = (t) => { const [h, m] = String(t).split(':'); return Number(h) * 60 + Number(m); };
-        const heuresSemaine = data.planning.filter(c => (c.personnel_ids || []).includes(p.id)).reduce((total, c) => {
+        const creneauxPers = data.planning.filter(c => (c.personnel_ids || []).includes(p.id));
+        const capSemaine = capaciteHeuresSemaine(creneauxPers);
+        const heuresSemaine = creneauxPers.reduce((total, c) => {
           if (!c.heure_debut || !c.heure_fin) return total + 8;
           let min = minutesDe(c.heure_fin) - minutesDe(c.heure_debut);
           min -= Math.max(0, Math.min(minutesDe(c.heure_fin), 750) - Math.max(minutesDe(c.heure_debut), 720)); // pause 12h00-12h30 : seule la part qui chevauche la plage est déduite
@@ -6207,7 +6249,7 @@
         return {
           id: p.id, name: p.nom, role: p.poste || '',
           comp: [...(p.competences || []), ...(p.machines_specifiques || []).map(m => `machine: ${m}`)],
-          charge: Math.round((heuresSemaine / 40) * 100),
+          charge: Math.round((heuresSemaine / capSemaine) * 100),
           statut: statutAffiche,
         };
       });
