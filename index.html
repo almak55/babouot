@@ -6290,6 +6290,7 @@
     // d'un coup avec l'IA est trop long (erreur 504). On lit page par page ; si une tranche est encore trop longue,
     // elle est coupée en deux (avec recouvrement) et relue, jusqu'à 3 fois.
     const URL_IMPORT = `${API}/importer-planning-annuel`;
+    const NB_BANDES = 8, TRANCHES_EN_PARALLELE = 6;
     const postImport = async (corps) => {
       const res = await fetch(URL_IMPORT, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
       let d = null; try { d = await lireJson(res); } catch (e) { d = null; }
@@ -6328,7 +6329,7 @@
         c2.getContext('2d').drawImage(cv, 0, sy, cv.width, sh, 0, 0, cv.width, sh);
         return postImport({ action: 'lire', image_base64: c2.toDataURL('image/jpeg', 0.85).split(',')[1], mime_type: 'image/jpeg', haut_coupe: y0 > 0, bas_coupe: y1 < 1 });
       },
-      couper: () => { if (niveau >= 3) return null; const mid = (y0 + y1) / 2, rec = 0.04;
+      couper: () => { if (niveau >= 2) return null; const mid = (y0 + y1) / 2, rec = 0.02;
         return [tacheImage(page, cv, y0, Math.min(1, mid + rec), niveau + 1), tacheImage(page, cv, Math.max(0, mid - rec), y1, niveau + 1)]; },
     });
     const tacheTexte = (entete, lignes, rang, niveau) => ({
@@ -6340,18 +6341,26 @@
     const lirePlanningParTranches = async (file, info) => {
       const attente = [];
       if (/^image\//.test(file.type) || file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
-        (await canvasDePage(file, info)).forEach((cv, i) => attente.push(tacheImage(i + 1, cv, 0, 1, 0)));
+        (await canvasDePage(file, info)).forEach((cv, i) => {
+          // 8 bandes par page (avec recouvrement) : des tranches courtes se lisent en quelques secondes et en parallèle.
+          for (let k = 0; k < NB_BANDES; k++) attente.push(tacheImage(i + 1, cv, Math.max(0, k / NB_BANDES - 0.03), Math.min(1, (k + 1) / NB_BANDES + 0.03), 0));
+        });
       } else {
         const r0 = await postImport({ action: 'decouper', file_base64: await fichierEnBase64(file), file_name: file.name, mime_type: file.type });
         if (!r0.ok) throw new Error((r0.d && r0.d.error) || `HTTP ${r0.status}`);
-        for (let i = 0; i < r0.d.lignes.length; i += 12) attente.push(tacheTexte(r0.d.entete, r0.d.lignes.slice(i, i + 12), i, 0));
+        for (let i = 0; i < r0.d.lignes.length; i += 6) attente.push(tacheTexte(r0.d.entete, r0.d.lignes.slice(i, i + 6), i, 0));
       }
       const resultats = []; let total = attente.length, faites = 0, niveauDepart = 0, actifs = 0, fini = false;
-      const afficher = () => info(`Lecture du planning « ${esc(file.name)} » : ${faites} tranche(s) lue(s) sur ${total}… (plusieurs secondes par tranche)`);
+      const afficher = () => info(`Lecture du planning « ${esc(file.name)} » : ${faites} tranche(s) lue(s) sur ${total}… `);
       const traiter = async (t) => {
         if (t.niveau < niveauDepart) { const ch = t.couper(); if (ch) { total += ch.length - 1; attente.push(...ch); return; } }
         const r = await t.envoyer();
         if (r.ok) { resultats.push({ ordre: t.ordre, lues: (r.d && r.d.lues) || [] }); faites++; afficher(); return; }
+        if (r.d && r.d.occupe) {
+          t.essais = (t.essais || 0) + 1;
+          if (t.essais > 4) throw new Error('Le service de lecture est surchargé. Réessayez dans une minute.');
+          await new Promise((ok) => setTimeout(ok, 2500 * t.essais)); attente.unshift(t); return;
+        }
         const tropLong = r.d === null || (r.d && r.d.trop_long) || [502, 503, 504].includes(r.status);
         if (!tropLong) throw new Error((r.d && (r.d.error || r.d.errorMessage)) || `HTTP ${r.status}`);
         niveauDepart = Math.max(niveauDepart, t.niveau + 1);
@@ -6364,7 +6373,7 @@
         const pomper = () => {
           if (fini) return;
           if (!attente.length && actifs === 0) { fini = true; resolve(); return; }
-          while (actifs < 3 && attente.length) {
+          while (actifs < TRANCHES_EN_PARALLELE && attente.length) {
             const t = attente.shift(); actifs++;
             traiter(t).then(() => { actifs--; pomper(); }).catch((e) => { fini = true; reject(e); });
           }
