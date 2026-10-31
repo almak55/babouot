@@ -4213,6 +4213,7 @@
           <h2>Phases de travail standard</h2>
           <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
             <select id="ts-filtre" style="min-width:170px;"><option value="">Toutes les opérations</option></select>
+            <button class="btn" id="ts-dep" title="Quelle opération attend quelle autre, par défaut, dans la gamme d'un OF">Dépendances standards</button>
             <button class="btn" id="ts-ligne" title="Opérations qui fonctionnent en ligne (production simultanée)">Opérations en ligne</button>
             <button class="btn" id="ts-ops" title="Ajouter ou modifier des opérations du catalogue">Gérer les opérations</button>
             <button class="btn" id="ts-copie" title="Copier les réglages d'une machine vers d'autres machines">Copier vers…</button>
@@ -4246,6 +4247,7 @@
     wrap.querySelector('#ts-new').addEventListener('click', () => ouvrirModalePhase(null));
     wrap.querySelector('#ts-ops').addEventListener('click', () => ouvrirModaleOperations());
     wrap.querySelector('#ts-ligne').addEventListener('click', () => ouvrirModaleEnLigne());
+    wrap.querySelector('#ts-dep').addEventListener('click', () => ouvrirModaleDependances());
     wrap.querySelector('#ts-copie').addEventListener('click', () => ouvrirModaleCopie());
     wrap.querySelector('#ts-export').addEventListener('click', () => exporterExcel());
     const fichier = wrap.querySelector('#ts-import-file');
@@ -4581,6 +4583,102 @@
         toast(edition ? 'Caractéristique mise à jour.' : `Caractéristique « ${d.cle} » créée.`); fermerModale(); render();
       } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
     });
+  }
+
+  // ----- Dépendances standards : quelle opération attend quelle autre (modèle de gamme) -----
+  async function ouvrirModaleDependances(codeAEditer) {
+    let d;
+    try {
+      const res = await fetch(`${API}/gerer-dependances`);
+      d = await lireJson(res);
+      if (!res.ok) throw new Error(d.error || ('Erreur serveur (HTTP ' + res.status + ')'));
+    } catch (e) { toast(`Impossible de charger : ${e.message}`, 'error'); return; }
+    const lignes = d.lignes, parCode = Object.fromEntries(lignes.map(l => [l.code, l]));
+    const nom = (c) => (parCode[c] ? parCode[c].libelle : c);
+    const resume = (l) => l.predecesseurs.length
+      ? l.predecesseurs.map(p => `${esc(nom(p))}${l.simultane.includes(p) ? ` <span class="plan-note">(en simultané, dès ${l.seuil_pct} %)</span>` : ''}`).join(' · ')
+      : '<span class="plan-note">— (ordre habituel des opérations)</span>';
+    const appeler = async (methode, url, corps) => {
+      const res = await fetch(url, { method: methode, headers: { 'Content-Type': 'application/json' }, body: corps ? JSON.stringify(corps) : undefined });
+      const r = await lireJson(res);
+      if (!res.ok) throw new Error(r.error || ('Erreur serveur (HTTP ' + res.status + ')'));
+      return r;
+    };
+
+    const editer = (code) => {
+      const l = parCode[code];
+      const autres = lignes.filter(x => x.code !== code);
+      afficherModale(`
+        <h3>Dépendances standards — ${esc(l.libelle)}</h3>
+        <p style="font-size:12.5px; color:var(--ink-700); margin:0 0 10px;">Cochez les opérations que « <strong>${esc(l.libelle)}</strong> » doit attendre. Une opération absente de l'OF est simplement sautée. « En simultané » : elle démarre dès qu'une part de l'opération attendue est faite, sans attendre sa fin.</p>
+        <input id="dp-q" placeholder="Rechercher une opération…" style="width:100%; margin-bottom:8px;">
+        <div id="dp-liste" style="max-height:340px; overflow:auto; border:1px solid var(--line); border-radius:10px; padding:6px 12px;">
+          ${autres.map(x => `<div class="pred-row dp-ligne" data-code="${esc(x.code)}" data-nom="${esc((x.libelle + ' ' + x.operation).toLowerCase())}" style="padding:4px 0;">
+            <label class="pred-name"><input type="checkbox" class="dp-pred" ${l.predecesseurs.includes(x.code) ? 'checked' : ''}> ${esc(x.libelle)}${x.personnalisee ? ' <span class="tag">ajoutée</span>' : ''}</label>
+            <select class="dp-mode ${l.predecesseurs.includes(x.code) ? '' : 'hidden'}"><option value="fin" ${l.simultane.includes(x.code) ? '' : 'selected'}>Attendre la fin</option><option value="simultane" ${l.simultane.includes(x.code) ? 'selected' : ''}>En simultané (démarrage progressif)</option></select>
+          </div>`).join('')}
+        </div>
+        <div class="field" id="dp-seuil-zone" style="max-width:320px; margin-top:10px;"><label>Démarrage progressif : dès que l'opération attendue est faite à</label><input id="dp-seuil" type="number" min="1" max="100" step="1" value="${l.seuil_pct}" style="width:90px;"> <span class="plan-note">%</span></div>
+        <div id="m-msg"></div>
+        <div class="actions"><button class="btn" id="m-cancel">← Retour à la liste</button><button class="btn primary" id="dp-save">Enregistrer</button></div>`, 'xlarge');
+      const racine = document.getElementById('dp-liste');
+      const majSeuil = () => { document.getElementById('dp-seuil-zone').style.display = Array.from(racine.querySelectorAll('.dp-mode')).some(sel => !sel.classList.contains('hidden') && sel.value === 'simultane') ? '' : 'none'; };
+      majSeuil();
+      racine.addEventListener('change', (ev) => {
+        const ligne = ev.target.closest('.dp-ligne'); if (!ligne) return;
+        if (ev.target.classList.contains('dp-pred')) ligne.querySelector('.dp-mode').classList.toggle('hidden', !ev.target.checked);
+        majSeuil();
+      });
+      document.getElementById('dp-q').addEventListener('input', (ev) => {
+        const q = ev.target.value.trim().toLowerCase();
+        racine.querySelectorAll('.dp-ligne').forEach(x => { x.style.display = !q || x.dataset.nom.includes(q) ? '' : 'none'; });
+      });
+      document.getElementById('m-cancel').addEventListener('click', () => ouvrirModaleDependances());
+      document.getElementById('dp-save').addEventListener('click', async (ev) => {
+        const msg = document.getElementById('m-msg');
+        const coches = Array.from(racine.querySelectorAll('.dp-ligne')).filter(x => x.querySelector('.dp-pred').checked);
+        const corps = { code, predecesseurs: coches.map(x => x.dataset.code), simultane: coches.filter(x => x.querySelector('.dp-mode').value === 'simultane').map(x => x.dataset.code), seuil_pct: Number(document.getElementById('dp-seuil').value) || 10 };
+        ev.target.disabled = true; msg.innerHTML = '<div class="msg">Enregistrement…</div>';
+        try { await appeler('PUT', `${API}/gerer-dependances`, corps); toast('Dépendances enregistrées.'); ouvrirModaleDependances(); }
+        catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; ev.target.disabled = false; }
+      });
+    };
+
+    const libres = d.operations.filter(o => !o.dans_modele);
+    afficherModale(`
+      <h3>Dépendances standards</h3>
+      <p style="font-size:12.5px; color:var(--ink-700); margin:0 0 10px;">Pour chaque opération : celles qu'elle <strong>attend</strong> dans la gamme d'un OF (modèle de gamme). Ces réglages servent aux <strong>nouveaux OF</strong> et au bouton « Recalculer les dépendances » de la gamme d'un OF ; ils ne changent aucun OF déjà planifié. Les liens d'un OF précis se règlent dans son chiffrage (« Démarre après »).</p>
+      <input id="dp-filtre" placeholder="Rechercher une opération…" style="width:100%; margin-bottom:8px;">
+      <div style="max-height:360px; overflow:auto; border:1px solid var(--line); border-radius:10px;">
+        <table><thead><tr><th>Opération</th><th>Attend</th><th></th></tr></thead><tbody id="dp-corps">
+        ${lignes.map(l => `<tr data-nom="${esc((l.libelle + ' ' + l.operation).toLowerCase())}"><td><strong>${esc(l.libelle)}</strong>${l.personnalisee ? ' <span class="tag">ajoutée</span>' : ''}${l.condition && !['toujours', 'standard'].includes(l.condition) ? ` <span class="plan-note">(Pléiade : ${esc(l.condition)})</span>` : ''}</td><td style="font-size:12.5px;">${resume(l)}</td>
+          <td style="white-space:nowrap; text-align:right;"><button class="btn dp-edit" data-code="${esc(l.code)}">Modifier</button>${l.personnalisee ? ` <button class="btn dp-del" data-code="${esc(l.code)}" title="Retirer cette opération du modèle">✕</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="3" class="plan-note">Modèle vide.</td></tr>'}
+        </tbody></table>
+      </div>
+      ${libres.length ? `<div style="display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap;"><span style="font-size:13px;">Donner des dépendances à une autre opération :</span>
+        <select id="dp-ajout" style="min-width:220px;"><option value="">— choisir —</option>${libres.map(o => `<option value="${esc(o.code)}">${esc(o.nom)}</option>`).join('')}</select>
+        <button class="btn" id="dp-add">Ajouter</button></div>` : ''}
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`, 'xlarge');
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.getElementById('dp-filtre').addEventListener('input', (ev) => {
+      const q = ev.target.value.trim().toLowerCase();
+      document.querySelectorAll('#dp-corps tr[data-nom]').forEach(tr => { tr.style.display = !q || tr.dataset.nom.includes(q) ? '' : 'none'; });
+    });
+    document.querySelectorAll('.dp-edit').forEach(b => b.addEventListener('click', () => editer(b.dataset.code)));
+    document.querySelectorAll('.dp-del').forEach(b => b.addEventListener('click', async () => {
+      if (!confirm(`Retirer « ${nom(b.dataset.code)} » du modèle de dépendances ?`)) return;
+      try { await appeler('DELETE', `${API}/gerer-dependances?code=${encodeURIComponent(b.dataset.code)}`); toast('Opération retirée du modèle.'); ouvrirModaleDependances(); }
+      catch (e) { toast(e.message, 'error'); }
+    }));
+    const ajout = document.getElementById('dp-add');
+    if (ajout) ajout.addEventListener('click', async () => {
+      const code = document.getElementById('dp-ajout').value;
+      if (!code) { document.getElementById('m-msg').innerHTML = '<div class="msg error">Choisissez une opération.</div>'; return; }
+      try { const r = await appeler('POST', `${API}/gerer-dependances`, { operation_code: code }); toast('Opération ajoutée : réglez maintenant ce qu\'elle attend.'); ouvrirModaleDependances(r.code); }
+      catch (e) { document.getElementById('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
+    if (codeAEditer && parCode[codeAEditer]) editer(codeAEditer);
   }
 
   // ----- Opérations « en ligne » : production simultanée avec l'opération précédente -----
