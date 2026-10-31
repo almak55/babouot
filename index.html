@@ -6883,7 +6883,14 @@
             // Fiche sur plusieurs pages : l'emboîtage par défaut se décide sur l'ensemble (tranchefile/signet sur une page, finitions sur l'autre).
             const sg = p.signes_emboitage || {}, sf = f.signes_emboitage || {};
             const ts = !!(sg.ts || sf.ts), fin = !!(sg.fin || sf.fin), emb = !!(sg.emb || sf.emb);
-            p.signes_emboitage = { ts, fin, emb };
+            const coud = !!(sg.coud || sf.coud), asm = !!(sg.asm || sf.asm);
+            p.signes_emboitage = { ts, fin, emb, coud, asm };
+            // Couture sur une page, assemblage absent : l'assemblage est ajouté avant la couture (l'ordre exact est rétabli à la création de l'OF).
+            const ca = p.assemblage_code || f.assemblage_code;
+            if (coud && !asm && ca && !p.operation_codes.includes(ca)) {
+              p.operation_codes.unshift(ca); p.signes_emboitage.asm = true;
+              p.notes = [p.notes, 'Assemblage ajouté automatiquement (couture sur la fiche : l\'assemblage précède la couture).'].filter(Boolean).join(' ');
+            }
             const ce = p.emboitage_code || f.emboitage_code;
             if (ts && fin && !emb && ce && !p.operation_codes.includes(ce) && p.type_production !== 'pleiade' && p.type_production !== 'coffret') {
               p.operation_codes.push(ce); p.signes_emboitage.emb = true;
