@@ -58,6 +58,7 @@ function actif(etape, opts, pave) {
     case 'rhodoides': return !!opts.rhodoides;
     case 'etuis': return !!opts.etuis;
     case 'a_la_demande': return !!opts.reparations_volumes;
+    case 'standard': return false;   // lignes ajoutées depuis « Dépendances standards » : elles ne servent qu'au calcul des liens, jamais à une gamme Pléiade
     default: return true;
   }
 }
@@ -137,7 +138,7 @@ function caracteristiquesOf(valeurs, opts) {
 
 // Toutes les étapes du modèle, avec indication de celles retenues par défaut (pour la liste à cocher).
 function etapesPossibles(ref, opts, pave) {
-  return ref.modele.slice().sort((a, b) => a.ordre - b.ordre).map((e) => ({
+  return ref.modele.filter((e) => e.condition !== 'standard').sort((a, b) => a.ordre - b.ordre).map((e) => ({
     code: e.code, ordre: e.ordre, predecesseurs: e.predecesseurs || [], simultane: e.simultane || [], operation_code: e.operation_code, libelle: e.libelle || e.operation_code, condition: e.condition, par_defaut: actif(e, opts, pave),
   }));
 }
