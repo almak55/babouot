@@ -96,7 +96,7 @@ async function calculerEtapes(supabase, ofId) {
     const typeManquant = !utilisees.length && typesAutres.length > 0;
 
     const quantiteEtape = nombreOuNull(parametres.quantite);
-    // Quantité : saisie sur l'étape > ratio du modèle (réparations : % de la quantité de l'OF) > quantité de l'OF.
+    // Quantité : saisie sur l'étape > ratio du modèle (réparations : % de la quantité de l'OF ; pliage de gardes : 2 × la quantité de l'OF) > quantité de l'OF.
     const parRatio = quantiteEtape !== null && quantiteEtape > 0 ? null : DL.quantiteParRatio(modeleDelais, reglesEL, g.operations.code, g.operations.nom, of.quantite);
     const quantite = quantiteEtape !== null && quantiteEtape > 0 ? quantiteEtape : (parRatio ? parRatio.quantite : of.quantite);
 
@@ -240,7 +240,7 @@ async function calculerEtapes(supabase, ofId) {
       parametres, parametres_requis: requis, parametres_manquants: manquants,
       quantite_etape: quantite,
       quantite_regle: parRatio ? parRatio.detail : null,
-      quantite_ratio: parRatio ? parRatio.regle : (quantiteEtape !== null && quantiteEtape > 0 ? (DL.ligneDe(modeleDelais, reglesEL, g.operations.code, g.operations.nom) || {}).ratio || null : null),
+      quantite_ratio: parRatio ? parRatio.regle : (quantiteEtape !== null && quantiteEtape > 0 ? DL.ratioDe(modeleDelais, reglesEL, g.operations.code, g.operations.nom) : null),
       unite_quantite: uniteQte ? uniteQte.unite : null,
       formule_quantite: uniteQte ? uniteQte.formule : null,
       quantite_unite: uniteQte && uniteQte.valeur !== null ? arrondi(uniteQte.valeur) : null,

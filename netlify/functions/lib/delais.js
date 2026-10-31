@@ -28,16 +28,32 @@ function ligneDe(modele, regles, opCode, opNom) {
 }
 
 // Quantité à traiter d'après le ratio de la ligne du modèle : { quantite, taux, detail } ou null.
-function quantiteParRatio(modele, regles, opCode, opNom, quantiteOf) {
+// Règle intégrée : le pliage de gardes traite 2 gardes par ouvrage (une de chaque côté) → quantité = 2 × celle de l'OF.
+// Exprimée comme un ratio de 200 % sans seuil, pour suivre exactement le même circuit que les réparations (affichage, valeur
+// corrigeable à la main, retour à l'automatique). Un ratio saisi dans le modèle pour cette opération reste prioritaire.
+const norm = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const estPliageGardes = (code, nom) => /plia|pliu/.test(norm(nom)) && /garde/.test(norm(nom)) || /^pliage_gardes/.test(norm(code));
+const RATIO_PLIAGE_GARDES = { seuil: 0, taux_sous: 200, taux_au_dela: 200 };
+
+// Ratio applicable à l'opération : celui du modèle, sinon la règle intégrée (ou null).
+function ratioDe(modele, regles, opCode, opNom) {
   const ligne = ligneDe(modele, regles, opCode, opNom);
-  const r = ligne && ligne.ratio;
+  if (ligne && ligne.ratio) return ligne.ratio;
+  return estPliageGardes(opCode, opNom) ? RATIO_PLIAGE_GARDES : null;
+}
+
+function quantiteParRatio(modele, regles, opCode, opNom, quantiteOf) {
+  const r = ratioDe(modele, regles, opCode, opNom);
   const q = nombre(quantiteOf);
   if (!r || q === null || q <= 0) return null;
   const seuil = nombre(r.seuil); const sous = nombre(r.taux_sous); const au = nombre(r.taux_au_dela);
   if (seuil === null || sous === null || au === null) return null;
   const taux = q < seuil ? sous : au;
   const quantite = Math.max(1, Math.ceil(q * taux / 100 - 1e-9));
-  return { quantite, taux, regle: { seuil, taux_sous: sous, taux_au_dela: au }, detail: `${taux} % de ${q} ex. (${q < seuil ? 'moins' : 'au moins'} de ${seuil}) = ${quantite} ex. à réparer` };
+  const detail = r === RATIO_PLIAGE_GARDES
+    ? `2 × ${q} ex. (une garde de chaque côté de l'ouvrage) = ${quantite} ex. à plier`
+    : `${taux} % de ${q} ex. (${q < seuil ? 'moins' : 'au moins'} de ${seuil}) = ${quantite} ex. à réparer`;
+  return { quantite, taux, regle: { seuil, taux_sous: sous, taux_au_dela: au }, detail };
 }
 
 // Délais minimaux par étape : { [sequence]: { [sequence de l'étape attendue]: minutes } }.
@@ -70,4 +86,4 @@ function delaisMinimaux(modele, regles, gammes) {
   return out;
 }
 
-module.exports = { charger, ligneDe, quantiteParRatio, delaisMinimaux };
+module.exports = { charger, ligneDe, ratioDe, quantiteParRatio, delaisMinimaux };
