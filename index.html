@@ -2436,6 +2436,14 @@
             <div style="flex:1; min-width:170px;">
               <div style="font-size:15px; font-weight:700; color:#161C2C; line-height:1.25;">${esc(nom)}</div>
               ${el ? `<div style="margin-top:3px; font-size:12px; color:${enLigneActif ? '#0F766E' : '#5B6478'}; font-weight:600;">${enLigneActif ? '↳ en ligne avec ' : 'hors ligne, après '}${esc(el.avec)}</div>` : ''}
+              ${(() => {
+                const i = g.info; if (!i) return '';
+                const l = [];
+                if (i.regle || i.quantite_manuelle) l.push(`🔧 <strong>${Number(i.quantite).toLocaleString('fr-FR')} ex.</strong> à traiter — ${i.quantite_manuelle ? 'quantité réglée à la main' : esc(i.regle)}`);
+                if (i.regle || i.quantite_manuelle || i.duree_manuelle_h !== null) l.push(i.total_h !== null && i.total_h !== undefined ? `durée <strong>${fmtH(i.total_h)}</strong>${i.duree_manuelle_h !== null ? ' (manuelle)' : ''}` : 'non chiffrée (temps standard à définir)');
+                (i.attentes || []).forEach(a => l.push(`⏱ attente mini <strong>${String(a.heures).replace('.', ',')} h</strong> après « ${esc(a.apres)} »`));
+                return l.length ? `<div style="margin-top:3px; font-size:12px; color:#5B6478;">${l.join(' · ')}${(i.regle || i.quantite_manuelle) && g.statut === 'à planifier' ? ` <button class="btn g-ajuster" style="padding:1px 8px;font-size:11.5px;" title="Ajuster la quantité ou la durée de cette opération dans le chiffrage de l'OF">Ajuster</button>` : ''}</div>` : '';
+              })()}
             </div>
             <span class="tag ${classe}" style="font-size:12px;">${ETAT[g.statut] || esc(g.statut)}</span>
             ${el && g.statut === 'à planifier' ? `<div style="flex:1 1 100%; margin-left:40px;">${modeHtml}</div>` : (el ? modeHtml : '')}
@@ -2509,6 +2517,7 @@
         list.querySelectorAll('[data-gmode]').forEach(sel => sel.addEventListener('change', () => appliquerMode({ gamme_id: sel.dataset.gmode, mode: sel.value })));
         list.querySelectorAll('[data-gmode-tout]').forEach(b => b.addEventListener('click', () => appliquerMode({ mode: b.dataset.gmodeTout })));
       }
+      list.querySelectorAll('.g-ajuster').forEach(b => b.addEventListener('click', () => ouvrirModaleChiffrage(ofUuid, ofNumero)));
       list.querySelectorAll('[data-gact]').forEach(b => b.addEventListener('click', async () => {
         const id = b.dataset.id, act = b.dataset.gact;
         if (act === 'voir') { ouvrirDetailEtape(id, ofUuid, ofNumero); return; }
@@ -4595,6 +4604,13 @@
     } catch (e) { toast(`Impossible de charger : ${e.message}`, 'error'); return; }
     const lignes = d.lignes, parCode = Object.fromEntries(lignes.map(l => [l.code, l]));
     const nom = (c) => (parCode[c] ? parCode[c].libelle : c);
+    const resumeBis = (l) => {
+      const a = [];
+      const dl = Object.entries(l.delais || {}).filter(([c]) => parCode[c]);
+      if (dl.length) a.push(`<div class="plan-note">⏱ attente mini : ${dl.map(([c, dd]) => `${esc(String(dd.min_h))} h après ${esc(nom(c))}`).join(' · ')}</div>`);
+      if (l.ratio) a.push(`<div class="plan-note">🔧 quantité = ${esc(String(l.ratio.taux_sous))} % de l'OF (< ${esc(String(l.ratio.seuil))} ex.), ${esc(String(l.ratio.taux_au_dela))} % au-delà</div>`);
+      return a.join('');
+    };
     const resume = (l) => l.predecesseurs.length
       ? l.predecesseurs.map(p => `${esc(nom(p))}${l.simultane.includes(p) ? ` <span class="plan-note">(en simultané, dès ${l.seuil_pct} %)</span>` : ''}`).join(' · ')
       : '<span class="plan-note">— (ordre habituel des opérations)</span>';
@@ -4619,8 +4635,34 @@
           </div>`).join('')}
         </div>
         <div class="field" id="dp-seuil-zone" style="max-width:320px; margin-top:10px;"><label>Démarrage progressif : dès que l'opération attendue est faite à</label><input id="dp-seuil" type="number" min="1" max="100" step="1" value="${l.seuil_pct}" style="width:90px;"> <span class="plan-note">%</span></div>
+        <div style="margin-top:12px; border-top:1px solid var(--line); padding-top:10px;">
+          <div style="font-weight:600; font-size:13px;">Délai d'attente minimal avant de démarrer <span class="plan-note">(séchage de la colle…)</span></div>
+          <div class="plan-note" style="margin:2px 0 6px;">Heures réelles, week-end compris : l'étape ne démarre pas avant la fin de l'étape choisie + ce délai.</div>
+          <div id="dp-delais"></div>
+          <button class="btn" id="dp-delai-add" type="button">+ Ajouter un délai</button>
+        </div>
+        <div style="margin-top:12px; border-top:1px solid var(--line); padding-top:10px;">
+          <label style="font-weight:600; font-size:13px;"><input type="checkbox" id="dp-ratio-on" ${l.ratio ? 'checked' : ''}> La quantité à traiter est un pourcentage de celle de l'OF <span class="plan-note">(réparations)</span></label>
+          <div id="dp-ratio" style="margin-top:6px; ${l.ratio ? '' : 'display:none;'}">
+            <input id="dp-r-sous" type="number" min="0" max="100" step="0.1" value="${l.ratio ? esc(String(l.ratio.taux_sous)) : ''}" style="width:70px;"> % si l'OF compte moins de
+            <input id="dp-r-seuil" type="number" min="1" step="1" value="${l.ratio ? esc(String(l.ratio.seuil)) : ''}" style="width:90px;"> exemplaires, sinon
+            <input id="dp-r-au" type="number" min="0" max="100" step="0.1" value="${l.ratio ? esc(String(l.ratio.taux_au_dela)) : ''}" style="width:70px;"> %
+            <div class="plan-note" style="margin-top:4px;">La durée vient du temps standard de l'opération (ex. 15 min par exemplaire = cadence de 4 / h). Une quantité saisie à la main sur l'étape de l'OF reste prioritaire.</div>
+          </div>
+        </div>
         <div id="m-msg"></div>
         <div class="actions"><button class="btn" id="m-cancel">← Retour à la liste</button><button class="btn primary" id="dp-save">Enregistrer</button></div>`, 'xlarge');
+      const optionsAutres = (sel) => autres.map(x => `<option value="${esc(x.code)}" ${x.code === sel ? 'selected' : ''}>${esc(x.libelle)}</option>`).join('');
+      const ajouterDelai = (c, h) => {
+        const div = document.createElement('div');
+        div.className = 'dp-delai'; div.style.cssText = 'display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap;';
+        div.innerHTML = `<input type="number" class="dp-d-h" min="0" max="720" step="0.5" value="${esc(String(h))}" style="width:80px;"> h après la fin de <select class="dp-d-c" style="min-width:200px;">${optionsAutres(c)}</select> <button class="btn" type="button" title="Retirer">✕</button>`;
+        div.querySelector('button').addEventListener('click', () => div.remove());
+        document.getElementById('dp-delais').appendChild(div);
+      };
+      Object.entries(l.delais || {}).filter(([c]) => parCode[c] && c !== code).forEach(([c, dd]) => ajouterDelai(c, dd.min_h));
+      document.getElementById('dp-delai-add').addEventListener('click', () => ajouterDelai(autres[0] ? autres[0].code : '', 24));
+      document.getElementById('dp-ratio-on').addEventListener('change', (ev) => { document.getElementById('dp-ratio').style.display = ev.target.checked ? '' : 'none'; });
       const racine = document.getElementById('dp-liste');
       const majSeuil = () => { document.getElementById('dp-seuil-zone').style.display = Array.from(racine.querySelectorAll('.dp-mode')).some(sel => !sel.classList.contains('hidden') && sel.value === 'simultane') ? '' : 'none'; };
       majSeuil();
@@ -4638,6 +4680,9 @@
         const msg = document.getElementById('m-msg');
         const coches = Array.from(racine.querySelectorAll('.dp-ligne')).filter(x => x.querySelector('.dp-pred').checked);
         const corps = { code, predecesseurs: coches.map(x => x.dataset.code), simultane: coches.filter(x => x.querySelector('.dp-mode').value === 'simultane').map(x => x.dataset.code), seuil_pct: Number(document.getElementById('dp-seuil').value) || 10 };
+        corps.delais = {};
+        document.querySelectorAll('#dp-delais .dp-delai').forEach(dv => { const c = dv.querySelector('.dp-d-c').value; const h = Number(String(dv.querySelector('.dp-d-h').value).replace(',', '.')); if (c && h > 0) corps.delais[c] = { min_h: Math.max(corps.delais[c] ? corps.delais[c].min_h : 0, h) }; });
+        corps.ratio = document.getElementById('dp-ratio-on').checked ? { seuil: document.getElementById('dp-r-seuil').value, taux_sous: document.getElementById('dp-r-sous').value, taux_au_dela: document.getElementById('dp-r-au').value } : null;
         ev.target.disabled = true; msg.innerHTML = '<div class="msg">Enregistrement…</div>';
         try { await appeler('PUT', `${API}/gerer-dependances`, corps); toast('Dépendances enregistrées.'); ouvrirModaleDependances(); }
         catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; ev.target.disabled = false; }
@@ -4651,7 +4696,7 @@
       <input id="dp-filtre" placeholder="Rechercher une opération…" style="width:100%; margin-bottom:8px;">
       <div style="max-height:360px; overflow:auto; border:1px solid var(--line); border-radius:10px;">
         <table><thead><tr><th>Opération</th><th>Attend</th><th></th></tr></thead><tbody id="dp-corps">
-        ${lignes.map(l => `<tr data-nom="${esc((l.libelle + ' ' + l.operation).toLowerCase())}"><td><strong>${esc(l.libelle)}</strong>${l.personnalisee ? ' <span class="tag">ajoutée</span>' : ''}${l.condition && !['toujours', 'standard'].includes(l.condition) ? ` <span class="plan-note">(Pléiade : ${esc(l.condition)})</span>` : ''}</td><td style="font-size:12.5px;">${resume(l)}</td>
+        ${lignes.map(l => `<tr data-nom="${esc((l.libelle + ' ' + l.operation).toLowerCase())}"><td><strong>${esc(l.libelle)}</strong>${l.personnalisee ? ' <span class="tag">ajoutée</span>' : ''}${l.condition && !['toujours', 'standard'].includes(l.condition) ? ` <span class="plan-note">(Pléiade : ${esc(l.condition)})</span>` : ''}</td><td style="font-size:12.5px;">${resume(l)}${resumeBis(l)}</td>
           <td style="white-space:nowrap; text-align:right;"><button class="btn dp-edit" data-code="${esc(l.code)}">Modifier</button>${l.personnalisee ? ` <button class="btn dp-del" data-code="${esc(l.code)}" title="Retirer cette opération du modèle">✕</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="3" class="plan-note">Modèle vide.</td></tr>'}
         </tbody></table>
       </div>
@@ -5322,6 +5367,15 @@
     // elle est AFFICHÉE dans cette unité (exemplaires × cahiers par exemplaire) ; l'enregistrement reste en exemplaires,
     // car le suivi de production (badge, avancement) compte des exemplaires.
     const champQuantite = (e) => {
+      // Étape à quantité calculée par ratio (réparations) : le champ montre la quantité calculée, corrigeable ; « ↺ auto » revient au calcul.
+      if (e.quantite_ratio) {
+        const r = e.quantite_ratio;
+        const calcule = e.parametres.quantite ? Number(e.parametres.quantite) : e.quantite_etape;
+        const auto = e.parametres.quantite ? 0 : 1;
+        return `<div class="field"><label>Quantité de cette opération <span class="plan-note qte-regle">— ${esc(e.quantite_regle || `${r.taux_sous} % de l'OF si moins de ${r.seuil} ex., sinon ${r.taux_au_dela} %`)}${auto ? '' : ' — réglée à la main'}</span></label>
+          <div style="display:flex; gap:6px; align-items:center;"><input class="s-qte" type="number" min="1" data-auto="${auto}" data-r-seuil="${r.seuil}" data-r-sous="${r.taux_sous}" data-r-au="${r.taux_au_dela}" value="${calcule}">
+          <button class="btn s-qte-auto" type="button" style="padding:3px 9px;font-size:12px;" title="Revenir à la quantité calculée automatiquement d'après le ratio">↺ auto</button></div></div>`;
+      }
       const ouvrages = e.parametres.quantite ?? data.of.quantite;
       const auto = e.parametres.quantite ? 0 : 1;
       if (e.unite_quantite && e.quantite_unite !== null && e.ratio_unite) {
@@ -5448,8 +5502,19 @@
       eq.textContent = Number.isFinite(ex) && i.value !== '' ? ` = ${ex.toLocaleString('fr-FR')} exemplaires` : '';
     };
     document.querySelectorAll('.s-qte').forEach(i => { majEquivalent(i); i.addEventListener('input', () => { i.dataset.auto = '0'; majEquivalent(i); }); });
+    // Quantité calculée par ratio d'après la quantité de l'OF saisie à l'écran.
+    const qRatio = (i) => {
+      const q = Number(document.getElementById('m-of-qte').value);
+      if (!Number.isFinite(q) || q <= 0) return null;
+      return Math.max(1, Math.ceil(q * (q < Number(i.dataset.rSeuil) ? Number(i.dataset.rSous) : Number(i.dataset.rAu)) / 100 - 1e-9));
+    };
+    document.querySelectorAll('.s-qte-auto').forEach(b => b.addEventListener('click', () => {
+      const i = b.parentNode.querySelector('.s-qte'); const v = qRatio(i);
+      if (v !== null) { i.value = v; i.dataset.auto = '1'; }
+    }));
     document.getElementById('m-of-qte').addEventListener('input', (ev) => {
-      document.querySelectorAll('.s-qte[data-auto="1"]').forEach(i => {
+      document.querySelectorAll('.s-qte[data-r-seuil][data-auto="1"]').forEach(i => { const v = qRatio(i); if (v !== null) i.value = v; });
+      document.querySelectorAll('.s-qte[data-auto="1"]:not([data-r-seuil])').forEach(i => {
         const rat = Number(i.dataset.ratio);
         i.value = rat && ev.target.value !== '' ? Math.round(Number(ev.target.value) * rat) : ev.target.value;
         majEquivalent(i);
@@ -5515,7 +5580,11 @@
         const qIn = card.querySelector('.s-qte');
         const ratioQ = Number(qIn.dataset.ratio) || 0;
         const qOuvrages = ratioQ && qIn.value !== '' ? String(Math.round(Number(qIn.value) / ratioQ)) : qIn.value;   // affichée en cahiers → enregistrée en exemplaires
-        if (qIn.dataset.auto === '0' && qOuvrages !== '' && qOuvrages !== document.getElementById('m-of-qte').value) parametres.quantite = qOuvrages;
+        if (qIn.dataset.rSeuil !== undefined) {
+          // Quantité par ratio : enregistrée seulement si elle a été corrigée à la main (sinon elle suit la quantité de l'OF).
+          const calc = qRatio(qIn);
+          if (qIn.dataset.auto === '0' && qOuvrages !== '' && String(calc) !== String(qOuvrages)) parametres.quantite = qOuvrages;
+        } else if (qIn.dataset.auto === '0' && qOuvrages !== '' && qOuvrages !== document.getElementById('m-of-qte').value) parametres.quantite = qOuvrages;
         card.querySelectorAll('.s-param').forEach(i => { if (i.value !== '') parametres[i.dataset.cle] = i.value; });
         const etape = {
           gamme_id: card.dataset.gamme,
