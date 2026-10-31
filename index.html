@@ -5016,6 +5016,19 @@
       const memes = data.etapes.filter(y => y.operation === x.operation);
       libelles.set(x.sequence, memes.length > 1 ? `${x.operation} (${memes.indexOf(x) + 1}/${memes.length})` : x.operation);
     });
+    // Quantité de l'étape. Quand la cadence porte sur une autre unité que l'exemplaire (ex. assemblage : cahiers),
+    // elle est AFFICHÉE dans cette unité (exemplaires × cahiers par exemplaire) ; l'enregistrement reste en exemplaires,
+    // car le suivi de production (badge, avancement) compte des exemplaires.
+    const champQuantite = (e) => {
+      const ouvrages = e.parametres.quantite ?? data.of.quantite;
+      const auto = e.parametres.quantite ? 0 : 1;
+      if (e.unite_quantite && e.quantite_unite !== null && e.ratio_unite) {
+        const rat = (Math.round(e.ratio_unite * 100) / 100).toLocaleString('fr-FR');
+        return `<div class="field"><label>Quantité de cette opération (${esc(e.unite_quantite)}) <span class="plan-note">— ${Number(ouvrages).toLocaleString('fr-FR')} ex. × ${rat} ${esc(e.unite_quantite)}/ex., corrigeable</span></label><input class="s-qte" type="number" min="1" data-auto="${auto}" data-ratio="${e.ratio_unite}" data-formule="${esc(e.formule_quantite || '')}" value="${Math.round(e.quantite_unite)}"><small class="qte-eq plan-note"></small></div>`;
+      }
+      const aide = e.unite_quantite ? ` <span class="plan-note">— exemplaires ; renseignez les caractéristiques du produit pour l'afficher en ${esc(e.unite_quantite)}</span>` : ' <span class="plan-note">— reprise de l\'OF, corrigeable</span>';
+      return `<div class="field"><label>Quantité de cette opération${aide}</label><input class="s-qte" type="number" min="1" data-auto="${auto}" value="${ouvrages}"></div>`;
+    };
     const etapesHtml = data.etapes.map(e => {
       const verrou = e.statut !== 'à planifier';
       const machOptions = `<option value="">— Standard de l'opération —</option>` + e.machines_compatibles
@@ -5062,7 +5075,7 @@
           <div class="step-source">${SOURCES[e.source]}${e.duree_manuelle_h !== null ? ' — <strong>durée manuelle appliquée</strong>' : ''}</div>
           <div class="step-grid">
             <div class="field"><label>Machine prévue ${verrou ? '(planifiée — non modifiable ici)' : ''}</label><select class="s-machine" ${verrou ? 'disabled' : ''}>${machOptions}</select></div>
-            <div class="field"><label>Quantité de cette opération <span class="plan-note">— reprise de l'OF, corrigeable</span></label><input class="s-qte" type="number" min="1" data-auto="${e.parametres.quantite ? 0 : 1}" value="${e.parametres.quantite ?? data.of.quantite}"></div>
+            ${champQuantite(e)}
             ${paramsHtml}
             <div class="field"><label>Durée manuelle (h) — remplace le calcul</label><input class="s-manuel" type="number" min="0" step="any" value="${e.duree_manuelle_h ?? ''}"></div>
           </div>
@@ -5124,10 +5137,43 @@
     `, 'large');
 
     // Quantité : la quantité de l'OF se répercute sur les opérations qui n'ont pas de valeur propre.
-    document.querySelectorAll('.s-qte').forEach(i => i.addEventListener('input', () => { i.dataset.auto = '0'; }));
+    // Pour une étape affichée en cahiers (data-ratio), la valeur saisie se convertit en exemplaires : valeur ÷ ratio.
+    const majEquivalent = (i) => {
+      const eq = i.parentNode.querySelector('.qte-eq');
+      const rat = Number(i.dataset.ratio);
+      if (!eq || !rat) return;
+      const ex = Math.round(Number(i.value) / rat);
+      eq.textContent = Number.isFinite(ex) && i.value !== '' ? ` = ${ex.toLocaleString('fr-FR')} exemplaires` : '';
+    };
+    document.querySelectorAll('.s-qte').forEach(i => { majEquivalent(i); i.addEventListener('input', () => { i.dataset.auto = '0'; majEquivalent(i); }); });
     document.getElementById('m-of-qte').addEventListener('input', (ev) => {
-      document.querySelectorAll('.s-qte[data-auto="1"]').forEach(i => { i.value = ev.target.value; });
+      document.querySelectorAll('.s-qte[data-auto="1"]').forEach(i => {
+        const rat = Number(i.dataset.ratio);
+        i.value = rat && ev.target.value !== '' ? Math.round(Number(ev.target.value) * rat) : ev.target.value;
+        majEquivalent(i);
+      });
     });
+    // Le nombre de cahiers (ou autre caractéristique de la formule) change : la quantité affichée suit, les exemplaires restent les mêmes.
+    const majRatios = () => {
+      document.querySelectorAll('.step-card').forEach(card => {
+        const i = card.querySelector('.s-qte[data-ratio]');
+        if (!i) return;
+        const m = /^\s*(?:quantite\s*\*\s*([a-z][a-z0-9_]*)|([a-z][a-z0-9_]*)\s*\*\s*quantite)\s*$/i.exec(i.dataset.formule || '');
+        if (!m) return;
+        const cle = (m[1] || m[2]).toLowerCase();
+        const propre = card.querySelector(`.s-param[data-cle="${cle}"]`);
+        const produit = document.querySelector(`.s-car[data-cle="${cle}"]`);
+        const brut = propre && propre.value !== '' ? propre.value : (produit ? produit.value : '');
+        const nouveau = Number(String(brut).replace(',', '.'));
+        const ancien = Number(i.dataset.ratio);
+        if (!Number.isFinite(nouveau) || nouveau <= 0 || !ancien || nouveau === ancien) return;
+        const ex = Math.round(Number(i.value) / ancien);
+        i.dataset.ratio = String(nouveau);
+        i.value = Math.round(ex * nouveau);
+        majEquivalent(i);
+      });
+    };
+    document.querySelectorAll('.s-car, .s-param').forEach(i => i.addEventListener('input', majRatios));
     const majLignePred = (row) => {
       const coche = row.querySelector('.s-pred-check').checked;
       const sel = row.querySelector('.s-pred-mode');
@@ -5165,7 +5211,9 @@
       const etapes = Array.from(document.querySelectorAll('.step-card')).map(card => {
         const parametres = {};
         const qIn = card.querySelector('.s-qte');
-        if (qIn.dataset.auto === '0' && qIn.value !== '' && qIn.value !== document.getElementById('m-of-qte').value) parametres.quantite = qIn.value;
+        const ratioQ = Number(qIn.dataset.ratio) || 0;
+        const qOuvrages = ratioQ && qIn.value !== '' ? String(Math.round(Number(qIn.value) / ratioQ)) : qIn.value;   // affichée en cahiers → enregistrée en exemplaires
+        if (qIn.dataset.auto === '0' && qOuvrages !== '' && qOuvrages !== document.getElementById('m-of-qte').value) parametres.quantite = qOuvrages;
         card.querySelectorAll('.s-param').forEach(i => { if (i.value !== '') parametres[i.dataset.cle] = i.value; });
         const etape = {
           gamme_id: card.dataset.gamme,
