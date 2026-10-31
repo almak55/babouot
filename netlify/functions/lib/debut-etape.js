@@ -15,6 +15,7 @@
 const PL = require('./planification');
 const EL = require('./en-ligne');
 const { normaliserGamme } = require('./ordre-gamme');
+const DL = require('./delais');
 
 const DEBUT = '08:00';
 const FIN = '16:30';
@@ -62,7 +63,7 @@ async function jourDebutSuggere(supabase, gammeId, aujourdhui) {
   const regles = await EL.chargerRegles(supabase);
   const { data: toutes, error: e2 } = await supabase
     .from('gammes_operatoires')
-    .select('sequence, statut, operations(code, nom), planning_jour(date, heure_debut, heure_fin)')
+    .select('sequence, statut, predecesseurs, operations(code, nom), planning_jour(date, heure_debut, heure_fin)')
     .eq('of_id', g.of_id);
   if (e2) throw e2;
   const triees = toutes.slice().sort((a, b) => a.sequence - b.sequence);
@@ -91,6 +92,20 @@ async function jourDebutSuggere(supabase, gammeId, aujourdhui) {
     if (c.progressif) cands.push([instantProgressif(iv, pct), `dès ${pct} % de « ${nom(p)} »`]);
     cands.forEach(([t, r]) => { raisons.push([t, r]); if (instant === null || t > instant) instant = t; });
   }
+
+  // Délais d'attente (séchage de la colle avant l'emboîtage…) : N heures réelles après la fin de l'étape attendue.
+  try {
+    const delais = DL.delaisMinimaux(await DL.charger(supabase), regles, triees.map((e) => ({ sequence: e.sequence, predecesseurs: e.predecesseurs, operation_code: e.operations && e.operations.code, operation: e.operations && e.operations.nom })));
+    Object.entries(delais[g.sequence] || {}).forEach(([seq, minutes]) => {
+      const p = triees.find((e) => e.sequence === Number(seq));
+      const iv = p ? intervalles(p.planning_jour) : [];
+      if (!iv.length) return;
+      const t = iv[iv.length - 1][1] + minutes;
+      const h = minutes % 60 === 0 ? `${minutes / 60} h` : `${minutes} min`;
+      raisons.push([t, `${h} d'attente après la fin de « ${nom(p)} » (séchage)`]);
+      if (instant === null || t > instant) instant = t;
+    });
+  } catch (_) { /* délais indisponibles : on s'en tient aux liens */ }
 
   const jourAuj = PL.enMinutes(aujourdhui, '00:00');
   let jour; let raison;

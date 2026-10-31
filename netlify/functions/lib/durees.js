@@ -22,6 +22,7 @@
 
 const { analyser, evaluer } = require('./formules');
 const EL = require('./en-ligne');
+const DL = require('./delais');
 
 const arrondi = (x) => Math.round(x * 100) / 100;
 const heures = (t) => { const [h, m] = String(t).split(':'); return Number(h) + Number(m) / 60; };
@@ -70,6 +71,8 @@ async function calculerEtapes(supabase, ofId) {
   const parCle = Object.fromEntries(catalogue.map((c) => [c.cle, c]));
   const typesCar = Object.fromEntries(catalogue.map((c) => [c.cle, c.type]));
   const caracteristiquesOf = of.caracteristiques || {};
+  // Modèle de gamme : ratios de réparation et délais d'attente (lib/delais.js).
+  const [reglesEL, modeleDelais] = await Promise.all([EL.chargerRegles(supabase), DL.charger(supabase)]);
 
   const etapes = gammes.map((g) => {
     const parametres = g.parametres || {};
@@ -93,7 +96,9 @@ async function calculerEtapes(supabase, ofId) {
     const typeManquant = !utilisees.length && typesAutres.length > 0;
 
     const quantiteEtape = nombreOuNull(parametres.quantite);
-    const quantite = quantiteEtape !== null && quantiteEtape > 0 ? quantiteEtape : of.quantite;
+    // Quantité : saisie sur l'étape > ratio du modèle (réparations : % de la quantité de l'OF) > quantité de l'OF.
+    const parRatio = quantiteEtape !== null && quantiteEtape > 0 ? null : DL.quantiteParRatio(modeleDelais, reglesEL, g.operations.code, g.operations.nom, of.quantite);
+    const quantite = quantiteEtape !== null && quantiteEtape > 0 ? quantiteEtape : (parRatio ? parRatio.quantite : of.quantite);
 
     // Valeur d'une caractéristique : propre à l'étape, sinon celle de l'OF.
     const valeurDe = (cle) => {
@@ -234,6 +239,8 @@ async function calculerEtapes(supabase, ofId) {
       types_possibles: typeManquant ? typesAutres : [],
       parametres, parametres_requis: requis, parametres_manquants: manquants,
       quantite_etape: quantite,
+      quantite_regle: parRatio ? parRatio.detail : null,
+      quantite_ratio: parRatio ? parRatio.regle : (quantiteEtape !== null && quantiteEtape > 0 ? (DL.ligneDe(modeleDelais, reglesEL, g.operations.code, g.operations.nom) || {}).ratio || null : null),
       unite_quantite: uniteQte ? uniteQte.unite : null,
       formule_quantite: uniteQte ? uniteQte.formule : null,
       quantite_unite: uniteQte && uniteQte.valeur !== null ? arrondi(uniteQte.valeur) : null,
@@ -248,10 +255,13 @@ async function calculerEtapes(supabase, ofId) {
   });
 
   // Opérations en ligne : la production de l'étape suit celle de son prédécesseur.
-  const reglesEL = await EL.chargerRegles(supabase);
   EL.appliquerEnLigne(etapes, reglesEL);
   // Couples « en ligne » connus (ex. contrôle couvertures / montage) : l'écran propose « en ligne » par défaut pour ces liens.
   etapes.forEach((e) => { e.regle_en_ligne = etapes.filter((x) => x.sequence !== e.sequence && reglesEL.has(`${e.operation_code}|${x.operation_code}`)).map((x) => x.sequence); });
+
+  // Délais d'attente (séchage de la colle avant l'emboîtage…) : minutes minimales entre la fin de l'étape attendue et le début.
+  const delais = DL.delaisMinimaux(modeleDelais, reglesEL, etapes);
+  etapes.forEach((e) => { e.delais_min = delais[e.sequence] || {}; });
 
   const calendrier = calRes.data.map((c) => {
     const utiles = heures(c.heure_fin) - heures(c.heure_debut) - c.pause_minutes / 60;

@@ -491,10 +491,15 @@ function planifierAvant(entree, debutMin) {
         finMinRequise = Math.max(finMinRequise, pr.fin);
       }
     });
+    // Délai d'attente minimal (séchage…) : le départ est repoussé de N minutes après la fin réelle de l'étape attendue.
+    Object.entries(etape.delais || {}).forEach(([p, minutes]) => {
+      const pr = resultats.get(Number(p));
+      if (pr && pr.reel && Number(minutes) > 0) depart = Math.max(depart, pr.fin + Number(minutes));
+    });
 
     if (etape.fixe) {
       const fin = etape.fin_min !== null && etape.fin_min !== undefined ? Math.max(depart, etape.fin_min) : depart;
-      resultats.set(etape.index, { debut: depart, fin, duree: 0, brutes: null });
+      resultats.set(etape.index, { debut: depart, fin, duree: 0, brutes: null, reel: etape.fin_min !== null && etape.fin_min !== undefined });
       etapes.push({ index: etape.index, fixe: true, machine_id: null, phases: [], debut_min: null, fin_min: etape.fin_min ?? null, problemes: [] });
       return;
     }
@@ -518,7 +523,7 @@ function planifierAvant(entree, debutMin) {
       const brutes = res.phases.flatMap((ph) => ph.brutes);
       const prods = res.phases.filter((ph) => ph.type_phase === 'production').flatMap((ph) => ph.brutes);
       const prod = prods.length ? { d: Math.min(...prods.map((x) => x.d)), f: Math.max(...prods.map((x) => x.f)) } : null;
-      resultats.set(etape.index, { debut: res.debut_min, fin: res.fin_min, duree: brutes.reduce((t, x) => t + (x.f - x.d), 0), brutes, prod });
+      resultats.set(etape.index, { debut: res.debut_min, fin: res.fin_min, duree: brutes.reduce((t, x) => t + (x.f - x.d), 0), brutes, prod, reel: true });
     } else {
       // Étape impossible à placer : elle ne retarde pas ses successeurs (qui repartent de leur propre départ).
       resultats.set(etape.index, { debut: depart, fin: depart, duree: 0, brutes: null });
