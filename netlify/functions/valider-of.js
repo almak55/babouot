@@ -18,7 +18,9 @@
 //      suffisante. Sans déclaration, ce critère est considéré ok.
 //   3. PERSONNEL — pour chaque opération de la gamme, il doit exister
 //      au moins une personne compétente (par opération ou par
-//      machine précise) et non absente aujourd'hui.
+//      machine précise) et non absente aujourd'hui — OU une personne
+//      déjà affectée à cette étape dans le planning (l'affectation
+//      refuse déjà les absences sur le jour du créneau).
 //
 // Si les 3 critères passent : statut -> 'validé'.
 // Sinon : statut -> 'en attente de validation', avec le détail des
@@ -69,7 +71,7 @@ const handlerProtege = async (event) => {
     }
 
     const [machinesRes, machinesOpsRes, maintenanceRes, competencesRes, persMachinesRes,
-           absencesRes, personnelRes, matieresRes, phasesRes] = await Promise.all([
+           absencesRes, personnelRes, matieresRes, phasesRes, affectesRes] = await Promise.all([
       supabase.from('machines').select('id, nom, operation_id, actif'),
       supabase.from('machines_operations').select('machine_id, operation_id'),
       supabase.from('maintenance_machine').select('*').eq('statut', 'en cours'),
@@ -79,6 +81,7 @@ const handlerProtege = async (event) => {
       supabase.from('personnel').select('id, nom').eq('actif', true),
       supabase.from('of_matieres').select('stock_id, quantite_requise, stocks(nom, quantite, unite)').eq('of_id', of_id),
       supabase.from('phases_standard').select('operation_id, occupe_machine'),
+      supabase.from('planning_jour').select('gamme_operatoire_id, personnel_id, planning_jour_personnel(personnel_id)').eq('of_id', of_id),
     ]);
     for (const r of [machinesRes, machinesOpsRes, maintenanceRes, competencesRes, persMachinesRes, absencesRes, personnelRes, matieresRes]) {
       if (r.error) throw r.error;
@@ -92,6 +95,13 @@ const handlerProtege = async (event) => {
       if (ph.length) return !ph.some((p) => p.occupe_machine !== false);
       return machinesParOp(operationId).length === 0;
     };
+
+    // Étapes déjà affectées à du personnel dans le planning (créneaux de l'OF). Table illisible : on l'ignore.
+    const etapesAvecPersonnel = new Set();
+    (affectesRes.error ? [] : (affectesRes.data || [])).forEach((c) => {
+      const pers = [c.personnel_id, ...((c.planning_jour_personnel || []).map((x) => x.personnel_id))].filter(Boolean);
+      if (c.gamme_operatoire_id && pers.length) etapesAvecPersonnel.add(c.gamme_operatoire_id);
+    });
 
     const machineEnMaintenance = (machineId) => maintenanceRes.data.some((m) =>
       m.machine_id === machineId && m.bloquant !== false && m.date_debut <= aujourdHui && (!m.date_fin || m.date_fin >= aujourdHui)
@@ -154,7 +164,7 @@ const handlerProtege = async (event) => {
     // ---- 3. Critère personnel ----
     let personnelOk = true;
     for (const g of gammes) {
-      if (!personnelDisponiblePourOp(g.operation_id)) {
+      if (!etapesAvecPersonnel.has(g.id) && !personnelDisponiblePourOp(g.operation_id)) {
         personnelOk = false;
         blocages.push({ etape: g.sequence, type: 'personnel', detail: `${g.operations.nom} : personne de compétent·e disponible aujourd'hui (tout le monde absent ou aucune compétence déclarée).` });
       }
