@@ -252,6 +252,9 @@
   .row-icon.muted { background: var(--paper-raised-2); color: var(--ink-500); }
   .row-title { font-weight: 600; font-family: "IBM Plex Mono", monospace; font-size: 12px; }
   .row-sub { color: var(--ink-500); font-size: 12px; margin-top: 1px; }
+  /* OF Pléiade / coffrets : numéro et titre en bleu, comme le bouton « OF Pléiade » */
+  .of-pleiade .row-title, .of-pleiade .row-sub { color: #4338ca; }
+  :root[data-theme="dark"] .of-pleiade .row-title, :root[data-theme="dark"] .of-pleiade .row-sub { color: #a5b4fc; }
   .chip { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; background: var(--paper-raised-2); color: var(--ink-700); }
   .etat { font-size: 12.5px; font-weight: 600; }
   .etat-teal { color: var(--accent-teal); }
@@ -1297,7 +1300,7 @@
         const accent = (ETAT[o.statut] || [0, 'teal'])[1];
         const fill = o.avancement >= 70 ? '' : (o.avancement >= 30 ? 'warn' : 'danger');
         const typeTag = o.type === 'coffret' ? ' <span class="tag warn" style="margin-left:4px;">Coffret</span>' : '';
-        return `<tr class="row-accent-${accent}">
+        return `<tr class="row-accent-${accent}${estOfPleiade(o) ? ' of-pleiade' : ''}">
           <td class="row-icon-cell"><span class="row-icon ${accent}">${svgIcon(PRIO_ICON[o.priorite] || PRIO_ICON.normale)}</span></td>
           <td><div class="row-title">${esc(o.id)}${typeTag}</div><div class="row-sub">${esc(o.produit)}</div></td>
           <td><span class="chip">${esc(o.client || '—')}</span></td>
@@ -1338,7 +1341,7 @@
       const fillClass = o.avancement>=70?'':(o.avancement>=30?'warn':'danger');
       const accent = ROW_ACCENT[o.statut] || 'teal';
       tbody.appendChild(el(`
-        <tr class="row-accent-${accent}">
+        <tr class="row-accent-${accent}${estOfPleiade(o) ? ' of-pleiade' : ''}">
           <td class="row-icon-cell"><span class="row-icon ${accent}">${svgIcon(PRIO_ICON[o.priorite] || PRIO_ICON.normale)}</span></td>
           <td><div class="row-title">${o.id}</div><div class="row-sub">${o.produit}</div></td>
           <td><span class="chip">${o.client || '—'}</span></td>
