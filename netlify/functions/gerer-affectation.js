@@ -256,9 +256,18 @@ const handlerProtege = async (event) => {
       const cal = await calendrierNormal(supabase);
       const erreurs = [];
       if (e <= s) erreurs.push('L\'heure de fin doit être après l\'heure de début.');
-      if (!PL.estOuvre(PL.enMinutes(date, '00:00'))) erreurs.push('Ce jour n\'est pas ouvré (week-end ou jour férié).');
-      if (s < cal.debut || e > cal.fin) erreurs.push(`Hors des horaires de l'atelier (${hh(cal.debut)}-${hh(cal.fin)}).`);
-      if (chevauche([s, e], [cal.pause, cal.pauseFin])) erreurs.push(`Le créneau chevauche la pause déjeuner (${hh(cal.pause)}-${hh(cal.pauseFin)}) : scindez-le avant ou après.`);
+      // Jours et horaires : lundi-vendredi (8h-16h30 ; heures supplémentaires jusqu'à 7h-17h30), samedi exceptionnel 6h-12h, jamais le dimanche ni les jours fériés.
+      const avHoraires = [];
+      const dow = new Date(PL.enMinutes(date, '00:00') * 60000).getUTCDay();
+      if (dow === 0 || PL.libelleFerie(date)) erreurs.push('Ce jour n\'est pas ouvré (dimanche ou jour férié).');
+      else if (dow === 6) {
+        if (s < 6 * 60 || e > 12 * 60) erreurs.push('Samedi exceptionnel : le travail se fait de 06:00 à 12:00.');
+        else avHoraires.push('Samedi exceptionnel (6h-12h).');
+      } else {
+        if (s < 7 * 60 || e > 17 * 60 + 30) erreurs.push('Hors des horaires de l\'atelier, même en heures supplémentaires (07:00-17:30).');
+        else if (s < cal.debut || e > cal.fin) avHoraires.push(`Heures supplémentaires : hors des horaires normaux (${hh(cal.debut)}-${hh(cal.fin)}).`);
+        if (chevauche([s, e], [cal.pause, cal.pauseFin])) erreurs.push(`Le créneau chevauche la pause déjeuner (${hh(cal.pause)}-${hh(cal.pauseFin)}) : scindez-le avant ou après.`);
+      }
       if (!erreurs.length) {
         const cible = { ...l, date };
         const jour = await etatJour(supabase, cible);
@@ -276,7 +285,7 @@ const handlerProtege = async (event) => {
       if (erreurs.length) return rep(409, { error: erreurs.join(' '), erreurs });
 
       // Avertissements (non bloquants) : ordre des étapes de la gamme
-      const avertissements = [];
+      const avertissements = [...avHoraires];
       if (l.gamme_operatoire_id) {
         const { data: g } = await supabase.from('gammes_operatoires').select('id, of_id, sequence, predecesseurs').eq('id', l.gamme_operatoire_id).maybeSingle();
         if (g) {

@@ -4,7 +4,7 @@
 //
 // GET ?section=calendrier&debut=AAAA-MM-JJ&fin=AAAA-MM-JJ      (au plus 400 jours)
 //   -> { periode, capacite:{machines, personnel}, jours:{ 'AAAA-MM-JJ': { machine_h, pers_h, cap_pers_h, cap_machine_h, charge,
-//        creneaux, nb_of, absents, machines_arret } }, par_machine:[{ id, nom, heures, jours_actifs, par_jour? }],
+//        creneaux, nb_of, absents, machines_arret, heures_jour (8 | 10 heures sup | 6 samedi travaillé | 0), mode } }, par_machine:[{ id, nom, heures, jours_actifs, par_jour? }],
 //        interventions:[…], absences:[{ personnel, date, statut }],
 //        creneaux?:[…] }   (liste détaillée des créneaux seulement si la période ne dépasse pas 8 jours)
 // GET ?section=of
@@ -79,6 +79,7 @@ async function sectionCalendrier(supabase, debut, fin) {
   });
   const parMachine = Object.fromEntries(machines.map((m) => [m.id, { id: m.id, nom: m.nom, heures: 0, jours: new Set(), par_jour: {} }]));
   const detail = [];
+  const listeJour = {};   // créneaux de chaque jour : sert à savoir si le jour est en heures sup ou si le samedi est ouvert
   const matrice = (Date.parse(fin) - Date.parse(debut)) / 86400000 <= 7;
   planning.forEach((c) => {
     const j = jours[c.date]; if (!j) return;
@@ -86,6 +87,7 @@ async function sectionCalendrier(supabase, debut, fin) {
     const ids = (c.planning_jour_personnel || []).map((l) => l.personnel_id);
     const pers = ids.length ? ids : (c.personnel_id ? [c.personnel_id] : []);
     j.creneaux += 1; if (c.of_id) j.ofs.add(c.of_id);
+    (listeJour[c.date] ??= []).push(c);
     j.pers_h += h * pers.length;
     if (c.machine_id) {
       j.machine_h += h;
@@ -99,10 +101,13 @@ async function sectionCalendrier(supabase, debut, fin) {
 
   // Capacités et charge de chaque jour
   Object.entries(jours).forEach(([d, j]) => {
-    const ouvre = C.estJourOuvre(d);
+    const hj = C.heuresOuvertes(d, listeJour[d]);   // 8 h (lun-ven), 10 h (heures sup), 6 h (samedi travaillé), 0 sinon
+    const ouvre = hj > 0;
+    j.heures_jour = hj;
+    j.mode = hj === 10 ? 'heures_sup' : (hj === 6 ? 'samedi' : (hj === 8 ? 'normal' : 'ferme'));
     j.machines_arret = ouvre ? (arretJour[d] ? Array.from(arretJour[d]).filter((id) => nomMachine[id]).length : 0) : 0;
-    j.cap_pers_h = ouvre ? Math.max(0, personnel.length - j.absents) * C.HEURES_JOUR : 0;
-    j.cap_machine_h = ouvre ? Math.max(0, machines.length - j.machines_arret) * C.HEURES_JOUR : 0;
+    j.cap_pers_h = ouvre ? Math.max(0, personnel.length - j.absents) * hj : 0;
+    j.cap_machine_h = ouvre ? Math.max(0, machines.length - j.machines_arret) * hj : 0;
     j.charge = C.chargeJour(j);
     j.nb_of = j.ofs.size; delete j.ofs;
     j.machine_h = arrondi(j.machine_h); j.pers_h = arrondi(j.pers_h);

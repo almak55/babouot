@@ -40,6 +40,8 @@ const CALENDRIERS_DEFAUT = {
   normal:     { code: 'normal',     debut: '08:00', fin: '16:30', pause_debut: '12:00', pause_minutes: 30 },
   heures_sup: { code: 'heures_sup', debut: '07:00', fin: '17:30', pause_debut: '12:00', pause_minutes: 30 },
 };
+// Samedi exceptionnel : 06:00-12:00, sans pause. Il s'ajoute à l'un des deux calendriers ('normal' ou 'heures_sup').
+const SAMEDI = { samedi_debut: '06:00', samedi_fin: '12:00' };
 
 // 'AAAA-MM-JJTHH:MM' -> minutes ; 'AAAA-MM-JJ' -> minutes à `heureParDefaut`.
 function lireDateHeure(s, heureParDefaut) {
@@ -65,7 +67,8 @@ const handlerProtege = async (event) => {
     const etapesImposees = Array.isArray(body.etapes_imposees) ? body.etapes_imposees : [];
     if (!of_id) return { statusCode: 400, body: JSON.stringify({ error: 'of_id requis.' }) };
     if (!['avant', 'arriere'].includes(mode)) return { statusCode: 400, body: JSON.stringify({ error: 'mode invalide (avant | arriere).' }) };
-    const horairesCode = body.horaires === 'heures_sup' ? 'heures_sup' : 'normal';
+    // horaires : 'normal' | 'heures_sup', avec le suffixe '_samedi' pour ouvrir aussi le samedi (6h-12h, exceptionnel).
+    const horairesCode = ['normal', 'normal_samedi', 'heures_sup', 'heures_sup_samedi'].includes(body.horaires) ? body.horaires : 'normal';
 
     const supabase = getSupabase();
     await purgerObsoletes(supabase);   // ne pas bloquer personnes et machines avec des créneaux d'étapes terminées
@@ -75,11 +78,13 @@ const handlerProtege = async (event) => {
     if (!calcul) return { statusCode: 404, body: JSON.stringify({ error: 'OF introuvable.' }) };
     const { of, etapes: etapesCalc, calendrier: calTable } = calcul;
 
-    const calendrierDe = (code) => {
+    const calendrierDe = (codeComplet) => {
+      const samedi = /_samedi$/.test(codeComplet), code = codeComplet.replace(/_samedi$/, '');
       const ligne = calTable.find((c) => c.code === code);
-      return ligne
+      const base = ligne
         ? { code, debut: ligne.heure_debut, fin: ligne.heure_fin, pause_debut: ligne.pause_debut, pause_minutes: ligne.pause_minutes }
         : CALENDRIERS_DEFAUT[code];
+      return samedi ? { ...base, code: codeComplet, ...SAMEDI } : base;
     };
     const cal = calendrierDe(horairesCode);
 
@@ -355,8 +360,8 @@ const handlerProtege = async (event) => {
     };
 
     // Variante avec heures supplémentaires, si le délai n'est pas tenu en horaires normaux.
-    if (horairesCode === 'normal' && delaiMin !== null && reponse.resume.respecte_delai === false) {
-      const alt = lancer(calendrierDe('heures_sup'));
+    if (!/^heures_sup/.test(horairesCode) && delaiMin !== null && reponse.resume.respecte_delai === false) {
+      const alt = lancer(calendrierDe(/_samedi$/.test(horairesCode) ? 'heures_sup_samedi' : 'heures_sup'));
       reponse.alternative_heures_sup = {
         debut: alt.debut_min !== null ? iso(alt.debut_min) : null,
         fin: alt.fin_min !== null ? iso(alt.fin_min) : null,
