@@ -163,6 +163,10 @@ ${listeOperations}`;
     const codesValides = new Set(operations.map(o => o.code));
     resultat.operation_codes = (resultat.operation_codes || []).filter(c => codesValides.has(c));
     if (!typesProd.some((t) => t.code === resultat.type_production)) resultat.type_production = null;
+    // Emboîtage par défaut (tranchefile/signet + finitions ; toujours pour un OF Pléiade) : voir lib/emboitage.js
+    const emb = require('./lib/emboitage').completer(resultat.operation_codes, operations, { type_production: resultat.type_production });
+    resultat.operation_codes = emb.codes;
+    if (emb.ajoute) resultat.notes = [resultat.notes, `« ${emb.ajoute.nom} » ajouté automatiquement (${emb.ajoute.raison}).`].filter(Boolean).join(' ');
     // Caractéristiques : on ne garde que les clés du catalogue, valeurs converties selon leur type.
     const propres = {};
     Object.entries(resultat.caracteristiques || {}).forEach(([cle, val]) => {
