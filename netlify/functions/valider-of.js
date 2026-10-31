@@ -20,7 +20,10 @@
 //      au moins une personne compétente (par opération ou par
 //      machine précise) et non absente aujourd'hui — OU une personne
 //      déjà affectée à cette étape dans le planning (l'affectation
-//      refuse déjà les absences sur le jour du créneau).
+//      refuse déjà les absences sur le jour du créneau). Pour une
+//      opération MANUELLE, aucune compétence précise n'est exigée :
+//      il suffit qu'une personne active soit présente aujourd'hui
+//      (les autres sont des « aides », comme à l'affectation).
 //
 // Si les 3 critères passent : statut -> 'validé'.
 // Sinon : statut -> 'en attente de validation', avec le détail des
@@ -122,6 +125,8 @@ const handlerProtege = async (event) => {
     );
     const personnelActifIds = new Set(personnelRes.data.map((p) => p.id));
 
+    const presentsAujourdhui = Array.from(personnelActifIds).filter((id) => !absentsAujourdhui.has(id)).length;
+
     const personnelDisponiblePourOp = (operationId) => {
       const parCompetence = competencesRes.data
         .filter((c) => c.operation_id === operationId).map((c) => c.personnel_id);
@@ -164,7 +169,7 @@ const handlerProtege = async (event) => {
     // ---- 3. Critère personnel ----
     let personnelOk = true;
     for (const g of gammes) {
-      if (!etapesAvecPersonnel.has(g.id) && !personnelDisponiblePourOp(g.operation_id)) {
+      if (!etapesAvecPersonnel.has(g.id) && !personnelDisponiblePourOp(g.operation_id) && !(operationManuelle(g.operation_id) && presentsAujourdhui > 0)) {
         personnelOk = false;
         blocages.push({ etape: g.sequence, type: 'personnel', detail: `${g.operations.nom} : personne de compétent·e disponible aujourd'hui (tout le monde absent ou aucune compétence déclarée).` });
       }
