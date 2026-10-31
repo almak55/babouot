@@ -145,6 +145,7 @@ ${coupe}`;
     }
     let d;
     try {
+      if (res.status === 429 || res.status === 529) return rep(503, { error: 'Service de lecture occupé, nouvel essai automatique.', occupe: true });
       if (!res.ok) throw new Error(`Anthropic API: ${res.status} ${(await res.text()).slice(0, 300)}`);
       d = await res.json();
     } catch (e) {
