@@ -108,6 +108,9 @@ async function calculerEtapes(supabase, ofId) {
     const ajouterRequis = (cle, libelle, type, unite) => {
       if (!requis.some((r) => r.cle === cle)) requis.push({ cle, libelle, type: type || 'nombre', unite: unite || null });
     };
+    // Unité de travail de l'étape quand la cadence porte sur autre chose que les exemplaires (ex. cahiers) :
+    // sert à afficher la quantité de l'étape dans cette unité (exemplaires × cahiers par exemplaire…).
+    let uniteQte = null;
     const phases = utilisees.map((p) => {
       let d = 0; let detail = '';
       if (p.type_calcul === 'fixe') {
@@ -152,6 +155,7 @@ async function calculerEtapes(supabase, ofId) {
         // Cadence sur une autre unité que l'exemplaire (cahiers cousus/pliés, coupes au massicot…) :
         // la quantité de travail se calcule d'après la fiche (ex. quantite * nb_cahiers).
         const unite = p.unite_cadence || 'unités';
+        if (!uniteQte) uniteQte = { unite, formule: String(p.quantite_formule).trim(), valeur: null };
         const a = analyser(p.quantite_formule);
         if (!a.ok) {
           erreursFormule.push({ phase: p.nom, message: `quantité à traiter : ${a.erreur}` });
@@ -172,6 +176,7 @@ async function calculerEtapes(supabase, ofId) {
             r.manquantes.forEach((v) => { if (!manquants.includes(v)) manquants.push(v); });
             detail = `à renseigner : ${r.manquantes.join(', ')}`;
           } else {
+            if (uniteQte && uniteQte.valeur === null) uniteQte.valeur = r.valeur;
             const n = Math.max(1, Number(p.par_passage) || 1);
             const passages = n > 1 ? Math.ceil(r.valeur / n - 1e-9) : r.valeur;
             d = passages / Number(p.cadence_par_h);
@@ -226,6 +231,11 @@ async function calculerEtapes(supabase, ofId) {
       source, phases, type_manquant: typeManquant,
       types_possibles: typeManquant ? typesAutres : [],
       parametres, parametres_requis: requis, parametres_manquants: manquants,
+      quantite_etape: quantite,
+      unite_quantite: uniteQte ? uniteQte.unite : null,
+      formule_quantite: uniteQte ? uniteQte.formule : null,
+      quantite_unite: uniteQte && uniteQte.valeur !== null ? arrondi(uniteQte.valeur) : null,
+      ratio_unite: uniteQte && uniteQte.valeur !== null && quantite > 0 ? uniteQte.valeur / quantite : null,
       duree_manuelle_h: manuelle,
       erreurs_formule: erreursFormule,
       chiffre: (source !== 'aucune' && erreursFormule.length === 0) || manuelle !== null,
