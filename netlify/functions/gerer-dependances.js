@@ -7,8 +7,10 @@
 //
 // GET    -> { lignes: [{ code, ordre, operation_code, operation, libelle, condition, predecesseurs, simultane, seuil_pct, personnalisee }],
 //             operations: [{ code, nom, dans_modele }] }
-// PUT    body { code, predecesseurs: [code], simultane?: [code], seuil_pct? }
+// PUT    body { code, predecesseurs: [code], simultane?: [code], seuil_pct?, delais?: { "<code>": { min_h } }, ratio?: { seuil, taux_sous, taux_au_dela } | null }
 //          -> remplace les dépendances d'une ligne du modèle (simultane = parmi les prédécesseurs : démarrage progressif)
+//          delais : attente minimale (heures réelles) après la fin d'une étape (séchage de la colle…) ; ratio : quantité = % de la quantité de l'OF
+//          (migration 51 requise pour delais et ratio)
 // POST   body { operation_code, predecesseurs?, simultane?, seuil_pct? }
 //          -> ajoute une opération au modèle (ligne « personnalisée », condition 'standard' : jamais proposée dans une gamme Pléiade)
 // DELETE ?code=XXX -> retire une ligne personnalisée (les lignes d'origine du modèle Pléiade ne se suppriment pas)
@@ -63,6 +65,7 @@ const handlerProtege = async (event) => {
           code: r.code, ordre: r.ordre, operation_code: r.operation_code, operation: nomOp[r.operation_code] || r.operation_code,
           libelle: r.libelle || nomOp[r.operation_code] || r.code, condition: r.condition,
           predecesseurs: r.predecesseurs || [], simultane: r.simultane || [], seuil_pct: r.seuil_pct || 10, personnalisee: r.condition === 'standard',
+          delais: r.delais || {}, ratio: r.ratio || null,
         })),
         operations: (ops.data || []).map((o) => ({ code: o.code, nom: o.nom, dans_modele: dans.has(o.code) })),
       });
@@ -79,6 +82,26 @@ const handlerProtege = async (event) => {
       if (erreur) return rep(409, { error: erreur });
       const maj = { predecesseurs, simultane };
       if (seuil !== undefined) maj.seuil_pct = seuil;
+      if ('delais' in b) {
+        const brut = b.delais && typeof b.delais === 'object' ? b.delais : {};
+        const delais = {};
+        for (const [c, d] of Object.entries(brut)) {
+          const h = Number(String((d && d.min_h) ?? '').replace(',', '.'));
+          if (c === b.code || !modele.some((r) => r.code === c)) return rep(409, { error: `Étape inconnue pour le délai d'attente : ${c}.` });
+          if (!Number.isFinite(h) || h < 0 || h > 720) return rep(409, { error: 'Le délai d\'attente doit être compris entre 0 et 720 heures.' });
+          if (h > 0) delais[c] = { min_h: Math.round(h * 100) / 100 };
+        }
+        maj.delais = delais;
+      }
+      if ('ratio' in b) {
+        if (b.ratio === null) maj.ratio = null;
+        else {
+          const n = (v) => Number(String(v ?? '').replace(',', '.'));
+          const r = { seuil: n(b.ratio && b.ratio.seuil), taux_sous: n(b.ratio && b.ratio.taux_sous), taux_au_dela: n(b.ratio && b.ratio.taux_au_dela) };
+          if (!(r.seuil > 0) || [r.taux_sous, r.taux_au_dela].some((t) => !Number.isFinite(t) || t < 0 || t > 100)) return rep(409, { error: 'Ratio invalide : seuil > 0 et taux entre 0 et 100 %.' });
+          maj.ratio = r;
+        }
+      }
       const { error } = await supabase.from('pleiade_gamme_modele').update(maj).eq('code', b.code);
       if (error) throw error;
       return rep(200, { ok: true });
@@ -123,7 +146,8 @@ const handlerProtege = async (event) => {
 
     return rep(405, { error: 'Méthode non autorisée.' });
   } catch (err) {
-    return rep(500, { error: err.message });
+    const manque = /delais|ratio/.test(err.message || '') && /column|schema/i.test(err.message || '');
+    return rep(500, { error: manque ? 'Délais et ratios : exécutez d\'abord la migration 51 dans Supabase.' : err.message });
   }
 };
 

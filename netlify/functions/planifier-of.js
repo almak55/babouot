@@ -204,6 +204,12 @@ const handlerProtege = async (event) => {
       });
       return out;
     };
+    // Délais d'attente minimaux (séchage…) : { position de l'étape attendue: minutes }.
+    const delaisDe = (e) => {
+      const out = {};
+      Object.entries(e.delais_min || {}).forEach(([seq, m]) => { const i = positionDe.get(Number(seq)); if (i !== undefined && Number(m) > 0) out[i] = Number(m); });
+      return out;
+    };
     const indicesDe = (e) => (Array.isArray(e.predecesseurs)
       ? e.predecesseurs.map((s) => positionDe.get(s)).filter((i) => i !== undefined)
       : null);
@@ -239,6 +245,7 @@ const handlerProtege = async (event) => {
         index,
         predecesseurs: indicesDe(e),
         liens: liensDe(e),
+        delais: delaisDe(e),
         non_chiffre: !e.chiffre,
         parametres_manquants: e.parametres_manquants,
         bloquants_chiffrage: (e.erreurs_formule || []).map((x) => ({ type: 'formule_erreur', detail: `${x.phase} : ${x.message}` })),

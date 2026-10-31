@@ -72,10 +72,27 @@ const handlerProtege = async (event) => {
       if (ph.length) return !ph.some((p) => p.occupe_machine !== false);
       return !avecMachine.has(opId);
     };
+    // Quantité, durée et attente calculées automatiquement (ratios de réparation, séchage…), réglables dans le chiffrage de l'OF.
+    const infos = new Map();
+    try {
+      const calcul = await require('./lib/durees').calculerEtapes(supabase, ofId);
+      if (calcul) {
+        const nomDeSeq = new Map(calcul.etapes.map((e) => [e.sequence, e.operation]));
+        calcul.etapes.forEach((e) => {
+          infos.set(e.sequence, {
+            quantite: e.quantite_etape, quantite_of: calcul.of.quantite, regle: e.quantite_regle || null,
+            quantite_manuelle: !!(e.parametres && e.parametres.quantite),
+            total_h: e.chiffre ? e.total_h : null, duree_manuelle_h: e.duree_manuelle_h,
+            attentes: Object.entries(e.delais_min || {}).map(([s, m]) => ({ apres: nomDeSeq.get(Number(s)) || `étape ${s}`, heures: Math.round(Number(m) / 6) / 10 })),
+          });
+        });
+      }
+    } catch (_) { /* chiffrage indisponible : la gamme s'affiche sans ces informations */ }
     return {
       statusCode: 200,
       body: JSON.stringify(data.map((g, i) => ({
         id: g.id, sequence: g.sequence, rang: g.rang, statut: g.statut, operation: g.operations, en_ligne: enLigneDe(g, i),
+        info: infos.get(g.sequence) || null,
         sans_machine: !!(g.operations && sansMachine(g.operations.id)),
       }))),
     };
