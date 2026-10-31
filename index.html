@@ -1198,6 +1198,7 @@
             <button class="btn" id="sem-suiv" title="Semaine suivante">▶</button>
             <button class="btn" id="feuille-jour">Feuille du jour (PDF)</button>
             <button class="btn" id="saisie-prod">Saisie de production</button>
+            <button class="btn" id="temps-libres-btn" title="Affecter le personnel qui a des temps libres dans la journée">Temps libres</button>
           </div>
           <button class="btn primary" id="add-of-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Affecter un OF</button>
         </div>
@@ -1214,6 +1215,7 @@
 
     legend.querySelector('#saisie-prod').addEventListener('click', () => ouvrirModaleSaisieProduction());
     legend.querySelector('#feuille-jour').addEventListener('click', ouvrirModaleFeuilleJournaliere);
+    legend.querySelector('#temps-libres-btn').addEventListener('click', () => ouvrirModaleTempsLibres());
     legend.querySelector('#sem-prec').addEventListener('click', () => changerSemaine(-1));
     legend.querySelector('#sem-suiv').addEventListener('click', () => changerSemaine(1));
     legend.querySelector('#sem-auj').addEventListener('click', () => changerSemaine(0));
@@ -1238,6 +1240,10 @@
             const col = s.statut==='danger' ? 'var(--danger)' : s.statut==='warn' ? 'var(--accent-amber)' : 'var(--accent-teal)';
             const heures = s.debut ? `${s.debut}–${s.fin}` : 'journée';
             const nom = s.phase ? `${s.of} · ${s.phase}` : s.of;
+            if (s.libre) {   // temps libre / travail hors planning : pas d'étape de gamme, on ouvre la fenêtre « Temps libres » du jour
+              const nomLibre = s.phase ? (s.of && s.of !== 'Hors OF' ? `${s.of} · ${s.phase}` : s.phase) : s.of;
+              return `<div class="bar compact clic-libre" data-date="${s.date||''}" style="background:#7A6FD0;cursor:pointer;" title="Temps libre — ${esc(nomLibre)} — ${heures}${s.nbPers > 1 ? ' — ' + s.nbPers + ' pers.' : ''}"><span class="b-text"><span class="b-name">${esc(nomLibre)}</span></span><span class="b-time">${heures}</span></div>`;
+            }
             return `<div class="bar compact clic-tache" data-gamme="${s.gamme||''}" data-date="${s.date||''}" data-of="${esc(s.of)}" style="background:${col};cursor:pointer;" title="Cliquer pour saisir l'avancement — ${esc(nom)} — ${heures}${s.nbPers > 1 ? ' — ' + s.nbPers + ' pers.' : ''}"><span class="b-text"><span class="b-name">${esc(nom)}</span></span><span class="b-time">${heures}</span></div>`;
           }).join('');
           rows += `<td class="slot"><div class="stack">${barres}</div></td>`;
@@ -1259,6 +1265,7 @@
     table.querySelectorAll('.clic-tache').forEach(b=>{
       b.addEventListener('click', (ev)=>{ ev.stopPropagation(); ouvrirModaleTache(b.dataset.gamme, b.dataset.date, b.dataset.of); });
     });
+    table.querySelectorAll('.clic-libre').forEach(b => b.addEventListener('click', (ev) => { ev.stopPropagation(); ouvrirModaleTempsLibres(b.dataset.date); }));
     table.querySelectorAll('.intervention-cell').forEach(td => td.addEventListener('click', () => ouvrirModaleInterventions({ id: td.dataset.machineUuid, nom: td.dataset.machineName }, chargerDonneesReelles)));
     table.querySelectorAll('.slot.clickable').forEach(td=>{
       td.addEventListener('click', ()=> ouvrirModaleAffectation({
@@ -3328,7 +3335,7 @@
 
     // Couleur par OF
     const PALETTE = [[200,230,225],[250,220,190],[210,220,245],[245,210,225],[225,240,190],[235,215,250],[255,240,170],[200,235,245],[250,205,200],[215,235,215],[240,225,205],[220,220,235]];
-    const ofs = [...new Set(data.personnes.flatMap(p => p.creneaux).concat(data.sans_personnel).map(c => c.of))];
+    const ofs = [...new Set(data.personnes.flatMap(p => p.creneaux).concat(data.sans_personnel).map(c => c.of).filter(Boolean))];   // les temps libres hors OF n'ont pas d'OF : grisés, hors légende
     const couleurOf = Object.fromEntries(ofs.map((o, i) => [o, PALETTE[i % PALETTE.length]]));
 
     const grand = gens.length > 13;
@@ -3416,8 +3423,8 @@
         const horaire = `${c.debut}-${c.fin}`;
         const titre = [c.titre, c.client].filter(Boolean).join(' - ') || c.of;
         const items = grandBloc
-          ? [['b', c.operation], ['bi', titre], ['n', nomMachine], ['n', `${c.of}  ${horaire}`]]
-          : [['b', c.operation], ['bi', titre], ['n', `${nomMachine} | ${c.of} ${horaire}`]];
+          ? [['b', c.operation], ['bi', titre], ['n', nomMachine], ['n', [c.of, horaire].filter(Boolean).join('  ')]]
+          : [['b', c.operation], ['bi', titre], ['n', [nomMachine, c.of, horaire].filter(Boolean).join(' | ')]];
         doc.setFontSize(fs);
         items.forEach(([st, txt], k) => {
           doc.setFont('helvetica', st === 'b' ? 'bold' : st === 'bi' ? 'bolditalic' : 'normal');
@@ -3490,6 +3497,219 @@
         msg.innerHTML = `<div class="msg error">${e.message}</div>`;
       }
     });
+  }
+
+  // ---------- Temps libres du personnel : affecter les personnes disponibles ----------
+  // Une personne qui n'a pas de tâche sur un créneau (voir « Affectation du personnel ») peut être affectée soit à une tâche
+  // figurant sur un OF (pose de rhodoïds, réparations d'emboîtage…), soit à un travail hors planning (tri, anciens volumes…).
+  // Les lignes créées (violettes sur le planning, sur la « Travail manuel ») sont de vrais créneaux : elles apparaissent sur la
+  // feuille du jour et occupent la personne. La pause 12h00–12h30 coupe toujours un créneau en deux.
+  async function ouvrirModaleTempsLibres(dateInit) {
+    const $ = (id) => document.getElementById(id);
+    const hm = (t) => { const [h, m] = String(t).slice(0, 5).split(':'); return Number(h) * 60 + Number(m); };
+    const hh = (n) => String(Math.floor(n / 60)).padStart(2, '0') + ':' + String(n % 60).padStart(2, '0');
+    const dur = (n) => { const h = Math.floor(n / 60), m = n % 60; return (h ? h + ' h' : '') + (m ? (h ? ' ' : '') + m + ' min' : '') || '0 min'; };
+    const ajouterJours = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    const jourOuvrable = (iso) => { const j = new Date(iso + 'T00:00:00Z').getUTCDay(); return j !== 0 && j !== 6; };
+    const dateDef = dateInit || (DAYS_ISO.includes(AUJOURDHUI_ISO) && jourOuvrable(AUJOURDHUI_ISO) ? AUJOURDHUI_ISO : (DAYS_ISO.find(jourOuvrable) || DAYS_ISO[0]));
+    let D = null, sel = new Set(), seq = 0;
+
+    afficherModale(`
+      <h3>Temps libres — affecter le personnel disponible</h3>
+      <div class="plan-note" style="margin-bottom:8px;">Choisissez un jour, cochez une ou plusieurs personnes (ou cliquez sur un temps libre), puis indiquez la tâche. La pause 12h00–12h30 est toujours déduite. Les créneaux ajoutés ici restent en place lors d'un nouveau calcul du planning ; retirez-les ici quand ils ne sont plus utiles.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+        <button class="btn" id="tl-prec" title="Jour ouvré précédent">◀</button>
+        <input id="tl-date" type="date" value="${dateDef}" style="padding:7px 10px;border-radius:8px;border:1px solid var(--line);">
+        <button class="btn" id="tl-suiv" title="Jour ouvré suivant">▶</button>
+        <select id="tl-horaires" style="padding:7px 10px;border-radius:8px;border:1px solid var(--line);"><option value="normal">Horaires normaux (8h–16h30)</option><option value="heures_sup">Heures supplémentaires (7h–17h30)</option></select>
+        <label style="display:inline;margin:0;font-size:13px;"><input type="checkbox" id="tl-seulement" checked> Seulement les personnes ayant du temps libre</label>
+      </div>
+      <div id="tl-etat"></div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;">
+        <div id="tl-liste" style="flex:1.5 1 420px;min-width:0;max-height:56vh;overflow:auto;"></div>
+        <div style="flex:1 1 300px;min-width:0;">
+          <div class="field"><label>Personnes sélectionnées</label><div id="tl-sel" style="font-size:13px;">Aucune</div></div>
+          <div id="tl-commun" style="margin-bottom:8px;"></div>
+          <div style="display:flex;gap:10px;">
+            <div class="field" style="flex:1;"><label>De</label><input id="tl-d" type="time" step="300"></div>
+            <div class="field" style="flex:1;"><label>À</label><input id="tl-f" type="time" step="300"></div>
+          </div>
+          <div class="field"><label>Type d'affectation</label>
+            <select id="tl-type"><option value="of">Tâche figurant sur un OF</option><option value="libre">Travail hors planning</option></select>
+          </div>
+          <div id="tl-bloc-of">
+            <div class="field"><label>Ordre de fabrication</label><select id="tl-of"></select></div>
+            <div class="field"><label>Tâche de l'OF</label><select id="tl-tache"><option value="">— choisir d'abord un OF —</option></select></div>
+          </div>
+          <div id="tl-bloc-libre" class="hidden">
+            <div class="field"><label>Catégorie</label><select id="tl-cat"></select></div>
+            <div class="field"><label>Précision (ex : tri des retours d'avril, réparations emboîtage 2025)</label><input id="tl-lib" maxlength="80"></div>
+          </div>
+          <div class="field"><label>Commentaire (facultatif)</label><input id="tl-com" maxlength="300"></div>
+          <div id="m-msg"></div>
+          <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="tl-go">Affecter</button></div>
+        </div>
+      </div>
+      <h4 style="margin:14px 0 6px;">Affectations ajoutées ce jour</h4>
+      <div id="tl-ajouts"></div>
+    `, 'xlarge');
+
+    $('m-cancel').addEventListener('click', fermerModale);
+    const rafraichirPlanning = () => { try { chargerDonneesReelles().catch(() => {}); } catch (e) { /* la vue se mettra à jour au prochain chargement */ } };
+    const msg = (html) => { $('m-msg').innerHTML = html; };
+    const mode = () => $('tl-horaires').value;
+
+    // Plages libres d'une personne, recollées de part et d'autre de la pause (le temps net exclut la pause).
+    const fusionPause = (plages) => {
+      const pd = D.horaires.pause_debut ? hm(D.horaires.pause_debut) : null, pf = D.horaires.pause_fin ? hm(D.horaires.pause_fin) : null;
+      const res = [];
+      plages.slice().sort((a, b) => a[0] - b[0]).forEach(([d, f]) => {
+        const prec = res[res.length - 1];
+        if (prec && pd !== null && prec.f === pd && d === pf) { prec.f = f; prec.net += f - d; }
+        else res.push({ d, f, net: f - d });
+      });
+      return res;
+    };
+    const libresDe = (p) => p.libres.map((l) => [hm(l.debut), hm(l.fin)]);
+
+    function dessinerListe() {
+      const liste = $('tl-liste');
+      if (!D || !D.jour_ouvre) { liste.innerHTML = ''; return; }
+      const seul = $('tl-seulement').checked;
+      const T0 = hm(D.horaires.debut), T1 = hm(D.horaires.fin), L = Math.max(1, T1 - T0);
+      const seg = (a, b, css, titre) => `<i title="${esc(titre || '')}" style="position:absolute;top:0;bottom:0;left:${((a - T0) / L * 100).toFixed(2)}%;width:${((b - a) / L * 100).toFixed(2)}%;${css}"></i>`;
+      const pers = D.personnes.filter((p) => !seul || p.libre_total_min > 0).slice().sort((a, b) => b.libre_total_min - a.libre_total_min || a.nom.localeCompare(b.nom, 'fr'));
+      if (!pers.length) { liste.innerHTML = `<div class="empty">${seul ? 'Personne n\'a de temps libre ce jour-là (décochez la case pour voir tout le monde).' : 'Aucun personnel.'}</div>`; return; }
+      liste.innerHTML = pers.map((p) => {
+        const barre = `<div style="position:relative;height:14px;border-radius:4px;background:#EEF1F5;overflow:hidden;margin:4px 0;">`
+          + (D.horaires.pause_debut ? seg(hm(D.horaires.pause_debut), hm(D.horaires.pause_fin), 'background:repeating-linear-gradient(45deg,#fff,#fff 3px,#D9DEE6 3px,#D9DEE6 6px)', 'Pause') : '')
+          + p.libres.map((l) => seg(hm(l.debut), hm(l.fin), 'background:#2BB5A0;opacity:.55', `Libre ${l.debut}–${l.fin}`)).join('')
+          + p.occupe.map((o) => seg(hm(o.debut), hm(o.fin), o.ajout ? 'background:#7A6FD0' : 'background:#8C98AD', `${o.debut}–${o.fin} ${o.libelle}${o.of ? ' (' + o.of + ')' : ''}`)).join('')
+          + `</div>`;
+        const entete = p.indisponible
+          ? `<b>${esc(p.nom)}</b> <span style="color:var(--muted);font-size:12px;">${esc(p.poste)}</span> <span style="color:var(--danger);font-size:12px;">— indisponible (${esc(p.indisponible)})</span>`
+          : `<label style="display:inline;margin:0;font-size:14px;color:var(--ink-900,#161C2C);cursor:pointer;"><input type="checkbox" class="tl-chk" data-id="${esc(p.id)}" ${sel.has(p.id) ? 'checked' : ''}> <b>${esc(p.nom)}</b></label> <span style="color:var(--muted);font-size:12px;">${esc(p.poste)}</span> <span style="font-size:12px;color:${p.libre_total_min ? '#177F70' : 'var(--muted)'};">— ${p.libre_total_min ? dur(p.libre_total_min) + ' de libre' : 'complet'}</span>`;
+        const chips = p.indisponible ? '' : fusionPause(libresDe(p)).map((c) => `<button type="button" class="btn tl-chip" data-id="${esc(p.id)}" data-d="${hh(c.d)}" data-f="${hh(c.f)}" style="padding:2px 8px;font-size:12px;" title="Cliquer pour affecter ce temps libre">${hh(c.d)}–${hh(c.f)} · ${dur(c.net)}</button>`).join(' ');
+        const occ = p.occupe.length ? `<div style="font-size:11px;color:var(--muted);margin-top:3px;">Occupé(e) : ${p.occupe.map((o) => `${o.debut}–${o.fin} ${esc(o.libelle)}${o.of ? ' (' + esc(o.of) + ')' : ''}`).join(' · ')}</div>` : '';
+        return `<div style="padding:8px 0;border-bottom:1px solid var(--line);">${entete}${barre}<div style="display:flex;gap:6px;flex-wrap:wrap;">${chips}</div>${occ}</div>`;
+      }).join('') + `<div style="font-size:11px;color:var(--muted);margin-top:6px;"><span style="color:#2BB5A0;">■</span> libre &nbsp; <span style="color:#8C98AD;">■</span> occupé(e) &nbsp; <span style="color:#7A6FD0;">■</span> ajouté depuis cette fenêtre &nbsp; (hachuré : pause)</div>`;
+      liste.querySelectorAll('.tl-chk').forEach((c) => c.addEventListener('change', () => { if (c.checked) sel.add(c.dataset.id); else sel.delete(c.dataset.id); majSelection(); }));
+      liste.querySelectorAll('.tl-chip').forEach((b) => b.addEventListener('click', () => {
+        sel.add(b.dataset.id); $('tl-d').value = b.dataset.d; $('tl-f').value = b.dataset.f;
+        liste.querySelectorAll('.tl-chk').forEach((c) => { if (c.dataset.id === b.dataset.id) c.checked = true; });
+        majSelection();
+      }));
+    }
+
+    // Temps libre commun à toutes les personnes cochées.
+    function communes() {
+      let cur = null;
+      for (const id of sel) {
+        const p = D && D.personnes.find((x) => x.id === id); if (!p) return [];
+        const l = libresDe(p);
+        if (cur === null) cur = l;
+        else { const nxt = []; cur.forEach((a) => l.forEach((b) => { const d = Math.max(a[0], b[0]), f = Math.min(a[1], b[1]); if (f - d >= 15) nxt.push([d, f]); })); cur = nxt; }
+      }
+      return cur ? fusionPause(cur) : [];
+    }
+    function majSelection() {
+      const noms = D ? D.personnes.filter((p) => sel.has(p.id)).map((p) => p.nom) : [];
+      $('tl-sel').textContent = noms.length ? noms.join(', ') : 'Aucune';
+      const c = communes();
+      $('tl-commun').innerHTML = sel.size > 1
+        ? (c.length ? `<div style="font-size:12px;margin-bottom:4px;">Libres en même temps :</div>` + c.map((x) => `<button type="button" class="btn tl-comm" data-d="${hh(x.d)}" data-f="${hh(x.f)}" style="padding:2px 8px;font-size:12px;margin:0 4px 4px 0;">${hh(x.d)}–${hh(x.f)} · ${dur(x.net)}</button>`).join('')
+            : `<div class="msg error" style="font-size:12px;">Ces personnes n'ont aucun temps libre en commun.</div>`)
+        : '';
+      $('tl-commun').querySelectorAll('.tl-comm').forEach((b) => b.addEventListener('click', () => { $('tl-d').value = b.dataset.d; $('tl-f').value = b.dataset.f; }));
+    }
+
+    function dessinerAjouts() {
+      const zone = $('tl-ajouts');
+      if (!D || !D.jour_ouvre || !D.ajouts.length) { zone.innerHTML = `<div class="empty" style="padding:8px;">Aucune affectation ajoutée ce jour-là.</div>`; return; }
+      zone.innerHTML = D.ajouts.map((a) => `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px;">
+        <span style="flex:1 1 320px;min-width:0;"><b>${a.debut}–${a.fin}</b> · ${esc(a.libelle)}${a.of ? ' · ' + esc(a.of) : ' · hors OF'} — ${a.personnes.map((p) => esc(p.nom)).join(', ')}${a.commentaire ? ' <i style="color:var(--muted);">(' + esc(a.commentaire) + ')</i>' : ''}</span>
+        <button class="btn tl-del" data-ids="${esc(a.ids.join(','))}">Retirer</button></div>`).join('');
+      zone.querySelectorAll('.tl-del').forEach((b) => b.addEventListener('click', async () => {
+        b.disabled = true;
+        try {
+          const res = await fetch(`${API}/temps-libres`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'supprimer', ids: b.dataset.ids.split(',') }) });
+          const d = await lireJson(res); if (!res.ok || d.error) throw new Error(d.error || 'Suppression impossible.');
+          toast('Affectation retirée.'); rafraichirPlanning(); await charger();
+        } catch (e) { b.disabled = false; msg(`<div class="msg error">${esc(e.message)}</div>`); }
+      }));
+    }
+
+    async function charger() {
+      const date = $('tl-date').value; const mon = ++seq;
+      if (!date) { $('tl-etat').innerHTML = `<div class="msg error">Choisissez un jour.</div>`; return; }
+      $('tl-etat').innerHTML = `<div class="msg">Chargement…</div>`; msg('');
+      try {
+        const res = await fetch(`${API}/temps-libres?date=${encodeURIComponent(date)}&horaires=${mode()}`);
+        const d = await lireJson(res); if (mon !== seq) return;
+        if (!res.ok || d.error) throw new Error(d.error || 'Chargement impossible.');
+        D = d;
+        // on ne garde cochées que les personnes encore sélectionnables ce jour-là
+        sel = new Set([...sel].filter((id) => D.personnes.some((p) => p.id === id && !p.indisponible)));
+        if (!D.jour_ouvre) {
+          $('tl-etat').innerHTML = `<div class="msg error">Pas de travail ce jour-là : ${esc(D.motif || 'jour non travaillé')}.</div>`; $('tl-go').disabled = true;
+        } else {
+          const nb = D.personnes.filter((p) => p.libre_total_min > 0).length;
+          $('tl-etat').innerHTML = `<div class="msg">${nb} personne${nb > 1 ? 's' : ''} avec du temps libre — horaires ${D.horaires.debut}–${D.horaires.fin}${D.horaires.pause_debut ? ' (pause ' + D.horaires.pause_debut + '–' + D.horaires.pause_fin + ')' : ' (sans pause)'}.</div>`;
+          $('tl-go').disabled = false;
+          const of = $('tl-of'), prec = of.value;
+          of.innerHTML = `<option value="">— choisir un OF —</option>` + D.ofs.map((o) => `<option value="${esc(o.id)}">${esc(o.numero)}${o.titre ? ' — ' + esc(o.titre) : ''}${o.client ? ' (' + esc(o.client) + ')' : ''}</option>`).join('');
+          if (prec && D.ofs.some((o) => o.id === prec)) of.value = prec;
+          const cat = $('tl-cat'), cprec = cat.value;
+          cat.innerHTML = D.categories.map((c) => `<option>${esc(c)}</option>`).join(''); if (cprec) cat.value = cprec;
+        }
+        dessinerListe(); majSelection(); dessinerAjouts();
+      } catch (e) { if (mon === seq) { D = null; $('tl-etat').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; $('tl-liste').innerHTML = ''; } }
+    }
+
+    async function chargerTaches() {
+      const id = $('tl-of').value, t = $('tl-tache');
+      if (!id) { t.innerHTML = `<option value="">— choisir d'abord un OF —</option>`; return; }
+      t.innerHTML = `<option value="">Chargement…</option>`;
+      try {
+        const res = await fetch(`${API}/temps-libres?etapes_of=${encodeURIComponent(id)}`);
+        const d = await lireJson(res); if (!res.ok || d.error) throw new Error(d.error || 'Tâches introuvables.');
+        if ($('tl-of').value !== id) return;
+        t.innerHTML = `<option value="">— choisir la tâche —</option>` + d.etapes.map((e) => `<option value="${esc(e.operation_id)}">${e.sequence != null ? esc(e.sequence) + '. ' : ''}${esc(e.operation)}${e.statut === 'terminé' ? ' (terminée)' : ''}</option>`).join('');
+      } catch (e) { t.innerHTML = `<option value="">—</option>`; msg(`<div class="msg error">${esc(e.message)}</div>`); }
+    }
+
+    $('tl-prec').addEventListener('click', () => { let j = ajouterJours($('tl-date').value || dateDef, -1), n = 0; while (!jourOuvrable(j) && n++ < 7) j = ajouterJours(j, -1); $('tl-date').value = j; charger(); });
+    $('tl-suiv').addEventListener('click', () => { let j = ajouterJours($('tl-date').value || dateDef, 1), n = 0; while (!jourOuvrable(j) && n++ < 7) j = ajouterJours(j, 1); $('tl-date').value = j; charger(); });
+    $('tl-date').addEventListener('change', charger);
+    $('tl-horaires').addEventListener('change', charger);
+    $('tl-seulement').addEventListener('change', dessinerListe);
+    $('tl-of').addEventListener('change', chargerTaches);
+    $('tl-type').addEventListener('change', () => { const of = $('tl-type').value === 'of'; $('tl-bloc-of').classList.toggle('hidden', !of); $('tl-bloc-libre').classList.toggle('hidden', of); });
+
+    $('tl-go').addEventListener('click', async () => {
+      const type = $('tl-type').value, ids = [...sel];
+      if (!ids.length) return msg(`<div class="msg error">Cochez au moins une personne (ou cliquez sur un de ses temps libres).</div>`);
+      if (!$('tl-d').value || !$('tl-f').value) return msg(`<div class="msg error">Indiquez l'heure de début et l'heure de fin.</div>`);
+      const corps = { date: $('tl-date').value, heure_debut: $('tl-d').value, heure_fin: $('tl-f').value, personnel_ids: ids, commentaire: $('tl-com').value, horaires: mode() };
+      if (type === 'of') {
+        if (!$('tl-of').value) return msg(`<div class="msg error">Choisissez l'ordre de fabrication.</div>`);
+        if (!$('tl-tache').value) return msg(`<div class="msg error">Choisissez la tâche de l'OF.</div>`);
+        Object.assign(corps, { action: 'affecter_of', of_id: $('tl-of').value, operation_id: $('tl-tache').value });
+      } else {
+        Object.assign(corps, { action: 'affecter_libre', categorie: $('tl-cat').value, libelle: $('tl-lib').value });
+      }
+      $('tl-go').disabled = true; msg(`<div class="msg">Enregistrement…</div>`);
+      try {
+        const res = await fetch(`${API}/temps-libres`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) });
+        const d = await lireJson(res); if (!res.ok || d.error) throw new Error(d.error || 'Affectation impossible.');
+        toast(`${d.personnes} personne${d.personnes > 1 ? 's' : ''} affectée${d.personnes > 1 ? 's' : ''} — ${dur(d.minutes_travail)} de travail.`);
+        sel = new Set(); $('tl-d').value = ''; $('tl-f').value = ''; $('tl-lib').value = ''; $('tl-com').value = '';
+        rafraichirPlanning(); await charger(); msg('');
+      } catch (e) { msg(`<div class="msg error">${esc(e.message)}</div>`); }
+      finally { $('tl-go').disabled = !(D && D.jour_ouvre); }
+    });
+
+    charger();
   }
 
   async function ouvrirModaleDisponibilite(personne) {
@@ -6451,7 +6671,8 @@
         if (!planningParMachine[machine.code]) planningParMachine[machine.code] = [];
         planningParMachine[machine.code].push({
           day: dayIdx,
-          of: of ? of.numero : creneau.of_id,
+          of: of ? of.numero : (creneau.of_id || 'Hors OF'),
+          libre: !creneau.gamme_operatoire_id,
           statut: creneau.statut === 'retard' ? 'danger' : 'ok',
           nbPers: (creneau.personnel_ids || []).length,
           debut: creneau.heure_debut ? String(creneau.heure_debut).slice(0, 5) : null,
