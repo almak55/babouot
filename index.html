@@ -1421,7 +1421,7 @@
       ['gamme', 'Gamme', 'Ajoutez des étapes à la gamme de cet OF.'],
       ['machine', 'Machines', 'Reliez l\'opération à une machine active : onglet Machines → Modifier → cochez l\'opération. Vérifiez aussi qu\'aucune maintenance n\'est en cours.'],
       ['matiere', 'Matières', 'Réapprovisionnez le stock (onglet Stocks), ou retirez la matière requise de l\'OF.'],
-      ['personnel', 'Personnel', 'Affectez une personne à l\'étape dans le planning, ou déclarez une compétence : onglet Personnel → Compétences. Sans affectation, ce contrôle tient aussi compte des absences d\'aujourd\'hui.'],
+      ['personnel', 'Personnel', 'Affectez une personne à l\'étape dans le planning, ou déclarez une compétence : onglet Personnel → Compétences (une opération manuelle n\'exige aucune compétence précise). Sans affectation, ce contrôle tient aussi compte des absences d\'aujourd\'hui.'],
     ];
     const n = data.blocages.length;
     const crit = (ok_, nom) => `<span class="tag ${ok_ ? 'ok' : 'warn'}">${ok_ ? '✓' : '✗'} ${nom}</span>`;
