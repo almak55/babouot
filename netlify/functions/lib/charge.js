@@ -12,6 +12,8 @@ const SEUILS = {
   fin_rouge_j: 3,      // fin planifiée > 3 jours après le délai -> rouge
 };
 const HEURES_JOUR = 8;   // journée de référence (5 j × 8 h = 40 h par semaine), comme la charge du personnel
+// Horaires de l'atelier : lun-ven 8h-12h / 12h30-16h30 (8 h) ; heures supplémentaires 7h-12h / 12h30-17h30 (10 h) ;
+// samedi exceptionnel 6h-12h (6 h, sans pause). Le dimanche n'est jamais travaillé.
 
 const minutes = (t) => { const [h, m] = String(t).split(':'); return Number(h) * 60 + Number(m || 0); };
 
@@ -25,6 +27,15 @@ function heuresCreneau(c) {
 
 const jourSemaine = (iso) => new Date(iso + 'T12:00:00Z').getUTCDay();   // 0 = dimanche
 const estJourOuvre = (iso) => { const j = jourSemaine(iso); return j >= 1 && j <= 5; };
+// Un créneau est « en heures supplémentaires » s'il commence avant 08:00 ou finit après 16:30.
+const estHeureSup = (c) => !!c && ((c.heure_debut && String(c.heure_debut).slice(0, 5) < '08:00') || (c.heure_fin && String(c.heure_fin).slice(0, 5) > '16:30'));
+// Heures ouvertes un jour d'après ce qui y est planifié (le samedi n'est ouvert que s'il y a du travail planifié).
+function heuresOuvertes(iso, creneaux) {
+  const j = jourSemaine(iso);
+  if (j >= 1 && j <= 5) return (creneaux || []).some(estHeureSup) ? 10 : HEURES_JOUR;
+  if (j === 6 && (creneaux || []).length) return 6;
+  return 0;
+}
 const ecartJours = (a, b) => Math.round((Date.parse(a + 'T12:00:00Z') - Date.parse(b + 'T12:00:00Z')) / 86400000);   // a - b
 
 // Charge d'un jour = le plus élevé de : heures-personnes ÷ capacité de l'équipe, heures-machines ÷ capacité du parc.
@@ -62,4 +73,4 @@ function niveauOf(of, aujourdhui) {
   return { niveau, raison, attendu, ecart, fin_prevue: finPrevue, heures_planifiees: Math.round(total * 10) / 10 };
 }
 
-module.exports = { SEUILS, HEURES_JOUR, heuresCreneau, estJourOuvre, ecartJours, chargeJour, niveauOf };
+module.exports = { SEUILS, HEURES_JOUR, heuresCreneau, estJourOuvre, estHeureSup, heuresOuvertes, ecartJours, chargeJour, niveauOf };

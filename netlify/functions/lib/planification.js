@@ -81,14 +81,19 @@ function joursFeries(annee) {
 }
 const libelleFerie = (dateStr) => joursFeries(Number(dateStr.slice(0, 4))).get(dateStr) || null;
 
-const estOuvre = (jourMin) => {
+// Jour travaillé : lundi-vendredi hors jours fériés. Le samedi n'est ouvert que de façon exceptionnelle,
+// quand le calendrier choisi le prévoit (cal.samedi_debut / cal.samedi_fin) ; le dimanche jamais.
+const estOuvre = (jourMin, cal) => {
   const j = new Date(jourMin * 60000).getUTCDay();
-  if (j === 0 || j === 6) return false;
+  if (j === 0) return false;
+  if (j === 6 && !(cal && cal.samedi_debut && cal.samedi_fin)) return false;
   return !libelleFerie(dateDe(jourMin));
 };
 
 // Plages de travail d'un jour (avant/après la pause).
 function fenetresDuJour(jour, cal) {
+  // Samedi exceptionnel : une seule plage (ex. 06:00-12:00), sans pause.
+  if (new Date(jour * 60000).getUTCDay() === 6) return cal.samedi_debut && cal.samedi_fin ? [[jour + hhmm(cal.samedi_debut), jour + hhmm(cal.samedi_fin)]].filter(([a, b]) => b > a) : [];
   const d = hhmm(cal.debut); const f = hhmm(cal.fin);
   const p = hhmm(cal.pause_debut); const q = p + Number(cal.pause_minutes);
   const res = [];
@@ -122,7 +127,7 @@ function consommer(dureeMin, depuisMin, occupes, cal) {
   const tranches = [];
   const finHorizon = debutDeJour(depuisMin) + HORIZON_JOURS * MIN_JOUR;
   for (let jour = debutDeJour(depuisMin); jour < finHorizon && reste > 0; jour += MIN_JOUR) {
-    if (!estOuvre(jour)) continue;
+    if (!estOuvre(jour, cal)) continue;
     for (const [a0, b] of fenetresDuJour(jour, cal)) {
       const a = Math.max(a0, depuisMin);
       if (b <= a) continue;
