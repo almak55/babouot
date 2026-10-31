@@ -101,6 +101,9 @@ const handlerProtege = async (event) => {
         const { error } = await supabase.from('gammes_operatoires').update({ statut: 'à planifier' }).in('id', Array.from(idsLib));
         if (error) throw error;
       }
+      // Nettoyages de fin de journée des machines dont des travaux viennent d'être libérés (voir lib/nettoyage.js).
+      try { await require('./lib/nettoyage').recalerNettoyages(supabase, aSupprimer.filter((c) => c.machine_id).map((c) => ({ machine_id: c.machine_id, date: c.date }))); }
+      catch (e) { console.warn('nettoyage de fin de journée ignoré :', e.message); }
       // OF à replanifier : ceux qui ont au moins une étape « à planifier » (libérée ou nouvelle).
       // Un OF jamais planifié n'est repris que s'il est prioritaire (nouvelle commande Pléiade / urgente).
       const dejaLance = (ofId) => gammes.some((g) => g.of_id === ofId && ['planifié', 'en cours', 'terminé'].includes(g.statut));
@@ -146,10 +149,13 @@ const handlerProtege = async (event) => {
       const p = data.payload;
       const idsGammes = p.gammes.map((g) => g.id);
       const idsSauves = new Set(p.creneaux.map((c) => c.id));
+      const joursMachine = p.creneaux.filter((c) => c.machine_id).map((c) => ({ machine_id: c.machine_id, date: c.date }));   // journées dont le nettoyage de fin de journée est à recaler
       // Supprimer ce que la réorganisation a recréé pour ces étapes.
       if (idsGammes.length) {
-        const { data: actuels } = await supabase.from('planning_jour').select('id, date').in('gamme_operatoire_id', idsGammes).neq('statut', 'annulé');
-        const aEffacer = (actuels || []).filter((c) => !idsSauves.has(c.id)).map((c) => c.id);
+        const { data: actuels } = await supabase.from('planning_jour').select('id, date, machine_id').in('gamme_operatoire_id', idsGammes).neq('statut', 'annulé');
+        const effaces = (actuels || []).filter((c) => !idsSauves.has(c.id));
+        const aEffacer = effaces.map((c) => c.id);
+        effaces.forEach((c) => { if (c.machine_id) joursMachine.push({ machine_id: c.machine_id, date: c.date }); });
         if (aEffacer.length) { const { error: e } = await supabase.from('planning_jour').delete().in('id', aEffacer); if (e) throw e; }
       }
       if (p.creneaux.length) {
@@ -161,6 +167,8 @@ const handlerProtege = async (event) => {
         const { error: e } = await supabase.from('gammes_operatoires').update({ statut: g.statut, machine_id: g.machine_id }).eq('id', g.id);
         if (e) throw e;
       }
+      try { await require('./lib/nettoyage').recalerNettoyages(supabase, joursMachine); }
+      catch (e) { console.warn('nettoyage de fin de journée ignoré :', e.message); }
       await supabase.from('reorg_sauvegarde').delete().eq('session_id', b.session_id);
       return rep(200, { ok: true, restaure: p.creneaux.length });
     }

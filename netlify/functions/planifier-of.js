@@ -99,7 +99,7 @@ const handlerProtege = async (event) => {
     // ---------- 2. Quelles étapes planifier, lesquelles sont figées ----------
     const gammeIds = etapesCalc.map((e) => e.gamme_id);
     const { data: lignesOf, error: lignesOfError } = gammeIds.length
-      ? await supabase.from('planning_jour').select('id, gamme_operatoire_id, date, heure_debut, heure_fin, statut, personnel_id, planning_jour_personnel(personnel_id)').in('gamme_operatoire_id', gammeIds).neq('statut', 'annulé')
+      ? await supabase.from('planning_jour').select('id, gamme_operatoire_id, date, heure_debut, heure_fin, statut, personnel_id, machine_id, phase, planning_jour_personnel(personnel_id)').in('gamme_operatoire_id', gammeIds).neq('statut', 'annulé')
       : { data: [], error: null };
     if (lignesOfError) throw lignesOfError;
     // Avancement des étapes (pour répartir le TEMPS RESTANT d'une tâche déjà entamée entre les personnes).
@@ -139,7 +139,7 @@ const handlerProtege = async (event) => {
 
     const [planRes, absRes, maintRes, persRes, compRes, persMachRes] = await Promise.all([
       supabase.from('planning_jour')
-        .select('id, date, heure_debut, heure_fin, machine_id, personnel_id, statut, planning_jour_personnel(personnel_id)')
+        .select('id, date, heure_debut, heure_fin, machine_id, personnel_id, statut, phase, planning_jour_personnel(personnel_id)')
         .gte('date', dateDepart).neq('statut', 'annulé'),
       supabase.from('personnel_planning_jour')
         .select('personnel_id, date, statut, heure_debut, heure_fin')
@@ -157,6 +157,8 @@ const handlerProtege = async (event) => {
     planRes.data.filter((l) => !idsARemplacer.has(l.id)).forEach((l) => {
       const tronque = aTronquer.find((t) => t.id === l.id);
       const iv = intervalleJournee(l.date, l.heure_debut && String(l.heure_debut).slice(0, 5), tronque ? tronque.heure_fin : (l.heure_fin && String(l.heure_fin).slice(0, 5)));
+      // Étiquette (voir « Journée de machine » dans lib/planification.js) : mise en route, nettoyage ou travail.
+      if (/mise en route|\bMER\b/i.test(l.phase || '')) iv.tag = 'mer'; else if (/nettoy/i.test(l.phase || '')) iv.tag = 'net';
       if (l.machine_id) ajouter('machines', l.machine_id, iv);
       const personnes = new Set((l.planning_jour_personnel || []).map((x) => x.personnel_id));
       if (l.personnel_id) personnes.add(l.personnel_id);
@@ -166,7 +168,7 @@ const handlerProtege = async (event) => {
       const hm = (t) => (t ? String(t).slice(0, 5) : null);
       const d = enMinutes(m.date_debut, hm(m.heure_debut) || '00:00');
       const f = m.date_fin ? enMinutes(m.date_fin, hm(m.heure_fin) || '00:00') + (hm(m.heure_fin) ? 0 : MIN_JOUR) : d + HORIZON_JOURS * MIN_JOUR;
-      ajouter('machines', m.machine_id, { d, f });
+      ajouter('machines', m.machine_id, { d, f, tag: 'maint' });
     });
     absRes.data.forEach((a) => {
       const j = enMinutes(a.date, '00:00');
@@ -220,13 +222,16 @@ const handlerProtege = async (event) => {
         return { index, fixe: true, fin_min: fins.length ? Math.max(...fins) : null, predecesseurs: indicesDe(e) };
       }
       const imp = etapesImposees.find((x) => x.gamme_id === e.gamme_id) || {};
+      // Équipement à mise en route : l'étape suit le modèle « journée de machine » (une mise en route par jour, nettoyage de fin de journée).
+      const merStd = e.duree_manuelle_h === null ? e.phases.find((p) => p.occupe_machine && /mise en route|\bMER\b/i.test(p.nom) && Number(p.duree_h) > 0) : null;
+      const journee = merStd ? { mer_min: Math.round(merStd.duree_h * 60), mer: { nom: merStd.nom, type_phase: 'reglage', duree_min: Math.round(merStd.duree_h * 60), besoin_machine: true, nb_personnes: merStd.nb_personnes, type_calcul: merStd.type_calcul, mer: true, repartissable: false } } : null;
       const besoinMachinePhases = e.phases.some((p) => p.occupe_machine);
       const nbMax = Math.max(1, ...e.phases.map((p) => p.nb_personnes));
       let phases;
       if (e.duree_manuelle_h !== null) {
         phases = [{ nom: 'Étape (durée manuelle)', type_phase: 'production', duree_min: Math.round(e.duree_manuelle_h * 60), besoin_machine: e.phases.length === 0 ? e.machines_compatibles.length > 0 : besoinMachinePhases, nb_personnes: nbMax }];
       } else {
-        phases = e.phases.map((p) => ({ nom: p.nom, type_phase: typePhase(p.nom), duree_min: Math.round(p.duree_h * 60), besoin_machine: !!p.occupe_machine, nb_personnes: p.nb_personnes, type_calcul: p.type_calcul }));
+        phases = e.phases.map((p) => ({ nom: p.nom, type_phase: typePhase(p.nom), mer: !!merStd && !!p.occupe_machine && /mise en route|\bMER\b/i.test(p.nom), duree_min: Math.round(p.duree_h * 60), besoin_machine: !!p.occupe_machine, nb_personnes: p.nb_personnes, type_calcul: p.type_calcul }));
       }
       // Étape déjà entamée : seule la part restante est replanifiée. La mise en route et le réglage sont
       // déjà faits ; le nettoyage reste dû ; le reste (cadence, par élément, formule) est proratisé.
@@ -250,6 +255,7 @@ const handlerProtege = async (event) => {
         parametres_manquants: e.parametres_manquants,
         bloquants_chiffrage: (e.erreurs_formule || []).map((x) => ({ type: 'formule_erreur', detail: `${x.phase} : ${x.message}` })),
         phases,
+        journee,
         machine_imposee: imp.machine_id || e.machine_id || null,
         machines_candidates: e.machines_compatibles.map((m) => m.id),
         personnes_imposees: Array.isArray(imp.personnel_ids) && imp.personnel_ids.length ? imp.personnel_ids : null,
@@ -446,6 +452,12 @@ const handlerProtege = async (event) => {
         .update({ statut: e.statut === 'en cours' ? 'en cours' : 'planifié', machine_id: e.machine ? e.machine.id : null }).eq('id', e.gamme_id);
       if (error) throw error;
     }
+
+    // Nettoyage de fin de journée des machines touchées (16:00, ou juste après le dernier travail) : voir lib/nettoyage.js.
+    try {
+      const jours = [...lignes.map((x) => x.ligne), ...lignesARemplacer].filter((l) => l.machine_id).map((l) => ({ machine_id: l.machine_id, date: l.date }));
+      if (jours.length) await require('./lib/nettoyage').recalerNettoyages(supabase, jours, cal);
+    } catch (e) { console.warn('nettoyage de fin de journée ignoré :', e.message); }
 
     // Une seule mise en route et un seul nettoyage par journée et par machine (opérations cochées) : jours touchés par ce planning.
     try {
