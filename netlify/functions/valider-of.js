@@ -9,7 +9,10 @@
 //      machine, celle-ci doit être active et ne pas être en
 //      maintenance/réparation en cours. Pour une étape pas encore
 //      affectée, il doit exister au moins une machine compatible
-//      disponible (active, sans maintenance en cours).
+//      disponible (active, sans maintenance en cours). Une opération
+//      MANUELLE (toutes ses phases standard sans machine, ou aucune
+//      phase et aucune machine liée : pose jaquettes, mise en caisses…)
+//      n'a besoin d'aucune machine et n'est jamais bloquante ici.
 //   2. MATIÈRES — si l'OF a des matières déclarées (table
 //      of_matieres), chacune doit être en stock en quantité
 //      suffisante. Sans déclaration, ce critère est considéré ok.
@@ -66,7 +69,7 @@ const handlerProtege = async (event) => {
     }
 
     const [machinesRes, machinesOpsRes, maintenanceRes, competencesRes, persMachinesRes,
-           absencesRes, personnelRes, matieresRes] = await Promise.all([
+           absencesRes, personnelRes, matieresRes, phasesRes] = await Promise.all([
       supabase.from('machines').select('id, nom, operation_id, actif'),
       supabase.from('machines_operations').select('machine_id, operation_id'),
       supabase.from('maintenance_machine').select('*').eq('statut', 'en cours'),
@@ -75,10 +78,20 @@ const handlerProtege = async (event) => {
       supabase.from('personnel_planning_jour').select('personnel_id, statut').eq('date', aujourdHui),
       supabase.from('personnel').select('id, nom').eq('actif', true),
       supabase.from('of_matieres').select('stock_id, quantite_requise, stocks(nom, quantite, unite)').eq('of_id', of_id),
+      supabase.from('phases_standard').select('operation_id, occupe_machine'),
     ]);
     for (const r of [machinesRes, machinesOpsRes, maintenanceRes, competencesRes, persMachinesRes, absencesRes, personnelRes, matieresRes]) {
       if (r.error) throw r.error;
     }
+
+    // Même définition que l'écran de gamme (gammes-ordre.js) : opération sans machine = toutes ses phases standard sont manuelles,
+    // ou aucune phase et aucune machine compatible. Les phases illisibles sont ignorées (comportement d'origine conservé).
+    const phasesStd = phasesRes.error ? [] : (phasesRes.data || []);
+    const operationManuelle = (operationId) => {
+      const ph = phasesStd.filter((p) => p.operation_id === operationId);
+      if (ph.length) return !ph.some((p) => p.occupe_machine !== false);
+      return machinesParOp(operationId).length === 0;
+    };
 
     const machineEnMaintenance = (machineId) => maintenanceRes.data.some((m) =>
       m.machine_id === machineId && m.bloquant !== false && m.date_debut <= aujourdHui && (!m.date_fin || m.date_fin >= aujourdHui)
@@ -121,6 +134,7 @@ const handlerProtege = async (event) => {
         }
       } else {
         const compatibles = machinesParOp(g.operation_id);
+        if (operationManuelle(g.operation_id)) continue;   // travail manuel : aucune machine requise
         if (!compatibles.some(machineOperationnelle)) {
           machinesOk = false;
           blocages.push({ etape: g.sequence, type: 'machine', detail: `${g.operations.nom} : aucune machine opérationnelle disponible pour cette opération.` });
