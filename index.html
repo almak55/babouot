@@ -1320,7 +1320,7 @@
   function renderOrdres(){
     const wrap = el(`
       <div class="panel">
-        <div class="panel-head" style="flex-wrap:wrap;gap:10px 14px;"><h2>Ordres de fabrication</h2><div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto;"><button class="btn" id="of-pleiade-btn" style="padding:12px 26px;font-size:15px;font-weight:700;min-width:180px;border:none;color:#fff;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.18);background:#4338ca;"></button><button class="btn" id="of-cartonnes-btn" style="padding:12px 26px;font-size:15px;font-weight:700;min-width:180px;border:none;color:#fff;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.18);background:#b45309;"></button></div><div class="of-actions" style="flex:1 1 100%;display:flex;gap:5px;flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;padding-top:2px;"><button class="btn" id="couts-btn">Coûts & tarifs</button><button class="btn" id="import-lot">Importer des fiches (PDF)</button><button class="btn" id="pleiade-btn">Fiche Pléiade</button><button class="btn" id="coffret-btn">Coffrets</button><button class="btn" id="annuel-btn">Planning annuel Pléiade</button><button class="btn" id="reorg-btn">Réorganiser par priorité</button><button class="btn" id="recalc-btn" title="Reprend tous les OF en cours de planification ou d'exécution avec les derniers temps, quantités, délais et dépendances">Recalculer tous les OF</button><button class="btn" id="report-btn" title="Reporter à aujourd'hui les tâches passées et non terminées">Reporter les tâches non terminées</button><button class="btn primary" id="new-of"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvel OF</button></div></div>
+        <div class="panel-head" style="flex-wrap:wrap;gap:10px 14px;"><h2>Ordres de fabrication</h2><div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto;"><button class="btn" id="of-pleiade-btn" style="padding:12px 26px;font-size:15px;font-weight:700;min-width:180px;border:none;color:#fff;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.18);background:#4338ca;"></button><button class="btn" id="of-cartonnes-btn" style="padding:12px 26px;font-size:15px;font-weight:700;min-width:180px;border:none;color:#fff;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.18);background:#b45309;"></button></div><div class="of-actions" style="flex:1 1 100%;display:flex;gap:5px;flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;padding-top:2px;"><button class="btn" id="couts-btn">Coûts & tarifs</button><button class="btn" id="import-lot">Importer des fiches (PDF)</button><button class="btn" id="pleiade-btn">Fiche Pléiade</button><button class="btn" id="coffret-btn">Coffrets</button><button class="btn" id="annuel-btn">Planning annuel Pléiade</button><button class="btn" id="reorg-btn">Réorganiser par priorité</button><button class="btn" id="recalc-btn" title="Reprend tous les OF en cours de planification ou d'exécution avec les derniers temps, quantités, délais et dépendances">Recalculer tous les OF</button><button class="btn" id="recalc-depuis-btn" title="Supprime puis recalcule tout ce qui est planifié à partir d'une date choisie, même déjà passée">Replanifier à partir de…</button><button class="btn" id="report-btn" title="Reporter à aujourd'hui les tâches passées et non terminées">Reporter les tâches non terminées</button><button class="btn primary" id="new-of"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nouvel OF</button></div></div>
         <table class="row-table">
           <thead><tr><th></th><th>Production</th><th>Client</th><th>Qté</th><th>Délai</th><th>État</th><th>Avancement</th><th></th></tr></thead>
           <tbody id="of-tbody"></tbody>
@@ -6312,6 +6312,8 @@
     if (reorgBtn) reorgBtn.addEventListener('click', () => ouvrirModaleReorganisation());
     const recalcBtn = document.getElementById('recalc-btn');
     if (recalcBtn) recalcBtn.addEventListener('click', () => ouvrirModaleReorganisation('actualiser'));
+    const recalcDepuisBtn = document.getElementById('recalc-depuis-btn');
+    if (recalcDepuisBtn) recalcDepuisBtn.addEventListener('click', () => ouvrirModaleReorganisation('depuis'));
     const coutsBtn = document.getElementById('couts-btn');
     if (coutsBtn) coutsBtn.addEventListener('click', ouvrirModaleCouts);
   }
@@ -7167,16 +7169,21 @@
 
   // ---------- Réorganisation du planning par priorité (Pléiade / urgences d'abord) ----------
   async function ouvrirModaleReorganisation(mode) {
-    const actualiser = mode === 'actualiser';
+    const depuisMode = mode === 'depuis';
+    const actualiser = mode === 'actualiser' || depuisMode;
     afficherModale(`
-      <h3>${actualiser ? 'Recalculer tous les OF' : 'Réorganiser le planning par priorité'}</h3>
-      ${actualiser ? `<div class="plan-note" style="margin-bottom:8px;">Reprend les <strong>OF validés ou en cours</strong> avec les <strong>derniers réglages</strong> : temps standards, quantités (ratios de réparation), délais de séchage, horaires et dépendances. L'<strong>ordre actuel du planning est conservé</strong>. Les tâches <strong>déjà commencées ne bougent pas</strong> ; seul ce qui n'a pas démarré est replanifié au plus tôt (les placements ou affectations faits à la main sur ces tâches sont recalculés). Les OF jamais planifiés ne sont pas touchés.<br>
+      <h3>${depuisMode ? 'Replanifier à partir d\u2019une date' : actualiser ? 'Recalculer tous les OF' : 'Réorganiser le planning par priorité'}</h3>
+      ${depuisMode ? `<div class="field" style="margin-bottom:8px;"><label for="ro-date">Replanifier tout ce qui est planifié à partir du</label>
+        <input type="date" id="ro-date" value="${dateLocaleIso()}" style="max-width:190px;">
+        <div class="plan-note" style="margin-top:4px;">Les créneaux de cette date et des jours suivants sont <strong>supprimés puis recalculés</strong>, même si la date est déjà passée. Ce qui commence <strong>avant</strong> cette date reste en place. Les étapes dont la <strong>production a été saisie</strong> ne sont jamais touchées.</div></div>
+      <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-bottom:8px;"><input type="checkbox" id="ro-encours" style="margin-top:3px;"> <span>Libérer aussi les étapes au statut <strong>« en cours »</strong> <span class="plan-note">(sans production saisie)</span></span></label>` : ''}
+      ${actualiser ? `<div class="plan-note" style="margin-bottom:8px;">Reprend les <strong>OF validés ou en cours</strong> avec les <strong>derniers réglages</strong> : temps standards, quantités (ratios de réparation), délais de séchage, horaires et dépendances. L'<strong>ordre actuel du planning est conservé</strong>. ${depuisMode ? 'Ce qui est libéré est replacé <strong>au plus tôt, à partir de maintenant</strong> (jamais dans le passé), avec la règle de la journée de machine ; les placements ou affectations faits à la main sont recalculés.' : 'Les tâches <strong>déjà commencées ne bougent pas</strong> ; seul ce qui n\'a pas démarré est replanifié au plus tôt (les placements ou affectations faits à la main sur ces tâches sont recalculés).'} Les OF jamais planifiés ne sont pas touchés.<br>
       Le résultat est <strong>provisoire</strong> : vous voyez les OF décalés, puis vous <strong>validez</strong> ou vous <strong>annulez</strong> (retour exact à l'état précédent).</div>
       <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-bottom:8px;"><input type="checkbox" id="ro-liens" style="margin-top:3px;"> <span>Refaire aussi les <strong>dépendances</strong> de chaque OF d'après le modèle <span class="plan-note">(remplace les liens saisis à la main sur ces OF ; à cocher après avoir modifié « Dépendances standards »)</span></span></label>` : ''}
       <div class="plan-note" style="margin-bottom:8px;${actualiser ? 'display:none;' : ''}">Les OF <strong>Pléiade / Coffret</strong> et les commandes <strong>urgentes</strong> passent en premier, classés par date de livraison. Les autres commandes sont replanifiées derrière, selon leur propre délai. Les tâches <strong>déjà commencées sont terminées</strong> ; seul ce qui n'a pas démarré est déplacé.<br>
       Le nouveau planning s'applique <strong>à titre provisoire</strong> : vous voyez les OF décalés, puis vous <strong>validez</strong> ou vous <strong>annulez</strong> (retour exact à l'état précédent).</div>
       <div id="ro-corps"></div><div id="m-msg"></div>
-      <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn" id="ro-annuler" style="display:none;">Annuler la réorganisation</button><button class="btn primary" id="ro-go">${actualiser ? 'Recalculer' : 'Calculer la réorganisation'}</button></div>`, 'xlarge');
+      <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn" id="ro-annuler" style="display:none;">Annuler la réorganisation</button><button class="btn primary" id="ro-go">${depuisMode ? 'Replanifier' : actualiser ? 'Recalculer' : 'Calculer la réorganisation'}</button></div>`, 'xlarge');
     const $ = (id) => document.getElementById(id);
     let session = null, termine = false;
     const post = async (corps) => {
@@ -7195,15 +7202,19 @@
     });
     $('ro-go').addEventListener('click', async () => {
       if (session) {            // validation
-        try { await post({ action: 'valider', session_id: session }); termine = true; toast(actualiser ? 'Recalcul validé.' : 'Nouvelle organisation validée.'); fermerModale(); chargerDonneesReelles(); }
+        try { await post({ action: 'valider', session_id: session }); termine = true; toast(depuisMode ? 'Replanification validée.' : actualiser ? 'Recalcul validé.' : 'Nouvelle organisation validée.'); fermerModale(); chargerDonneesReelles(); }
         catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
         return;
       }
       $('ro-go').disabled = true; $('m-msg').innerHTML = '<div class="msg">Libération des créneaux non commencés…</div>';
       try {
         const refaireLiens = !!($('ro-liens') && $('ro-liens').checked); if ($('ro-liens')) $('ro-liens').disabled = true;
-        const prep = await post({ action: 'preparer', mode: actualiser ? 'actualiser' : undefined }); session = prep.session_id;
-        if (!prep.ordre.length) { $('m-msg').innerHTML = `<div class="msg ok">${actualiser ? 'Rien à recalculer : aucun OF n\'a de tâche à venir non commencée.' : 'Rien à réorganiser.'}</div>`; $('ro-go').disabled = false; session = null; return; }
+        const dateDepuis = depuisMode ? ($('ro-date').value || '') : '';
+        if (depuisMode && !/^\d{4}-\d{2}-\d{2}$/.test(dateDepuis)) { $('m-msg').innerHTML = '<div class="msg error">Choisissez la date à partir de laquelle replanifier.</div>'; $('ro-go').disabled = false; if ($('ro-liens')) $('ro-liens').disabled = false; return; }
+        if (depuisMode) { $('ro-date').disabled = true; $('ro-encours').disabled = true; }
+        const prep = await post({ action: 'preparer', mode: actualiser ? 'actualiser' : undefined, depuis_date: depuisMode ? dateDepuis : undefined, inclure_en_cours: depuisMode ? !!$('ro-encours').checked : undefined }); session = prep.session_id;
+        const protegees = prep.proteges ? ` ${prep.proteges} étape(s) avec production saisie ont été conservées.` : '';
+        if (!prep.ordre.length) { $('m-msg').innerHTML = `<div class="msg ok">${depuisMode ? 'Rien à replanifier à partir de cette date.' : actualiser ? 'Rien à recalculer : aucun OF n\'a de tâche à venir non commencée.' : 'Rien à réorganiser.'}${protegees}</div>`; $('ro-go').disabled = false; session = null; if (depuisMode) { $('ro-date').disabled = false; $('ro-encours').disabled = false; } if ($('ro-liens')) $('ro-liens').disabled = false; return; }
         $('ro-corps').innerHTML = `<div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>#</th><th>OF</th><th>Titre</th><th>Priorité</th><th>Livraison</th><th>Fin prévue</th><th>Résultat</th></tr></thead><tbody>${prep.ordre.map((o, i) =>
           `<tr id="ro-${i}"><td>${i + 1}</td><td><strong>${esc(o.numero)}</strong></td><td>${esc(o.titre)}</td><td>${o.groupe === 'prioritaire' ? (o.type_production === 'coffret' ? 'Coffret' : o.type_production === 'pleiade' ? 'Pléiade' : 'Urgente') : 'Standard'}</td><td>${o.delai ? dateCourte(o.delai) : '—'}</td><td class="ro-fin">…</td><td class="ro-res">en attente</td></tr>`).join('')}</tbody></table></div><div id="ro-det"></div>`;
         const detail = [];
@@ -7235,8 +7246,8 @@
             b.outerHTML = '<span style="color:var(--ok,#1a7f5a);">appliqué</span>';
           } catch (e) { b.disabled = false; $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
         }));
-        $('m-msg').innerHTML = `<div class="msg ${retards ? '' : 'ok'}">${prep.ordre.length} OF replanifié(s)${retards ? `, ${retards} délai(s) non tenu(s)` : ', tous les délais sont tenus'}. Le planning est provisoire : validez ou annulez.</div>`;
-        $('ro-go').textContent = actualiser ? 'Valider le recalcul' : 'Valider la nouvelle organisation'; $('ro-go').disabled = false; $('ro-annuler').style.display = '';
+        $('m-msg').innerHTML = `<div class="msg ${retards ? '' : 'ok'}">${prep.ordre.length} OF replanifié(s)${retards ? `, ${retards} délai(s) non tenu(s)` : ', tous les délais sont tenus'}.${protegees} Le planning est provisoire : validez ou annulez.</div>`;
+        $('ro-go').textContent = depuisMode ? 'Valider la replanification' : actualiser ? 'Valider le recalcul' : 'Valider la nouvelle organisation'; $('ro-go').disabled = false; $('ro-annuler').style.display = '';
         chargerDonneesReelles();
       } catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; $('ro-go').disabled = false; }
     });
