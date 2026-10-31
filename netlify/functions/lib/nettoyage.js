@@ -129,7 +129,9 @@ async function traiterJour(supabase, machineId, date, cal, duree) {
     if (sup.length) { const { error: e } = await supabase.from('planning_jour').delete().in('id', sup); if (e) throw e; return { supprimes: sup.length, crees: 0 }; }
     return { supprimes: 0, crees: 0 };
   }
-  if (!jobs.some((r) => MER.test(r.phase || ''))) return { supprimes: 0, crees: 0 };   // journée hors modèle : inchangée
+  // Journée hors modèle (ni mise en route ni nettoyage posé ce jour-là, ex. uniquement des étapes à durée manuelle) : inchangée.
+  // Une machine sans phase « mise en route » mais avec un nettoyage suit la même règle : nettoyage après le dernier travail de la journée.
+  if (!jobs.some((r) => MER.test(r.phase || '')) && !nets.length) return { supprimes: 0, crees: 0 };
   if (nets.some((r) => !modifiables(r))) return { supprimes: 0, crees: 0 };           // nettoyage déjà commencé / terminé : on n'y touche pas
   const voulu = nettoyageSouhaite(jobs, date, cal, duree);
   if (!voulu) return { supprimes: 0, crees: 0 };

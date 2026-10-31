@@ -148,19 +148,13 @@ function consommer(dureeMin, depuisMin, occupes, cal, minTranche) {
   return reste > 0 ? null : tranches;
 }
 
-// Fusionne deux tranches consécutives quand seule la pause du midi les sépare
-// (une ligne de planning par jour plutôt que deux).
-function fusionner(tranches, cal) {
+// Fusionne les tranches strictement contiguës. La pause déjeuner (12h00-12h30) COUPE toujours : une ligne avant, une ligne après,
+// pour que le planning reflète le terrain (aucune ligne ne chevauche la pause).
+function fusionner(tranches) {
   const res = [];
   for (const t of tranches) {
     const prec = res[res.length - 1];
-    if (prec) {
-      const jour = debutDeJour(prec.d);
-      const memeJour = debutDeJour(t.d) === jour;
-      const pauseDebut = jour + hhmm(cal.pause_debut);
-      const pauseFin = pauseDebut + Number(cal.pause_minutes);
-      if (prec.f === t.d || (memeJour && prec.f === pauseDebut && t.d === pauseFin)) { prec.f = t.f; continue; }
-    }
+    if (prec && prec.f === t.d) { prec.f = t.f; continue; }
     res.push({ d: t.d, f: t.f });
   }
   return res;
@@ -609,7 +603,7 @@ function planifierAvant(entree, debutMin) {
   // Machines « en journée » : celles où passe un travail avec mise en route (cet OF ou d'autres déjà planifiés).
   ctx.machinesJournee = new Set();
   (entree.etapes || []).forEach((e) => { if (e.journee) (e.machine_imposee ? [e.machine_imposee] : (e.machines_candidates || [])).forEach((m) => ctx.machinesJournee.add(m)); });
-  Object.entries(entree.occupation.machines || {}).forEach(([m, ivs]) => { if (ivs.some((iv) => iv.tag === 'mer')) ctx.machinesJournee.add(m); });
+  Object.entries(entree.occupation.machines || {}).forEach(([m, ivs]) => { if (ivs.some((iv) => iv.tag === 'mer' || iv.tag === 'net')) ctx.machinesJournee.add(m); });
   const charge = new Map();
   const resultats = new Map();   // index -> { debut, fin, duree, brutes } : point de départ des suivantes
   const etapes = [];
