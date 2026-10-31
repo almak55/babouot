@@ -1085,7 +1085,7 @@
     machines: ['Machines', 'Parc machine — créer, modifier, rattacher à une opération'],
     temps: ['Temps standards', 'Mise en route, réglages, cadences et nettoyage — par opération et par machine'],
     stocks: ['Stocks & matières', 'Papier, colle, fil, couverture — suivi des seuils'],
-    reporting: ['Reporting', 'Indicateurs de production — semaine en cours'],
+    reporting: ['Reporting', 'Indicateurs calculés sur vos données réelles — OF, planning, machines, stocks'],
     messagerie: ['Messagerie', 'Échanges internes sur un OF, un titre, une machine…'],
   };
 
@@ -5388,20 +5388,30 @@
   }
 
   function renderReporting(){
+    // Tous les chiffres viennent des données réelles de l'application (OF, planning, machines, personnel, stocks).
+    const aujourdhui = new Date().toLocaleDateString('sv-SE');
     const enCours = state.ordres.filter(o=>o.statut==='en cours').length;
-    const enRetard = state.stocks.filter(s=>s.statut==='danger').length;
+    const retards = state.ordres
+      .filter(o => (o.avancement || 0) < 100 && o.delai && String(o.delai).slice(0, 10) < aujourdhui)
+      .sort((x, y) => String(x.delai).localeCompare(String(y.delai)));
+    const matieresCritiques = state.stocks.filter(s=>s.statut==='danger').length;
     const personnelActif = state.personnel.filter(p=>p.charge>0);
     const chargeMoy = personnelActif.length > 0
       ? Math.round(personnelActif.reduce((a,p)=>a+p.charge,0) / personnelActif.length)
       : 0;
+    const machines = state.machines.filter(m => m.uuid);
+    const etatDe = (m) => (state.etatsMachines || {})[m.uuid] || { etat: 'ok' };
+    const alArret = (m) => ['hors_service', 'maintenance'].includes(etatDe(m).etat);
+    const nbArret = machines.filter(alArret).length;
 
     const wrap = el(`<div></div>`);
     const kpis = el(`
       <div class="kpis">
-        <div class="kpi accent-teal"><div class="v">84%</div><div class="l">TRS moyen atelier (démo)</div></div>
         <div class="kpi accent-amber"><div class="v">${enCours}</div><div class="l">OF en cours</div></div>
-        <div class="kpi accent-teal"><div class="v">${chargeMoy}%</div><div class="l">Charge moyenne équipe</div></div>
-        <div class="kpi ${enRetard?'accent-danger':'accent-teal'}"><div class="v">${enRetard}</div><div class="l">Matières sous seuil critique</div></div>
+        <div class="kpi ${retards.length?'accent-danger':'accent-teal'}"><div class="v">${retards.length}</div><div class="l">OF en retard</div></div>
+        <div class="kpi accent-teal"><div class="v">${chargeMoy}%</div><div class="l">Charge moyenne équipe (semaine)</div></div>
+        <div class="kpi ${nbArret?'accent-danger':'accent-teal'}"><div class="v">${nbArret}<span style="font-size:15px;font-weight:500;color:var(--ink-500);"> / ${machines.length}</span></div><div class="l">Machines à l'arrêt aujourd'hui</div></div>
+        <div class="kpi ${matieresCritiques?'accent-danger':'accent-teal'}"><div class="v">${matieresCritiques}</div><div class="l">Matières sous seuil critique</div></div>
       </div>
     `);
     wrap.appendChild(kpis);
@@ -5445,28 +5455,57 @@
     `);
     wrap.appendChild(donutPanel);
 
-    const trsByMachine = [
-      {name:'Relieuse dos carré', trs:88},
-      {name:'Plieuse Stahl', trs:91},
-      {name:'Massicot trilatéral', trs:76},
-      {name:'Encarteuse-piqueuse', trs:82},
-      {name:'Presse à chaud', trs:69},
-    ];
-    const panel = el(`<div class="panel"><div class="panel-head"><h2>TRS par machine — semaine en cours <span style="font-weight:400; color:var(--ink-500); font-size:12px;">(données de démonstration)</span></h2></div></div>`);
+    // ---- Charge des machines : heures planifiées sur la semaine affichée ÷ 40 h (5 jours × 8 h), comme la charge du personnel ----
+    const minutesDe = (t) => { const [h, m] = String(t).split(':'); return Number(h) * 60 + Number(m); };
+    const heuresCreneau = (c) => {
+      if (!c.heure_debut || !c.heure_fin) return 8;   // sans horaire = journée entière
+      const d = minutesDe(c.heure_debut), f = minutesDe(c.heure_fin);
+      return (f - d - Math.max(0, Math.min(f, 750) - Math.max(d, 720))) / 60;   // pause 12h00-12h30
+    };
+    const planifie = (state.brut && state.brut.planning) || [];
+    const lignesMachines = machines.map(m => {
+      const h = planifie.filter(c => c.machine_id === m.uuid).reduce((t, c) => t + heuresCreneau(c), 0);
+      return { m, h, pct: Math.round(h / 40 * 100), arret: alArret(m), etat: etatDe(m) };
+    }).sort((x, y) => (x.arret - y.arret) || (y.h - x.h) || x.m.name.localeCompare(y.m.name, 'fr'));
+    const jjmm = (iso) => iso.slice(8, 10) + '/' + iso.slice(5, 7);
+    const periode = state.brut && state.brut.jours && state.brut.jours.length ? `du ${jjmm(state.brut.jours[0])} au ${jjmm(state.brut.jours[6])}` : '';
+    const panel = el(`<div class="panel"><div class="panel-head"><h2>Charge des machines — semaine ${periode}</h2></div></div>`);
     const body = el(`<div style="padding:16px; display:flex; flex-direction:column; gap:12px;"></div>`);
-    trsByMachine.forEach(m=>{
-      const cls = m.trs>=85?'':(m.trs>=75?'warn':'danger');
+    if (!lignesMachines.length) body.appendChild(el(`<div class="empty">Aucune machine active. Créez vos machines dans l'onglet « Machines ».</div>`));
+    lignesMachines.forEach(({ m, h, pct, arret, etat }) => {
+      const cls = pct > 100 ? 'danger' : (pct >= 85 ? 'warn' : '');
+      const hTxt = Math.round(h * 10) / 10;
       body.appendChild(el(`
-        <div>
-          <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:4px;">
-            <span>${m.name}</span><span class="mono">${m.trs}%</span>
+        <div style="${arret ? 'opacity:.7;' : ''}">
+          <div style="display:flex; justify-content:space-between; gap:10px; font-size:12.5px; margin-bottom:4px;">
+            <span>${esc(m.name)} ${etat.etat !== 'ok' ? tagEtatMachine(etat) : ''}</span><span class="mono">${hTxt} h / 40 h · ${pct}%</span>
           </div>
-          <div class="bar-track"><div class="bar-fill ${cls}" style="width:${m.trs}%"></div></div>
+          <div class="bar-track"><div class="bar-fill ${cls}" style="width:${Math.min(100, pct)}%"></div></div>
         </div>
       `));
     });
+    if (lignesMachines.length) body.appendChild(el(`<div class="plan-note">Charge = heures planifiées sur la semaine ÷ 40 h (5 jours × 8 h). Les machines à l'arrêt (hors service ou intervention en cours) sont signalées et placées en fin de liste.</div>`));
     panel.appendChild(body);
     wrap.appendChild(panel);
+
+    // ---- OF en retard : délai dépassé et avancement < 100 % ----
+    const retardPanel = el(`<div class="panel"><div class="panel-head"><h2>OF en retard</h2><span class="plan-note">${retards.length ? retards.length + ' OF — du plus ancien au plus récent' : ''}</span></div></div>`);
+    if (!retards.length) {
+      retardPanel.appendChild(el(`<div class="empty">Aucun OF en retard.</div>`));
+    } else {
+      const jours = (d) => Math.max(1, Math.round((new Date(aujourdhui) - new Date(String(d).slice(0, 10))) / 86400000));
+      retardPanel.appendChild(el(`
+        <table>
+          <thead><tr><th>OF</th><th>Titre</th><th>Délai</th><th>Retard</th><th>Avancement</th></tr></thead>
+          <tbody>${retards.slice(0, 12).map(o => `
+            <tr><td class="mono">${esc(o.id)}</td><td>${esc(o.produit)}${o.client ? ` <span class="plan-note">— ${esc(o.client)}</span>` : ''}</td>
+              <td class="mono">${esc(String(o.delai).slice(0, 10).split('-').reverse().join('/'))}</td>
+              <td><span class="tag danger">${jours(o.delai)} j</span></td><td class="mono">${Math.round(o.avancement || 0)}%</td></tr>`).join('')}
+          </tbody>
+        </table>
+        ${retards.length > 12 ? `<div class="plan-note" style="padding:10px 16px;">… et ${retards.length - 12} autre(s).</div>` : ''}`));
+    }
+    wrap.appendChild(retardPanel);
     return wrap;
   }
 
