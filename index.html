@@ -1838,7 +1838,8 @@
           detail = `<ul class="plan-note" style="margin:6px 0;">${lignes}</ul>
             <div class="plan-resume"><div><span class="plan-k">Fin prévue avant</span><strong>${fmtDateHeure(r.ancienne_fin)}</strong></div><div><span class="plan-k">Nouvelle fin</span><strong>${fmtDateHeure(r.nouvelle_fin)}</strong></div>
             <div>${r.delai_tenu === false ? `<span class="tag danger">Délai dépassé</span> <span class="plan-note">(délai ${fmtDateHeure(r.delai)} — ${fmtH(r.retard_delai_min / 60)} de retard${r.alternative_heures_sup ? ' ; avec heures sup : fin ' + fmtDateHeure(r.alternative_heures_sup.fin) + (r.alternative_heures_sup.respecte_delai ? ', délai tenu' : '') : ''})</span>` : (r.delai_tenu ? '<span class="tag ok">Délai tenu</span>' : '')}</div></div>
-            <div class="plan-note">Étapes replacées : ${r.etapes_decalees.map(x => esc(x.operation) + ' (' + fmtDateHeure(x.debut) + ' → ' + fmtDateHeure(x.fin) + ')').join(' ; ')}</div>`;
+            <div class="plan-note">Étapes replacées : ${r.etapes_decalees.map(x => esc(x.operation) + ' (' + fmtDateHeure(x.debut) + ' → ' + fmtDateHeure(x.fin) + ')').join(' ; ')}</div>
+            ${(r.attente_lot || []).length ? `<div class="msg" style="margin-top:6px;display:block;"><strong>⏳ En attente d'un lot minimum :</strong> ${r.attente_lot.map(a => '« ' + esc(a.operation) + ' » (' + a.quantite + ' ex.)').join(', ')} — la suite n'est <strong>pas reportée automatiquement au lendemain</strong> : elle sera programmée dès que ${r.attente_lot[0].quantite_min} ex. sont prêts (« Réorganiser / Recalculer »). La « nouvelle fin » ci-dessus est donc partielle.</div>` : ''}`;
         } else {
           etat = '<span class="tag danger">Retard — planning non recalé</span>';
           detail = `<ul class="plan-note" style="margin:6px 0;">${lignes}</ul><div class="msg error">${esc(r.raison || 'Recalage impossible')}${(r.bloquants || []).map(b => `<br>• ${esc(b.operation)} : ${esc(b.detail)}`).join('')}</div>`;
@@ -5383,6 +5384,7 @@
         maintenant: maintenantLocal(),
         horaires: $('pl-horaires').value,
         replanifier: $('pl-replan').checked,
+        lots: etat.lotsLibres ? 'liberes' : undefined,
         etapes_imposees: Object.entries(etat.imposes).map(([gamme_id, v]) => ({ gamme_id, ...v })),
       };
     };
@@ -5519,6 +5521,17 @@
       const rienAPlanifier = plan.etapes.length > 0 && plan.etapes.every(e => e.fixe);
       $('pl-appliquer').disabled = !(plan.bloquants.length === 0 && r.complet) || rienAPlanifier;
       $('m-msg').innerHTML = '';
+      if ((plan.attente_lot || []).length) {
+        // Règle des lots minimum (BDM / pressure en colle Pléiade) : ces étapes ne sont pas programmées seules.
+        const nbr = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '\u202f');
+        $('pl-resultat').insertAdjacentHTML('afterbegin', `
+          <div class="msg" style="margin:0 0 12px;display:block;"><strong>⏳ Lot minimum non atteint :</strong> ${plan.attente_lot.map((a) => `« ${esc(a.operation)} » (${nbr(a.quantite)} ex., minimum ${nbr(a.quantite_min)} par journée)`).join(' ; ')} ne sera${plan.attente_lot.length > 1 ? 'ont' : ''} <strong>pas programmé${plan.attente_lot.length > 1 ? 's' : ''}</strong> seul${plan.attente_lot.length > 1 ? 's' : ''} : ${plan.attente_lot.length > 1 ? 'elles attendent' : 'elle attend'} que d'autres titres soient prêts. Les lots se forment avec « Réorganiser / Recalculer » (menu planning), qui regroupe les titres Pléiade.
+            <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-top:6px;"><input type="checkbox" id="pl-lots-libres" ${etat.lotsLibres ? 'checked' : ''} style="margin-top:3px;"> <span>Programmer quand même, sans attendre le minimum</span></label></div>`);
+        $('pl-lots-libres').addEventListener('change', (ev) => { etat.lotsLibres = ev.target.checked; calculer(); });
+      } else if (etat.lotsLibres) {
+        $('pl-resultat').insertAdjacentHTML('afterbegin', `<div class="msg" style="margin:0 0 12px;display:block;"><label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;"><input type="checkbox" id="pl-lots-libres" checked style="margin-top:3px;"> <span>Programmer quand même, sans attendre le lot minimum (BDM / pressure en colle Pléiade)</span></label></div>`);
+        $('pl-lots-libres').addEventListener('change', (ev) => { etat.lotsLibres = ev.target.checked; calculer(); });
+      }
       if (rienAPlanifier) {
         // Message bien visible en haut du résultat (et non en bas de la fenêtre) + action directe.
         $('pl-resultat').insertAdjacentHTML('afterbegin', `
@@ -5538,7 +5551,7 @@
         const res = await fetch(`${API}/planifier-of`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps(true)) });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
-        toast(`${ofNumero} planifié : ${data.lignes_creees} ligne(s) de planning créée(s).`);
+        toast(`${ofNumero} planifié : ${data.lignes_creees} ligne(s) de planning créée(s).${(data.attente_lot || []).length ? ' Étapes en attente d\u2019un lot minimum : non programmées.' : ''}`);
         fermerModale(); chargerDonneesReelles();
       } catch (e) {
         msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`;
@@ -7438,36 +7451,103 @@
         if (!prep.ordre.length) { $('m-msg').innerHTML = `<div class="msg ok">${depuisMode ? 'Rien à replanifier à partir de cette date.' : actualiser ? 'Rien à recalculer : aucun OF n\'a de tâche à venir non commencée.' : 'Rien à réorganiser.'}${protegees}</div>`; $('ro-go').disabled = false; session = null; if (depuisMode) { $('ro-date').disabled = false; $('ro-encours').disabled = false; } if ($('ro-liens')) $('ro-liens').disabled = false; return; }
         $('ro-corps').innerHTML = `<div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>#</th><th>OF</th><th>Titre</th><th>Priorité</th><th>Livraison</th><th>Fin prévue</th><th>Résultat</th></tr></thead><tbody>${prep.ordre.map((o, i) =>
           `<tr id="ro-${i}"><td>${i + 1}</td><td><strong>${esc(o.numero)}</strong></td><td>${esc(o.titre)}</td><td>${o.groupe === 'prioritaire' ? (o.type_production === 'coffret' ? 'Coffret' : o.type_production === 'pleiade' ? 'Pléiade' : 'Urgente') : 'Standard'}</td><td>${o.delai ? dateCourte(o.delai) : '—'}</td><td class="ro-fin">…</td><td class="ro-res">en attente</td></tr>`).join('')}</tbody></table></div><div id="ro-det"></div>`;
-        const detail = [];
-        let retards = 0;
-        for (let i = 0; i < prep.ordre.length; i++) {
+        // ---- Calcul : les OF soumis à un lot minimum (BDM / pressure en colle Pléiade) sont placés d'abord ; les lots sont formés ; le reste suit ----
+        const liensFaits = new Set();                // OF dont les dépendances ont déjà été refaites (une seule fois)
+        const resultats = {};                        // i -> dernière réponse de planifier
+        const attentes = new Map();                  // gamme_id -> étape en attente d'un lot minimum
+        const rangDe = {}; prep.ordre.forEach((o, i) => { rangDe[o.of_id] = i; });
+        const planifier = async (i, extra) => {
           const o = prep.ordre[i]; const tr = $('ro-' + i);
           tr.querySelector('.ro-res').textContent = 'calcul…';
           let r;
-          try { r = await post({ action: 'planifier', session_id: session, of_id: o.of_id, refaire_liens: refaireLiens }); } catch (e) { r = { ok: false, erreur: e.message }; }
-          if (!r.ok) { tr.querySelector('.ro-res').innerHTML = `<span style="color:var(--danger,#c0392b);">non planifié : ${esc(r.erreur || (r.bloquants || []).map((b) => b.operation + ' — ' + b.detail).join(' ; '))}</span>`; continue; }
-          tr.querySelector('.ro-fin').textContent = fmt(r.fin);
-          if (r.respecte_delai === false) {
-            retards++;
-            tr.querySelector('.ro-res').innerHTML = `<strong style="color:var(--danger,#c0392b);">⚠ retard de ${dur(r.retard_min)}</strong>`;
-            const lignes = [];
-            if (r.heures_sup) lignes.push(`Heures supplémentaires (07h00–17h30) : ${r.heures_sup.respecte_delai ? '<strong>délai tenu</strong>, fin ' + fmt(r.heures_sup.fin) : 'délai toujours dépassé (fin ' + fmt(r.heures_sup.fin) + ')'}${r.heures_sup.respecte_delai ? ` <button class="btn ro-hs" data-of="${esc(o.of_id)}" style="padding:1px 8px;font-size:12px;">Appliquer</button>` : ''}`);
-            (r.renforts || []).forEach((x) => lignes.push(`Renfort : « ${esc(x.operation)} » passe de ${x.effectif_actuel} à ${x.effectif_necessaire} personnes (+${x.supplementaires}) — estimation`));
-            detail.push(`<div class="msg" style="margin-top:6px;"><strong>${esc(o.numero)}</strong> — délai ${o.delai ? dateCourte(o.delai) : ''} non tenu :<ul style="margin:4px 0 0 18px;">${lignes.length ? lignes.map((l) => `<li>${l}</li>`).join('') : '<li>aucune solution automatique : vérifier peaux/papier reçus, machines, personnel.</li>'}</ul></div>`);
-          } else {
-            tr.querySelector('.ro-res').innerHTML = r.respecte_delai === true ? '<span style="color:var(--ok,#1a7f5a);">✓ délai tenu</span>' : 'sans délai';
-          }
+          try { r = await post({ action: 'planifier', session_id: session, of_id: o.of_id, refaire_liens: refaireLiens && !liensFaits.has(o.of_id), ...(extra || {}) }); liensFaits.add(o.of_id); } catch (e) { r = { ok: false, erreur: e.message }; }
+          resultats[i] = r;
+          Array.from(attentes.keys()).forEach((k) => { if (attentes.get(k).of_id === o.of_id) attentes.delete(k); });
+          if (r.ok) (r.attente_lot || []).forEach((a) => attentes.set(a.gamme_id, a));
+          return r;
+        };
+        const dernierLots = prep.ordre.reduce((m, o, i) => (o.avec_lots ? i : m), -1);
+        for (let i = 0; i <= dernierLots; i++) await planifier(i);
+        let tour = 0;
+        while (attentes.size && tour++ < 12) {
+          $('m-msg').innerHTML = `<div class="msg">Formation des lots minimum (tour ${tour})…</div>`;
+          let l;
+          try { l = await post({ action: 'lots', session_id: session, attentes: Array.from(attentes.values()) }); } catch (e) { $('m-msg').innerHTML = `<div class="msg error">Lots : ${esc(e.message)}</div>`; break; }
+          if (!(l.lancements || []).length) break;
+          const parOf = {};
+          l.lancements.forEach((x) => { (parOf[x.of_id] = parOf[x.of_id] || {})[x.gamme_id] = x.depart; });
+          const ids = Object.keys(parOf).sort((x, y) => rangDe[x] - rangDe[y]);
+          for (const id of ids) await planifier(rangDe[id], { lots_liberes: parOf[id], lots_seul: true });   // 1) les machines du lot d'abord
+          for (const id of ids) await planifier(rangDe[id]);                                                  // 2) puis la suite de chaque OF
         }
-        $('ro-det').innerHTML = detail.join('');
-        $('ro-det').querySelectorAll('.ro-hs').forEach((b) => b.addEventListener('click', async () => {
-          b.disabled = true;
-          try {
-            const r = await fetch(`${API}/planifier-of`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: b.dataset.of, mode: 'avant', horaires: 'heures_sup', replanifier: true, depuis: `${dateLocaleIso()}T${new Date().toTimeString().slice(0, 5)}`, appliquer: true }) });
-            const d = await lireJson(r); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-            b.outerHTML = '<span style="color:var(--ok,#1a7f5a);">appliqué</span>';
-          } catch (e) { b.disabled = false; $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
-        }));
-        $('m-msg').innerHTML = `<div class="msg ${retards ? '' : 'ok'}">${prep.ordre.length} OF replanifié(s)${retards ? `, ${retards} délai(s) non tenu(s)` : ', tous les délais sont tenus'}.${protegees} Le planning est provisoire : validez ou annulez.</div>`;
+        for (let i = dernierLots + 1; i < prep.ordre.length; i++) await planifier(i);
+
+        const nomOp = (a) => a.operation || a.operation_code;
+        const mini = (a) => String(a.quantite_min).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        const nbr = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        const rendre = async () => {
+          const detail = []; let retards = 0, partiels = 0;
+          prep.ordre.forEach((o, i) => {
+            const r = resultats[i]; const tr = $('ro-' + i); if (!r) return;
+            if (!r.ok) { tr.querySelector('.ro-res').innerHTML = `<span style="color:var(--danger,#c0392b);">non planifié : ${esc(r.erreur || (r.bloquants || []).map((b) => b.operation + ' — ' + b.detail).join(' ; '))}</span>`; return; }
+            tr.querySelector('.ro-fin').textContent = fmt(r.fin) + (r.partiel ? ' *' : '');
+            const enAttente = Array.from(attentes.values()).filter((a) => a.of_id === o.of_id);
+            if (r.respecte_delai === false) {
+              retards++;
+              tr.querySelector('.ro-res').innerHTML = `<strong style="color:var(--danger,#c0392b);">⚠ retard de ${dur(r.retard_min)}</strong>${enAttente.length ? ' · ⏳ ' + enAttente.length + ' étape(s) en attente de lot' : ''}`;
+              const lignes = [];
+              if (r.heures_sup) lignes.push(`Heures supplémentaires (07h00–17h30) : ${r.heures_sup.respecte_delai ? '<strong>délai tenu</strong>, fin ' + fmt(r.heures_sup.fin) : 'délai toujours dépassé (fin ' + fmt(r.heures_sup.fin) + ')'}${r.heures_sup.respecte_delai && !r.partiel ? ` <button class="btn ro-hs" data-of="${esc(o.of_id)}" style="padding:1px 8px;font-size:12px;">Appliquer</button>` : ''}`);
+              (r.renforts || []).forEach((x) => lignes.push(`Renfort : « ${esc(x.operation)} » passe de ${x.effectif_actuel} à ${x.effectif_necessaire} personnes (+${x.supplementaires}) — estimation`));
+              detail.push(`<div class="msg" style="margin-top:6px;"><strong>${esc(o.numero)}</strong> — délai ${o.delai ? dateCourte(o.delai) : ''} non tenu :<ul style="margin:4px 0 0 18px;">${lignes.length ? lignes.map((l) => `<li>${l}</li>`).join('') : '<li>aucune solution automatique : vérifier peaux/papier reçus, machines, personnel.</li>'}</ul></div>`);
+            } else if (enAttente.length) {
+              partiels++;
+              tr.querySelector('.ro-res').innerHTML = `<span style="color:var(--warn,#b9770e);">⏳ ${enAttente.length} étape(s) en attente de lot</span>`;
+            } else {
+              tr.querySelector('.ro-res').innerHTML = r.respecte_delai === true ? '<span style="color:var(--ok,#1a7f5a);">✓ délai tenu</span>' : 'sans délai';
+            }
+          });
+          let bloc = detail.join('');
+          // Étapes qui attendent un lot : un titre qui n'atteint pas le minimum seul n'est pas lancé (pas de report automatique au lendemain).
+          const liste = Array.from(attentes.values());
+          if (liste.length) {
+            const codes = Array.from(new Set(liste.map((a) => a.operation_code)));
+            const lignesOp = codes.map((c) => {
+              const g = liste.filter((a) => a.operation_code === c); const prets = g.filter((a) => !a.en_amont);
+              const total = prets.reduce((t, a) => t + a.quantite, 0); const min = g[0].quantite_min;
+              return `<li><strong>${esc(nomOp(g[0]))}</strong> : ${nbr(total)} ex. prêts à fabriquer${total < min ? `, il manque <strong>${nbr(min - total)} ex.</strong> pour déclencher la mise en route (minimum ${mini(g[0])} par journée)` : ''}${g.length > prets.length ? ` · ${g.length - prets.length} titre(s) pas encore prêt(s) (étape précédente en attente)` : ''}</li>`;
+            }).join('');
+            const parOf = []; liste.forEach((a) => { if (!parOf.includes(a.of_id)) parOf.push(a.of_id); });
+            bloc += `<div class="msg" style="margin-top:8px;display:block;"><strong>⏳ En attente d'un lot minimum</strong> — pas d'exemplaires programmés tant que la journée n'atteint pas le minimum ; la suite attend que d'autres titres soient prêts (aucun report automatique).<ul style="margin:4px 0 6px 18px;">${lignesOp}</ul>
+              <div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>OF</th><th>Titre</th><th>Étape</th><th>Ex.</th><th>Livraison</th><th></th></tr></thead><tbody>${parOf.map((id) => {
+                const o = prep.ordre[rangDe[id]]; const g = liste.filter((a) => a.of_id === id);
+                return `<tr><td><strong>${esc(o.numero)}</strong></td><td>${esc(o.titre)}</td><td>${g.map((a) => esc(nomOp(a))).join(', ')}</td><td>${g.map((a) => nbr(a.quantite)).join(' / ')}</td><td>${o.delai ? dateCourte(o.delai) : '—'}</td><td><button class="btn ro-lancer" data-of="${esc(id)}" style="padding:1px 8px;font-size:12px;" title="Programmer ce titre sans attendre le minimum">Lancer quand même</button></td></tr>`;
+              }).join('')}</tbody></table></div></div>`;
+          }
+          // Contrôle : quantité réellement programmée par journée de machine.
+          let bilan = null;
+          try { bilan = await post({ action: 'lots_bilan', session_id: session }); } catch (e) { bilan = null; }
+          if (bilan && (bilan.jours || []).length) {
+            const mal = bilan.jours.filter((j) => !j.ok);
+            bloc += `<details style="margin-top:8px;" ${mal.length ? 'open' : ''}><summary style="cursor:pointer;">${mal.length ? `<strong style="color:var(--danger,#c0392b);">⚠ ${mal.length} journée(s) sous le minimum</strong>` : '<strong style="color:var(--ok,#1a7f5a);">✓ Lots minimum respectés</strong>'} — contrôle des journées Pléiade (BDM, pressure en colle)</summary>
+              <table class="sp-table" style="margin-top:4px;"><thead><tr><th>Jour</th><th>Opération</th><th>Machine</th><th>Exemplaires</th><th>Minimum</th><th>OF</th></tr></thead><tbody>${bilan.jours.map((j) => `<tr><td>${dateCourte(j.date)}</td><td>${esc(j.operation_code === 'PRESSURE_COLLE' ? 'Pressure en colle' : j.operation_code === 'MONTAGE_COUVERTURE_PLEAIDE' ? 'Montage couvertures (BDM)' : j.operation_code)}</td><td>${esc(j.machine)}</td><td><strong style="color:${j.ok ? 'var(--ok,#1a7f5a)' : 'var(--danger,#c0392b)'};">${nbr(j.quantite)}</strong></td><td>${nbr(j.quantite_min)}</td><td>${esc(j.ofs.join(', '))}</td></tr>`).join('')}</tbody></table></details>`;
+          }
+          $('ro-det').innerHTML = bloc;
+          $('ro-det').querySelectorAll('.ro-hs').forEach((b) => b.addEventListener('click', async () => {
+            b.disabled = true;
+            try {
+              const r = await fetch(`${API}/planifier-of`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: b.dataset.of, mode: 'avant', horaires: 'heures_sup', replanifier: true, depuis: `${dateLocaleIso()}T${new Date().toTimeString().slice(0, 5)}`, appliquer: true }) });
+              const d = await lireJson(r); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+              b.outerHTML = '<span style="color:var(--ok,#1a7f5a);">appliqué</span>';
+            } catch (e) { b.disabled = false; $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+          }));
+          $('ro-det').querySelectorAll('.ro-lancer').forEach((b) => b.addEventListener('click', async () => {
+            b.disabled = true; b.textContent = 'calcul…';
+            try { await planifier(rangDe[b.dataset.of], { lots: 'liberes' }); await rendre(); chargerDonneesReelles(); }
+            catch (e) { b.disabled = false; b.textContent = 'Lancer quand même'; $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+          }));
+          $('m-msg').innerHTML = `<div class="msg ${retards || partiels ? '' : 'ok'}">${prep.ordre.length} OF replanifié(s)${retards ? `, ${retards} délai(s) non tenu(s)` : ', tous les délais sont tenus'}${partiels ? `, ${partiels} OF avec des étapes en attente de lot (planning partiel, repéré par *)` : ''}.${protegees} Le planning est provisoire : validez ou annulez.</div>`;
+        };
+        await rendre();
         $('ro-go').textContent = depuisMode ? 'Valider la replanification' : actualiser ? 'Valider le recalcul' : 'Valider la nouvelle organisation'; $('ro-go').disabled = false; $('ro-annuler').style.display = '';
         chargerDonneesReelles();
       } catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; $('ro-go').disabled = false; }
