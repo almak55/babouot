@@ -17,7 +17,11 @@ const { evaluer } = require('./formules');
 const r2 = (x) => Math.round((Number(x) || 0) * 100) / 100;
 const num = (v, d = null) => { if (v === null || v === undefined || v === '') return d; const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : d; };
 
-const PARAMS_DEFAUT = { taux_horaire_client: 60, cout_horaire_personnel: 28, marge_matiere_pct: 15, facturer_machine: 1, marge_machine_pct: 10, tva_pct: 20, validite_jours: 30 };
+const PARAMS_DEFAUT = {
+  taux_horaire_client: 60, cout_horaire_personnel: 28, marge_matiere_pct: 15, facturer_machine: 1, marge_machine_pct: 10, tva_pct: 20, validite_jours: 30,
+  // Délais de livraison proposés au client (voir proposer-delais.js)
+  supplement_delai_rapide_pct: 25, remise_delai_long_pct: 10, decalage_delai_long_jours: 10,
+};
 
 function coutHoraireMachine(m) {
   const force = num(m.cout_horaire_force);
@@ -139,4 +143,21 @@ function totaliser(saisie) {
   };
 }
 
-module.exports = { construireBase, totaliser, lireParametres, coutHoraireMachine, PARAMS_DEFAUT, r2, num };
+// Enregistre un devis (numéro DEV-AAAA-NNNN). Même règle que gerer-devis.js.
+async function creerDevis(supabase, { of_id, client, titre, saisie, notes, statut }) {
+  const resultat = totaliser(saisie);
+  const annee = new Date().getFullYear();
+  const { data: existants, error: nErr } = await supabase.from('devis').select('numero').like('numero', `DEV-${annee}-%`);
+  if (nErr) throw nErr;
+  const suivant = (existants || []).reduce((m, d) => Math.max(m, Number(String(d.numero).split('-')[2]) || 0), 0) + 1;
+  const numero = `DEV-${annee}-${String(suivant).padStart(4, '0')}`;
+  const ligne = {
+    numero, of_id: of_id || null, client: client || null, titre: titre || null, quantite: Number(resultat.quantite) || null,
+    contenu: resultat, total_ht: resultat.totaux.ht, notes: notes || null, statut: statut || 'brouillon', updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabase.from('devis').insert(ligne).select('id, numero').single();
+  if (error) throw error;
+  return { id: data.id, numero: data.numero, resultat };
+}
+
+module.exports = { construireBase, totaliser, creerDevis, lireParametres, coutHoraireMachine, PARAMS_DEFAUT, r2, num };
