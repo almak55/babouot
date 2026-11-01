@@ -7575,11 +7575,11 @@
     let courant = listeMois().find((m) => m >= dateLocaleIso().slice(0, 7)) || listeMois()[0];
     afficherModale(`
       <h3>Planning annuel Pléiade <span style="font-size:13px;font-weight:400;color:var(--muted);">— référence Gallimard</span></h3>
-      <div class="plan-note" style="margin-bottom:8px;">Classement de chaque mois : <strong>1) carte de dos</strong> (séries de largeurs voisines, écart ≤ ${prop.parametres.ecart} mm : moins de réglages à la couverturière BDM), <strong>2) couleur de tête</strong> dans la série (moins de nettoyages des encres de jaspage). Cadence BDM retenue : ${prop.parametres.parJour} titres par jour. L'emboîtage suit le même ordre (épaisseurs de blocs voisines).
+      <div class="plan-note" style="margin-bottom:8px;">Classement de chaque mois : <strong>1) carte de dos décroissante</strong> (de la plus large à la plus étroite, par séries de largeurs voisines, écart ≤ ${prop.parametres.ecart} mm : moins de réglages à la couverturière BDM), <strong>2) couleur de tête</strong> dans la série (moins de nettoyages des encres de jaspage), puis carte de dos décroissante à couleur égale. Cadence BDM retenue : ${prop.parametres.parJour} titres par jour. L'emboîtage suit le même ordre (épaisseurs de blocs voisines).
         <br>Légende : <strong>S</strong> solde · <strong>N</strong> nouveauté · <strong>T</strong> train (en cours) · <strong>R</strong> réimpression.</div>
       <div id="pa-onglets" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;"></div>
       <div id="pa-corps"></div><div id="m-msg"></div>
-      <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn" id="pa-import" title="Charger le nouveau planning du client (PDF, photo, Excel) : le logiciel le compare à l'existant">Importer un nouveau planning…</button><button class="btn" id="pa-ajout">+ Ajouter un titre</button><input type="file" id="pa-fichier" accept="image/*,.pdf,.xlsx,.xls,.docx" style="display:none"><button class="btn" id="pa-coches" style="display:none;">Créer les OF cochés</button><button class="btn primary" id="pa-creer">Créer tous les OF de ce mois, dans cet ordre</button></div>`, 'xlarge');
+      <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn" id="pa-import" title="Charger le nouveau planning du client (PDF, photo, Excel) : le logiciel le compare à l'existant">Importer un nouveau planning…</button><button class="btn" id="pa-ajout">+ Ajouter un titre</button><button class="btn" id="pa-imprimer" title="Imprimer la liste des titres du mois, dans l'ordre de passage en production" style="display:none;">Imprimer la liste du mois</button><input type="file" id="pa-fichier" accept="image/*,.pdf,.xlsx,.xls,.docx" style="display:none"><button class="btn" id="pa-coches" style="display:none;">Créer les OF cochés</button><button class="btn primary" id="pa-creer">Créer tous les OF de ce mois, dans cet ordre</button></div>`, 'xlarge');
     const $ = (id) => document.getElementById(id);
     $('m-cancel').addEventListener('click', fermerModale);
     // Ajout d'un titre imprévu (nouveau titre, ou titre déjà connu à replacer).
@@ -7837,7 +7837,7 @@
         return `<button class="btn pa-mois" data-m="${mo}" style="${mo === courant ? 'background:var(--accent,#0f766e);color:#fff;' : ''}">${nomMois(mo)} (${pm ? pm.total_titres : 0}${nt ? ` · ${nt} ✓` : ''})</button>`; }).join('')
         + `<button class="btn pa-mois" data-m="reste" style="${courant === 'reste' ? 'background:var(--accent,#0f766e);color:#fff;' : ''}">À coudre / à emboîter</button>`;
       $('pa-onglets').querySelectorAll('.pa-mois').forEach((b) => b.addEventListener('click', () => { courant = b.dataset.m; rendre(); }));
-      $('pa-creer').style.display = m ? '' : 'none'; $('pa-coches').style.display = 'none';
+      $('pa-creer').style.display = m ? '' : 'none'; $('pa-coches').style.display = 'none'; $('pa-imprimer').style.display = m ? '' : 'none';
       if (courant === 'reste') {
         const liste = (t, l) => `<h4 style="margin:8px 0 4px;">${t} (${l.length})</h4><table class="sp-table"><thead><tr><th>Titre</th><th>Qté</th><th>Cahiers</th><th>Carte</th><th>Tête</th><th>Peau</th><th></th></tr></thead><tbody>${l.map((x) => `<tr><td>${esc(x.titre)}</td><td>${x.quantite || '—'}</td><td>${x.mp || '—'}</td><td>${x.carte_dos || '—'}</td><td>${pastille(x.tete)}</td><td>${esc(x.peau || '—')}</td><td style="text-align:right;">${x.of_id ? lienOf(x.of_id) : `<button class="btn pa-of" type="button" data-id="${x.id}" data-rang="1" data-titre="${esc(x.titre)}" style="padding:3px 10px;font-size:12px;">Créer l'OF</button>`}</td></tr>`).join('')}</tbody></table>`;
         $('pa-corps').innerHTML = liste('Blocs à coudre', prop.a_coudre) + liste('Blocs à emboîter', prop.a_emboiter);
@@ -7875,7 +7875,9 @@
         ${m.sans_carte.length ? `<div class="msg" style="margin-bottom:6px;">⚠ Carte de dos manquante (hors classement) : ${m.sans_carte.map((x) => esc(x.titre)).join(' ; ')}</div>` : ''}
         <div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th><input type="checkbox" id="pa-all" title="Tout cocher / décocher"></th><th>Jour BDM</th><th>#</th><th>Titre</th><th>Qté</th><th>Cahiers</th><th>Carte de dos</th><th>Tête</th><th>Peau</th><th>Livraison</th><th>OF</th></tr></thead><tbody>
         ${m.sequence.map((s, i) => { const l = lignesMois.find((x) => x.id === s.id) || {};
-          return `<tr style="${s.change_reglage ? 'border-top:2px solid var(--accent,#0f766e);' : ''}">
+          const dSerie = (i === 0 || s.change_reglage) ? (m.series_detail || []).find((x) => x.serie === s.serie) : null;
+          const enteteSerie = dSerie ? `<tr class="pa-serie"><td colspan="11" style="background:var(--field-bg);font-weight:600;font-size:12.5px;">Série ${dSerie.serie} — cartes de dos de ${dSerie.carte_max} à ${dSerie.carte_min} mm · ${dSerie.nb} titre${dSerie.nb > 1 ? 's' : ''}${dSerie.quantite ? ' · ' + dSerie.quantite.toLocaleString('fr-FR') + ' ex.' : ''}</td></tr>` : '';
+          return enteteSerie + `<tr style="${s.change_reglage ? 'border-top:2px solid var(--accent,#0f766e);' : ''}">
           <td>${l.of_id ? '' : `<input type="checkbox" class="pa-chk" data-id="${s.id}">`}</td><td>${i === 0 || m.sequence[i - 1].jour_bdm !== s.jour_bdm ? 'J' + s.jour_bdm : ''}</td><td>${i + 1}</td>
           <td>${esc(s.titre)} ${s.a_verifier ? '<span title="Modifié récemment" style="color:#c0392b;">●</span>' : ''} ${l.flags ? `<span style="color:var(--muted);font-size:12px;">${esc(l.flags)}</span>` : ''}</td>
           <td>${champ(s.id, 'quantite', s.quantite, 70)}</td><td>${champ(s.id, 'mp', s.mp, 46)}</td><td>${champ(s.id, 'carte_dos', s.carte_dos, 46)}${s.change_reglage ? ' <span title="Nouveau réglage BDM">⚙</span>' : ''}</td>
@@ -7920,6 +7922,35 @@
         } catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
       }));
     }
+    // Liste du mois à imprimer : mêmes titres, même ordre de passage que l'écran.
+    $('pa-imprimer').addEventListener('click', () => {
+      const m = prop.mois.find((x) => x.mois === courant); if (!m) return;
+      const parId = new Map(data.lignes.filter((l) => l.mois === m.mois).map((l) => [l.id, l]));
+      const jjmm = (d) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}` : '');
+      const cellules = (l, s) => `<td>${esc(s.titre)}${l.flags ? ` <small>${esc(l.flags)}</small>` : ''}</td><td class="n">${s.quantite || ''}</td><td class="n">${s.mp || ''}</td><td class="n">${s.carte_dos || ''}</td><td>${esc(s.tete || '')}</td><td>${esc(s.peau || '')}</td><td>${l.date_livraison ? jjmm(l.date_livraison) : ''}</td>`;
+      let corps = '';
+      m.sequence.forEach((s, i) => {
+        const l = parId.get(s.id) || {};
+        const d = (i === 0 || s.change_reglage) ? (m.series_detail || []).find((x) => x.serie === s.serie) : null;
+        if (d) corps += `<tr class="serie"><td colspan="9">Série ${d.serie} — cartes de dos de ${d.carte_max} à ${d.carte_min} mm · ${d.nb} titre${d.nb > 1 ? 's' : ''}</td></tr>`;
+        corps += `<tr><td class="n">${i + 1}</td><td class="n">${i === 0 || m.sequence[i - 1].jour_bdm !== s.jour_bdm ? 'J' + s.jour_bdm : ''}</td>${cellules(l, s)}</tr>`;
+      });
+      if (m.sans_carte.length) {
+        corps += `<tr class="serie"><td colspan="9">Carte de dos à renseigner (hors classement)</td></tr>`;
+        m.sans_carte.forEach((x) => { const l = parId.get(x.id) || {}; corps += `<tr><td class="n">—</td><td></td>${cellules(l, { titre: x.titre, quantite: l.quantite, mp: l.mp, carte_dos: '', tete: l.tete, peau: l.peau })}</tr>`; });
+      }
+      const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Liste Pléiade ${esc(nomMois(m.mois))}</title><style>
+        body{font:12px Arial,sans-serif;margin:16px;color:#111} h1{font-size:16px;margin:0 0 4px} p{margin:2px 0 8px;color:#444}
+        table{border-collapse:collapse;width:100%} th,td{border:1px solid #999;padding:3px 6px;text-align:left} th{background:#eee} td.n{text-align:right;white-space:nowrap}
+        tr.serie td{background:#f1f1f1;font-weight:bold} small{color:#666} @media print{body{margin:6mm}}</style></head><body>
+        <h1>Pléiade — titres à produire en ${esc(nomMois(m.mois))}</h1>
+        <p>${m.sequence.length + m.sans_carte.length} titre(s) · classés par carte de dos décroissante puis couleur de tête · ${m.jours_bdm} jour(s) de BDM (${prop.parametres.parJour} titres par jour) · ${m.reglages} changement(s) de réglage · ${m.nettoyages} changement(s) de tête · imprimé le ${esc(new Date().toLocaleDateString('fr-FR'))}</p>
+        <table><thead><tr><th>#</th><th>Jour BDM</th><th>Titre</th><th>Qté</th><th>Cahiers</th><th>Carte de dos</th><th>Tête</th><th>Peau</th><th>Livraison</th></tr></thead><tbody>${corps}</tbody></table></body></html>`;
+      const w = window.open('', '_blank');
+      if (!w) { toast('Fenêtre bloquée par le navigateur : autorisez les fenêtres pour ce site, puis recommencez.', 'error'); return; }
+      w.document.open(); w.document.write(html); w.document.close(); w.focus();
+      setTimeout(() => { try { w.print(); } catch (e) { /* impression manuelle possible */ } }, 300);
+    });
     $('pa-creer').addEventListener('click', async () => {
       const m = prop.mois.find((x) => x.mois === courant); if (!m) return;
       const lignes = data.lignes.filter((l) => m.sequence.some((s) => s.id === l.id) && !l.of_id);
