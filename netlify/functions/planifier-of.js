@@ -19,6 +19,7 @@
 //   --- lots minimum (montage couvertures Pléiade, pressure en colle Pléiade : 3 500 ex. par journée, voir lib/lots.js) ---
 //   lots_liberes?: { gamme_id: 'AAAA-MM-JJTHH:MM' | null }   // étapes à lancer (à partir de cette heure) : lot formé par reorganiser-planning
 //   lots?: 'liberes'                    // lancer quand même toutes les étapes à lot minimum (décision manuelle)
+//   liberer_ofs?: [of_id]                // simulation « passage prioritaire » : le travail pas encore commencé de ces OF est ignoré (non supprimé)
 //   lots_seul?: boolean                 // avec lots_liberes : ne place que les étapes libérées (le reste de l'OF est différé à un appel suivant)
 //   lots_report?: boolean               // recalage après retard : la suite d'un titre non terminé attend aussi un lot (pas de report automatique)
 // }
@@ -145,7 +146,7 @@ const handlerProtege = async (event) => {
 
     const [planRes, absRes, maintRes, persRes, compRes, persMachRes] = await Promise.all([
       supabase.from('planning_jour')
-        .select('id, date, heure_debut, heure_fin, machine_id, personnel_id, statut, phase, planning_jour_personnel(personnel_id)')
+        .select('id, of_id, date, heure_debut, heure_fin, machine_id, personnel_id, statut, phase, planning_jour_personnel(personnel_id)')
         .gte('date', dateDepart).neq('statut', 'annulé'),
       supabase.from('personnel_planning_jour')
         .select('personnel_id, date, statut, heure_debut, heure_fin')
@@ -160,7 +161,13 @@ const handlerProtege = async (event) => {
     const occupation = { machines: {}, personnes: {} };
     const ajouter = (cat, id, iv) => { (occupation[cat][id] ??= []).push(iv); };
 
-    planRes.data.filter((l) => !idsARemplacer.has(l.id)).forEach((l) => {
+    // Simulation « passage prioritaire » (proposer-delais) : le travail planifié, pas encore commencé, des OF listés est ignoré.
+    const libererOfs = new Set(Array.isArray(body.liberer_ofs) ? body.liberer_ofs : []);
+    const maintenantIso = String(maintenantStr).slice(0, 16);
+    const aIgnorer = (l) => libererOfs.size > 0 && libererOfs.has(l.of_id) && (l.statut || 'planifié') === 'planifié'
+      && `${l.date}T${String(l.heure_debut || '00:00').slice(0, 5)}` >= maintenantIso;
+    const planBase = planRes.data.filter((l) => !idsARemplacer.has(l.id) && !aIgnorer(l));
+    planBase.forEach((l) => {
       const tronque = aTronquer.find((t) => t.id === l.id);
       const iv = intervalleJournee(l.date, l.heure_debut && String(l.heure_debut).slice(0, 5), tronque ? tronque.heure_fin : (l.heure_fin && String(l.heure_fin).slice(0, 5)));
       // Étiquette (voir « Journée de machine » dans lib/planification.js) : mise en route, nettoyage ou travail.
@@ -174,7 +181,7 @@ const handlerProtege = async (event) => {
     });
     // Conducteur de chaque machine et de chaque jour (un seul par jour) d'après ce qui est déjà planifié et ne bouge pas.
     const conducteurs = {};
-    require('./lib/conducteur').conducteursDuJour(planRes.data.filter((l) => !idsARemplacer.has(l.id)), []).forEach((v, cle) => {
+    require('./lib/conducteur').conducteursDuJour(planBase, []).forEach((v, cle) => {
       const [mId, jour] = cle.split('|'); (conducteurs[mId] ??= {})[enMinutes(jour, '00:00')] = v.personnel_id;
     });
     maintRes.data.filter((m) => m.bloquant !== false).forEach((m) => {   // marche dégradée (bloquant = false) : la machine reste utilisable
