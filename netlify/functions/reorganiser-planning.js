@@ -217,7 +217,7 @@ const handlerProtege = async (event) => {
       if (!codes.length) return rep(200, { jours: [], regles: [] });
       const [opsRes, ofsRes, machRes] = await Promise.all([
         supabase.from('operations').select('id, code').in('code', codes),
-        supabase.from('ordres_fabrication').select('id, numero, quantite, type_production').in('statut', ['en attente de validation', 'validé', 'en cours']),
+        supabase.from('ordres_fabrication').select('*').in('statut', ['en attente de validation', 'validé', 'en cours']),
         supabase.from('machines').select('id, nom'),
       ]);
       if (opsRes.error) throw opsRes.error; if (ofsRes.error) throw ofsRes.error;
@@ -236,7 +236,7 @@ const handlerProtege = async (event) => {
       const jours = new Map();
       travail.forEach((l) => {
         const of = ofDe[l.of_id]; const code = codeDe[l.operation_id];
-        const regle = of && LOTS.regleDe(regles, code, of.type_production);
+        const regle = of && of.sans_lot_minimum !== true && LOTS.regleDe(regles, code, of.type_production);   // OF en délai rapproché : lot minimum non exigé
         if (!regle || l.date < aujourdhui) return;
         const part = totalGamme[l.gamme_operatoire_id] > 0 ? minutes(l) / totalGamme[l.gamme_operatoire_id] : 0;
         const cle = `${code}|${l.machine_id}|${l.date}`;

@@ -9,6 +9,8 @@
 //   normal : au plus tôt dans le planning tel qu'il est, sans rien décaler. Tarif normal.
 //   long   : délai important, tarif réduit : début décalé de N jours ouvrés (réglable) par rapport au délai normal,
 //            et vérifié sur le planning réel.
+// Pour un OF Pléiade, le lot minimum (3 500 ex. par journée, BDM et pressure en colle) n'est PAS exigé en délai rapproché :
+// choisir ce créneau marque l'OF « sans lot minimum » (colonne sans_lot_minimum, migration 56) pour toutes les planifications suivantes.
 // Un créneau qui n'apporte aucune autre date que le délai normal n'est pas proposé (d'où « au plus 3 »).
 //
 // Réglages (table parametres_devis, « Coûts & tarifs ») : supplement_delai_rapide_pct (25), remise_delai_long_pct (10),
@@ -142,16 +144,21 @@ const handlerProtege = async (event) => {
       const r = await simuler(b.of_id, extra);
       if (r.erreur) return rep(200, { scenario, erreur: r.erreur, bloquants: r.bloquants });
       const d = r.d;
+      const reponseExtra = {};
       const avertissements = [];
-      if (scenario === 'normal') {
-        // Règle des lots minimum (Pléiade) : l'estimation suppose un lot complet.
+      {
+        // Règle des lots minimum (OF Pléiade seulement) : l'estimation suppose un lot complet, sauf en délai rapproché (règle levée).
         const regles = await LOTS.chargerRegles(supabase);
         const { data: tOf } = await supabase.from('ordres_fabrication').select('type_production').eq('id', b.of_id).single();
         const { data: gs } = await supabase.from('gammes_operatoires').select('id, operations(code)').eq('of_id', b.of_id);
         const concernees = (gs || []).map((g) => g.operations && g.operations.code).filter((c) => c && LOTS.regleDe(regles, c, tOf && tOf.type_production) && Number(base.of.quantite) < LOTS.regleDe(regles, c, tOf && tOf.type_production).quantite_min);
-        if (concernees.length) avertissements.push(`Lot minimum : ${concernees.length} étape(s) (montage couvertures / pressure en colle Pléiade) exigent un lot de ${LOTS.regleDe(regles, concernees[0], tOf.type_production).quantite_min} ex. par journée. Les dates supposent que cet OF soit regroupé avec d'autres titres.`);
+        if (concernees.length) {
+          const min = LOTS.regleDe(regles, concernees[0], tOf.type_production).quantite_min;
+          if (scenario === 'rapide') { avertissements.push(`Pléiade : le lot minimum de ${min} ex. par journée n'est pas exigé en délai rapproché (l'OF peut tourner seul).`); reponseExtra.lot_leve = true; }
+          else avertissements.push(`Lot minimum : ${concernees.length} étape(s) (montage couvertures / pressure en colle Pléiade) exigent un lot de ${min} ex. par journée. Les dates supposent que cet OF soit regroupé avec d'autres titres.`);
+        }
       }
-      const reponse = { scenario, debut: d.resume.debut, fin: d.resume.fin, date_livraison: String(d.resume.fin).slice(0, 10), calendrier: d.calendrier, avertissements };
+      const reponse = { ...reponseExtra, scenario, debut: d.resume.debut, fin: d.resume.fin, date_livraison: String(d.resume.fin).slice(0, 10), calendrier: d.calendrier, avertissements };
       if (scenario === 'rapide') reponse.of_decales = await ofsDecales(supabase, candidats, d, maintenant);
       return rep(200, reponse);
     }
@@ -162,13 +169,16 @@ const handlerProtege = async (event) => {
       if (!dateValide(b.date_livraison) || b.date_livraison < aujourdhuiParis()) return rep(400, { error: 'date_livraison invalide.' });
       const { error: eU } = await supabase.from('ordres_fabrication').update({ delai: b.date_livraison }).eq('id', b.of_id);
       if (eU) throw eU;
+      // Délai rapproché : lot minimum levé pour cet OF ; autre choix : règle normale (colonne facultative, migration 56).
+      const { error: eL } = await supabase.from('ordres_fabrication').update({ sans_lot_minimum: option === 'rapide' }).eq('id', b.of_id);
+      const lotLeve = option === 'rapide' && !eL;
       const t = tarifs[option];
       const jour = new Date(`${b.date_livraison}T00:00:00Z`).toLocaleDateString('fr-FR', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
       const devis = await creerDevis(supabase, {
         of_id: b.of_id, client: base.of.client, titre: base.of.titre, saisie: saisies[option],
         notes: `${LIBELLES[option]} : livraison prévue le ${jour} (${t.texte}). Prix hors matières premières.`,
       });
-      return rep(200, { ok: true, delai: b.date_livraison, option, devis: { id: devis.id, numero: devis.numero, total_ht: devis.resultat.totaux.ht } });
+      return rep(200, { ok: true, delai: b.date_livraison, option, lot_minimum_leve: lotLeve, devis: { id: devis.id, numero: devis.numero, total_ht: devis.resultat.totaux.ht } });
     }
 
     return rep(400, { error: 'action inconnue (tarifs | simuler | choisir).' });

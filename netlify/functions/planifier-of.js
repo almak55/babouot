@@ -295,12 +295,15 @@ const handlerProtege = async (event) => {
     // forme les lots avec les autres titres prêts). Les étapes qui en dépendent attendent avec elle. Rien n'est supprimé ni inventé :
     // elles restent « à planifier ».
     const regles = await LOTS.chargerRegles(supabase);
+    // OF vendu en « délai rapproché » : le lot minimum n'est pas exigé (colonne facultative, migration 56).
+    let sansLotMinimum = false;
+    try { const { data: fl, error: eFl } = await supabase.from('ordres_fabrication').select('sans_lot_minimum').eq('id', of.id).maybeSingle(); if (!eFl && fl) sansLotMinimum = fl.sans_lot_minimum === true; } catch (_) { /* colonne absente */ }
     const liberes = body.lots_liberes && typeof body.lots_liberes === 'object' ? body.lots_liberes : {};
     const toutLiberer = body.lots === 'liberes';
     const lotDe = new Map();   // position de l'étape -> { regle, qte }
     etapesCalc.forEach((e, i) => {
       if (!aPlanifier.has(e.gamme_id)) return;
-      const regle = mode === 'avant' ? LOTS.regleDe(regles, e.operation_code, of.type_production) : null;   // planification « au plus tôt » seulement
+      const regle = mode === 'avant' && !sansLotMinimum ? LOTS.regleDe(regles, e.operation_code, of.type_production) : null;   // planification « au plus tôt » seulement
       if (!regle) return;
       // Seules les étapes encore à planifier (ou, au recalage, la suite d'un titre en retard) peuvent attendre.
       if (!(e.statut === 'à planifier' || (body.lots_report && idsReplan.has(e.gamme_id)))) return;
