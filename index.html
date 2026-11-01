@@ -230,6 +230,28 @@
   .tag.ok { background: var(--accent-teal); color: #fff; }
   .tag.warn { background: var(--accent-amber); color: #4A2E00; }
   .tag.danger { background: var(--danger); color: #fff; }
+
+  /* ---- Page Personnel : cartes compactes ---- */
+  .pers-bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+  .pers-bar input[type=search] { flex: 1 1 220px; min-width: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--field-bg); color: var(--ink-900); font: inherit; font-size: 13px; }
+  .pers-filtres { display: flex; gap: 6px; flex-wrap: wrap; }
+  .pers-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 12px; padding: 14px 18px 18px; align-items: start; }
+  .pers-card { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 12px 14px; background: var(--paper-raised); display: flex; flex-direction: column; gap: 10px; min-width: 0; box-shadow: var(--shadow-sm); }
+  .pers-top { display: flex; align-items: center; gap: 10px; }
+  .pers-av { flex: 0 0 34px; height: 34px; border-radius: 50%; background: var(--accent-teal-soft); color: var(--ink-900); font-weight: 700; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+  .pers-id { flex: 1; min-width: 0; }
+  .pers-nom { font-weight: 600; font-size: 14px; color: var(--ink-900); }
+  .pers-poste { font-size: 12px; color: var(--ink-500); line-height: 1.3; }
+  .pers-charge { display: block; width: 100%; cursor: pointer; background: none; border: none; padding: 0; font: inherit; color: inherit; text-align: left; }
+  .pers-charge .l { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--ink-500); }
+  .pers-comp-t { font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em; color: var(--ink-500); margin-bottom: 4px; }
+  .pers-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .pc { padding: 2px 8px; border-radius: 999px; font-size: 11.5px; line-height: 1.35; background: var(--accent-teal-soft); color: var(--ink-900); }
+  .pc.m { background: var(--paper-raised-2); color: var(--ink-700); }
+  .pc-plus { padding: 2px 8px; border-radius: 999px; font-size: 11.5px; line-height: 1.35; border: 1px dashed var(--ink-500); background: transparent; color: var(--ink-700); cursor: pointer; font-family: inherit; }
+  .pc-plus:hover { border-color: var(--accent-teal); color: var(--accent-teal); }
+  .pers-foot { display: flex; gap: 8px; margin-top: auto; }
+  .pers-foot .btn { flex: 1; justify-content: center; }
   .statut-btn { background: none; border: none; padding: 0; cursor: pointer; }
   .statut-btn .tag { transition: filter .12s var(--ease); }
   .statut-btn:hover .tag { filter: brightness(0.93); }
@@ -2663,48 +2685,81 @@
   }
 
   function renderPersonnel(){
+    const MAX_CHIPS = 4;   // pastilles visibles par groupe tant que la carte n'est pas dépliée
+    const sansAccent = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
     const wrap = el(`
       <div class="panel">
         <div class="panel-head"><h2>Équipe atelier <span style="font-weight:400;font-size:13px;color:var(--muted);">— ${state.personnel.length} personne${state.personnel.length > 1 ? 's' : ''}</span></h2><button class="btn primary" id="pers-ajout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Ajouter une personne</button></div>
-        <table>
-          <thead><tr><th>Opérateur</th><th>Poste</th><th>Compétences</th><th>Statut</th><th>Charge de la semaine</th><th></th></tr></thead>
-          <tbody id="pers-tbody"></tbody>
-        </table>
+        <div class="pers-bar">
+          <input type="search" id="pers-q" placeholder="Rechercher (nom, poste, machine…)" aria-label="Rechercher une personne">
+          <div class="pers-filtres" id="pers-filtres"></div>
+        </div>
+        <div class="pers-grid" id="pers-grid"></div>
       </div>
     `);
-    const tbody = wrap.querySelector('#pers-tbody');
-    state.personnel.forEach(p=>{
-      const fillClass = p.charge>=85?'danger':(p.charge>=65?'warn':'');
-      tbody.appendChild(el(`
-        <tr>
-          <td>${p.name}</td>
-          <td>${p.role}</td>
-          <td>${p.comp.map(c=>`<span class="tag ok" style="margin-right:4px;">${c}</span>`).join('')}</td>
-          <td><button class="statut-btn" data-id="${p.id}" data-action="dispo"><span class="tag ${statutTag(p.statut)}">${p.statut}</span></button></td>
-          <td style="min-width:110px;">
-            <button class="charge-btn" data-id="${p.id}" title="Voir l'occupation de la semaine" style="all:unset; cursor:pointer; display:block; width:100%;">
-              <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--ink-500);"><span>${p.charge}%</span><span style="color:var(--teal,#0F766E); font-weight:600;">Détail ›</span></div>
-              <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${p.charge}%"></div></div>
-            </button>
-          </td>
-          <td style="white-space:nowrap;"><button class="btn fiche-pers" data-id="${p.id}">Fiche</button> <button class="btn edit-pers" data-id="${p.id}">Compétences</button></td>
-        </tr>
-      `));
-    });
+    const grille = wrap.querySelector('#pers-grid');
+    const champ = wrap.querySelector('#pers-q');
+    const zoneFiltres = wrap.querySelector('#pers-filtres');
+    let filtreStatut = 'tous';
+    const ouverts = new Set();   // groupes dépliés : « idPersonne|ops » ou « idPersonne|mach »
+    const classeStatut = (p) => (String(p.statut).startsWith('Disponible') ? 'dispo' : p.statut === 'En arrêt' ? 'arret' : 'absent');
+    const sections = (p) => {
+      const comp = p.comp || [];
+      return { ops: comp.filter((c) => !String(c).startsWith('machine: ')), mach: comp.filter((c) => String(c).startsWith('machine: ')).map((c) => String(c).slice(9)) };
+    };
+    const groupe = (p, cle, titre, liste, classe) => {
+      if (!liste.length) return '';
+      const ouvert = ouverts.has(`${p.id}|${cle}`);
+      const visibles = ouvert ? liste : liste.slice(0, MAX_CHIPS);
+      const reste = liste.length - MAX_CHIPS;
+      return `<div><div class="pers-comp-t">${titre} (${liste.length})</div><div class="pers-chips">${visibles.map((c) => `<span class="pc ${classe}">${esc(c)}</span>`).join('')}${reste > 0 ? `<button type="button" class="pc-plus" data-id="${esc(p.id)}" data-g="${cle}" aria-expanded="${ouvert}">${ouvert ? 'Réduire' : '+' + reste}</button>` : ''}</div></div>`;
+    };
+    const carte = (p) => {
+      const fillClass = p.charge >= 85 ? 'danger' : (p.charge >= 65 ? 'warn' : '');
+      const { ops, mach } = sections(p);
+      const initiales = String(p.name || '?').trim().split(/\s+/).slice(0, 2).map((x) => x[0]).join('').toUpperCase();
+      return `<div class="pers-card" data-id="${esc(p.id)}">
+        <div class="pers-top">
+          <span class="pers-av">${esc(initiales)}</span>
+          <div class="pers-id"><div class="pers-nom">${esc(p.name)}</div><div class="pers-poste">${esc(p.role) || '—'}</div></div>
+          <button class="statut-btn" data-id="${esc(p.id)}" data-action="dispo" title="Modifier la disponibilité"><span class="tag ${statutTag(p.statut)}">${esc(p.statut)}</span></button>
+        </div>
+        <button class="pers-charge charge-btn" data-id="${esc(p.id)}" title="Voir l'occupation de la semaine">
+          <div class="l"><span>Charge de la semaine · <strong>${p.charge} %</strong></span><span style="color:var(--teal,#0F766E);font-weight:600;">Détail ›</span></div>
+          <div class="bar-track"><div class="bar-fill ${fillClass}" style="width:${Math.min(100, Math.max(0, p.charge))}%"></div></div>
+        </button>
+        ${groupe(p, 'ops', 'Opérations', ops, '')}${groupe(p, 'mach', 'Machines', mach, 'm')}
+        ${!ops.length && !mach.length ? '<div class="plan-note">Aucune compétence enregistrée.</div>' : ''}
+        <div class="pers-foot"><button class="btn fiche-pers" data-id="${esc(p.id)}">Fiche</button><button class="btn edit-pers" data-id="${esc(p.id)}">Compétences</button></div>
+      </div>`;
+    };
+    function dessiner() {
+      const q = sansAccent(champ.value).trim();
+      const visibles = state.personnel.filter((p) => {
+        if (filtreStatut !== 'tous' && classeStatut(p) !== filtreStatut) return false;
+        if (!q) return true;
+        return sansAccent([p.name, p.role, ...(p.comp || [])].join(' ')).includes(q);
+      });
+      grille.innerHTML = visibles.length ? visibles.map(carte).join('') : '<div class="plan-note" style="grid-column:1/-1;padding:8px 0;">Aucune personne ne correspond à cette recherche.</div>';
+      const n = (c) => state.personnel.filter((p) => classeStatut(p) === c).length;
+      const filtres = [['tous', `Tous (${state.personnel.length})`], ['dispo', `Disponibles (${n('dispo')})`], ['absent', `Absents (${n('absent')})`], ['arret', `En arrêt (${n('arret')})`]];
+      zoneFiltres.innerHTML = filtres.map(([k, l]) => `<button type="button" class="msg-chip ${k === filtreStatut ? 'on' : ''}" data-f="${k}">${l}</button>`).join('');
+    }
+    dessiner();
+    champ.addEventListener('input', dessiner);
+    zoneFiltres.addEventListener('click', (ev) => { const b = ev.target.closest('[data-f]'); if (!b) return; filtreStatut = b.dataset.f; dessiner(); });
     wrap.querySelector('#pers-ajout').addEventListener('click', () => ouvrirModalePersonne(null));
-    tbody.querySelectorAll('.charge-btn').forEach(btn => btn.addEventListener('click', () => ouvrirOccupationPersonne(btn.dataset.id)));
-    tbody.querySelectorAll('.fiche-pers').forEach(btn => btn.addEventListener('click', () => ouvrirModalePersonne(state.personnel.find(x => x.id === btn.dataset.id))));
-    tbody.querySelectorAll('.edit-pers').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const p = state.personnel.find(x => x.id === btn.dataset.id);
-        ouvrirModaleCompetences(p);
-      });
-    });
-    tbody.querySelectorAll('[data-action="dispo"]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const p = state.personnel.find(x => x.id === btn.dataset.id);
-        ouvrirModaleDisponibilite(p);
-      });
+    grille.addEventListener('click', (ev) => {
+      const plus = ev.target.closest('.pc-plus');
+      if (plus) { const cle = `${plus.dataset.id}|${plus.dataset.g}`; if (ouverts.has(cle)) ouverts.delete(cle); else ouverts.add(cle); dessiner(); return; }
+      const charge = ev.target.closest('.charge-btn');
+      if (charge) { ouvrirOccupationPersonne(charge.dataset.id); return; }
+      const fiche = ev.target.closest('.fiche-pers');
+      if (fiche) { ouvrirModalePersonne(state.personnel.find((x) => x.id === fiche.dataset.id)); return; }
+      const comp = ev.target.closest('.edit-pers');
+      if (comp) { ouvrirModaleCompetences(state.personnel.find((x) => x.id === comp.dataset.id)); return; }
+      const dispo = ev.target.closest('[data-action="dispo"]');
+      if (dispo) { ouvrirModaleDisponibilite(state.personnel.find((x) => x.id === dispo.dataset.id)); }
     });
     return wrap;
   }
