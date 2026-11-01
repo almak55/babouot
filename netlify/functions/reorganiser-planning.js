@@ -14,12 +14,20 @@
 //                                          -> { session_id, ordre: [ { of_id, numero, titre, delai, groupe, ... } ], proteges, depuis }
 //   'planifier' { session_id, of_id, refaire_liens? }  replanifie un OF (refaire_liens : refait d'abord ses dépendances d'après le modèle) (au plus tôt, horaires normaux), dans l'ordre fourni
 //                                          -> { fin, delai, respecte_delai, retard_min, heures_sup, renforts, bloquants }
+//                                          lots_liberes { gamme_id: 'AAAA-MM-JJTHH:MM' } : étapes à lot minimum à lancer (voir 'lots') ; lots: 'liberes' : tout lancer
+//                                          lots_seul: true : avec lots_liberes, ne place que ces étapes (le reste de l'OF est replanifié à l'appel suivant)
+//                                          -> + attente_lot : étapes qui attendent un lot (BDM / pressure en colle Pléiade : 3 500 ex. par journée), partiel
+//   'lots'      { attentes: [...] }       forme les lots minimum à partir des étapes en attente (réponses 'planifier') :
+//                                          -> { lancements: [ { of_id, gamme_id, depart } ], attente: [...] } ; à replanifier ensuite avec lots_liberes
 //   'valider'   { session_id }            garde la nouvelle organisation
 //   'annuler'   { session_id }            remet le planning exactement comme avant 'preparer'
 
 const { getSupabase } = require('./lib/supabaseclient');
 const { aujourdhuiParis } = require('./lib/debut-etape');
 const planifierOf = require('./planifier-of');
+const PL = require('./lib/planification');
+const LOTS = require('./lib/lots');
+const { imposerPause } = require('./lib/horaires');
 
 const rep = (code, o) => ({ statusCode: code, body: JSON.stringify(o) });
 const PRIORITAIRES = ['pleiade', 'coffret'];
@@ -132,7 +140,9 @@ const handlerProtege = async (event) => {
       const classes = actualiser
         ? aReplanifier.slice().sort((a, c) => { const x = debutActuel.get(a.id) || '9999', y = debutActuel.get(c.id) || '9999'; if (x !== y) return x < y ? -1 : 1; return trier([a, c])[0] === a ? -1 : 1; })
         : trier(aReplanifier);
+      const regles = await LOTS.chargerRegles(supabase);
       const ordre = classes.map((o) => ({
+        avec_lots: regles.some((r) => !r.type_production || r.type_production === o.type_production),   // OF soumis à une règle de lot minimum
         of_id: o.id, numero: o.numero, titre: o.titres ? o.titres.nom : '', delai: o.delai, quantite: o.quantite,
         groupe: estPrioritaire(o) ? 'prioritaire' : 'standard', type_production: o.type_production, priorite: o.priorite,
         etapes: gammes.filter((g) => g.of_id === o.id && (g.statut === 'à planifier' || idsLib.has(g.id))).length,
@@ -143,14 +153,99 @@ const handlerProtege = async (event) => {
     if (b.action === 'planifier') {
       if (!b.of_id) return rep(400, { error: 'of_id requis.' });
       if (b.refaire_liens) { try { await require('./lib/ordre-gamme').normaliserGamme(supabase, b.of_id, { tout: true }); } catch (_) { /* les liens actuels sont conservés */ } }
-      const res = await planifierOf.handler({ httpMethod: 'POST', body: JSON.stringify({ of_id: b.of_id, mode: 'avant', appliquer: true, maintenant }) });
+      const corps = { of_id: b.of_id, mode: 'avant', appliquer: true, maintenant };
+      if (b.lots_liberes && typeof b.lots_liberes === 'object') corps.lots_liberes = b.lots_liberes;
+      if (b.lots === 'liberes') corps.lots = 'liberes';
+      if (b.lots_seul) corps.lots_seul = true;
+      const res = await planifierOf.handler({ httpMethod: 'POST', body: JSON.stringify(corps) });
       const d = JSON.parse(res.body);
       if (res.statusCode === 409) return rep(200, { ok: false, bloquants: d.bloquants || [], erreur: d.error });
       if (res.statusCode !== 200) return rep(200, { ok: false, erreur: d.error || `HTTP ${res.statusCode}` });
       const r = d.resume;
-      const reponse = { ok: true, debut: r.debut, fin: r.fin, delai: r.delai, respecte_delai: r.respecte_delai, retard_min: r.retard_min, heures_sup: d.alternative_heures_sup, renforts: [] };
+      const reponse = { ok: true, debut: r.debut, fin: r.fin, delai: r.delai, respecte_delai: r.respecte_delai, retard_min: r.retard_min, heures_sup: d.alternative_heures_sup, renforts: [], partiel: !!r.partiel, attente_lot: d.attente_lot || [] };
       if (r.respecte_delai === false) reponse.renforts = suggestionsRenforts(d, r.retard_min);
       return rep(200, reponse);
+    }
+
+    if (b.action === 'lots') {
+      // Formation des lots minimum : une opération à la fois, journée par journée (voir lib/lots.js).
+      const prets = (Array.isArray(b.attentes) ? b.attentes : []).filter((x) => x && x.gamme_id && x.of_id && !x.en_amont && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(String(x.pret_le || '')));
+      if (!prets.length) return rep(200, { lancements: [], attente: [] });
+      const { data: cals } = await supabase.from('calendrier_travail').select('*');
+      const ligne = (cals || []).map(imposerPause).find((c) => c.code === 'normal');
+      const cal = ligne
+        ? { code: 'normal', debut: String(ligne.heure_debut).slice(0, 5), fin: String(ligne.heure_fin).slice(0, 5), pause_debut: '12:00', pause_minutes: 30 }
+        : { code: 'normal', debut: '08:00', fin: '16:30', pause_debut: '12:00', pause_minutes: 30 };
+      const minutes = (iso) => PL.enMinutes(String(iso).slice(0, 10), String(iso).slice(11, 16));
+      const iso = (m) => `${PL.dateDe(m)}T${PL.heureDe(m)}`;
+      const apartir = minutes(maintenant);
+      // Journées où une machine tourne déjà pour cette opération (OF Pléiade) : un nouveau lot ne s'y mêle pas.
+      const codes = Array.from(new Set(prets.map((x) => x.operation_code)));
+      const [opsRes, ofsRes] = await Promise.all([
+        supabase.from('operations').select('id, code').in('code', codes),
+        supabase.from('ordres_fabrication').select('id, type_production').eq('type_production', 'pleiade'),
+      ]);
+      if (opsRes.error) throw opsRes.error; if (ofsRes.error) throw ofsRes.error;
+      const idsOps = (opsRes.data || []).map((o) => o.id), idsOf = (ofsRes.data || []).map((o) => o.id);
+      const codeDe = Object.fromEntries((opsRes.data || []).map((o) => [o.id, o.code]));
+      let lignesPlan = [];
+      if (idsOps.length && idsOf.length) {
+        const r = await supabase.from('planning_jour').select('date, machine_id, operation_id, of_id, statut').in('operation_id', idsOps).in('of_id', idsOf).neq('statut', 'annulé');
+        if (r.error) throw r.error; lignesPlan = (r.data || []).filter((l) => l.machine_id);
+      }
+      const lancements = []; const attente = [];
+      for (const code of codes) {
+        const groupe = prets.filter((x) => x.operation_code === code);
+        const min = Math.max(...groupe.map((x) => Number(x.quantite_min) || 0));
+        const joursPris = new Set(lignesPlan.filter((l) => codeDe[l.operation_id] === code).map((l) => PL.enMinutes(l.date, '00:00')));
+        const items = groupe.map((x) => ({ cle: x.gamme_id, x, qte: Number(x.quantite) || 0, pret: minutes(x.pret_le), mer_min: Number(x.mer_min) || 0, regl_min: Number(x.regl_min) || 0, roulage_min: Number(x.roulage_min) || 0, rang: Number(x.rang) || 0 }));
+        const f = LOTS.formerLots({ items, joursPris, apartir, min, cal });
+        f.lots.forEach((lot) => lot.membres.forEach((m) => lancements.push({
+          of_id: m.x.of_id, gamme_id: m.cle, operation_code: code, depart: iso(lot.depart), lot_jour: PL.dateDe(lot.jour), lot_total: lot.total,
+          jours: lot.jours.map((j) => ({ date: PL.dateDe(j.jour), quantite: j.qte })), rang: m.rang,
+        })));
+        const total = f.attente.reduce((t, i) => t + i.qte, 0);
+        f.attente.forEach((i) => attente.push({ of_id: i.x.of_id, gamme_id: i.cle, operation_code: code, quantite: i.qte, quantite_min: min, total_en_attente: total, manque: Math.max(0, min - total) }));
+      }
+      return rep(200, { lancements, attente });
+    }
+
+    if (b.action === 'lots_bilan') {
+      // Contrôle du planning : quantité réellement programmée par journée de machine pour les opérations à lot minimum.
+      const regles = await LOTS.chargerRegles(supabase);
+      const codes = Array.from(new Set(regles.map((r) => r.operation_code)));
+      if (!codes.length) return rep(200, { jours: [], regles: [] });
+      const [opsRes, ofsRes, machRes] = await Promise.all([
+        supabase.from('operations').select('id, code').in('code', codes),
+        supabase.from('ordres_fabrication').select('id, numero, quantite, type_production').in('statut', ['en attente de validation', 'validé', 'en cours']),
+        supabase.from('machines').select('id, nom'),
+      ]);
+      if (opsRes.error) throw opsRes.error; if (ofsRes.error) throw ofsRes.error;
+      const codeDe = Object.fromEntries((opsRes.data || []).map((o) => [o.id, o.code]));
+      const ofDe = Object.fromEntries((ofsRes.data || []).map((o) => [o.id, o]));
+      const nomMachine = Object.fromEntries((machRes.data || []).map((m) => [m.id, m.nom]));
+      const idsOps = Object.keys(codeDe), idsOf = Object.keys(ofDe);
+      if (!idsOps.length || !idsOf.length) return rep(200, { jours: [], regles });
+      const { data: lignes, error: eL } = await supabase.from('planning_jour').select('date, heure_debut, heure_fin, machine_id, operation_id, of_id, gamme_operatoire_id, phase, statut')
+        .in('operation_id', idsOps).in('of_id', idsOf).neq('statut', 'annulé');
+      if (eL) throw eL;
+      const minutes = (l) => Math.max(0, (Number(String(l.heure_fin).slice(0, 2)) * 60 + Number(String(l.heure_fin).slice(3, 5))) - (Number(String(l.heure_debut).slice(0, 2)) * 60 + Number(String(l.heure_debut).slice(3, 5))));
+      const travail = (lignes || []).filter((l) => l.machine_id && l.gamme_operatoire_id && !/mise en route|r[ée]glage|nettoyage/i.test(l.phase || ''));
+      const totalGamme = {};
+      travail.forEach((l) => { totalGamme[l.gamme_operatoire_id] = (totalGamme[l.gamme_operatoire_id] || 0) + minutes(l); });
+      const jours = new Map();
+      travail.forEach((l) => {
+        const of = ofDe[l.of_id]; const code = codeDe[l.operation_id];
+        const regle = of && LOTS.regleDe(regles, code, of.type_production);
+        if (!regle || l.date < aujourdhui) return;
+        const part = totalGamme[l.gamme_operatoire_id] > 0 ? minutes(l) / totalGamme[l.gamme_operatoire_id] : 0;
+        const cle = `${code}|${l.machine_id}|${l.date}`;
+        const j = jours.get(cle) || { operation_code: code, machine: nomMachine[l.machine_id] || '?', date: l.date, quantite: 0, quantite_min: regle.quantite_min, ofs: new Set() };
+        j.quantite += Number(of.quantite) * part; j.ofs.add(of.numero); jours.set(cle, j);
+      });
+      const liste = Array.from(jours.values()).map((j) => ({ ...j, quantite: Math.round(j.quantite), ofs: Array.from(j.ofs).sort(), ok: j.quantite >= j.quantite_min * 0.995 }))
+        .sort((a, c) => (a.date === c.date ? String(a.operation_code).localeCompare(String(c.operation_code)) : a.date < c.date ? -1 : 1));
+      return rep(200, { jours: liste, regles });
     }
 
     if (b.action === 'valider') {

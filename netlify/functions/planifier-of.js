@@ -16,6 +16,11 @@
 //   etapes_a_replanifier?: [gamme_id]   // étapes à reprendre, quel que soit leur statut (sauf terminé)
 //   restant?: { gamme_id: 0..1 }        // part de travail restant à faire sur une étape déjà entamée
 //   depuis?: 'AAAA-MM-JJTHH:MM'         // les créneaux de ces étapes antérieurs à cet instant sont conservés (historique)
+//   --- lots minimum (montage couvertures Pléiade, pressure en colle Pléiade : 3 500 ex. par journée, voir lib/lots.js) ---
+//   lots_liberes?: { gamme_id: 'AAAA-MM-JJTHH:MM' | null }   // étapes à lancer (à partir de cette heure) : lot formé par reorganiser-planning
+//   lots?: 'liberes'                    // lancer quand même toutes les étapes à lot minimum (décision manuelle)
+//   lots_seul?: boolean                 // avec lots_liberes : ne place que les étapes libérées (le reste de l'OF est différé à un appel suivant)
+//   lots_report?: boolean               // recalage après retard : la suite d'un titre non terminé attend aussi un lot (pas de report automatique)
 // }
 //
 // Calcule, phase par phase, QUAND se déroule chaque étape de l'OF, en tenant
@@ -32,6 +37,7 @@ const { getSupabase } = require('./lib/supabaseclient');
 const { calculerEtapes } = require('./lib/durees');
 const PL = require('./lib/planification');
 const { typePhase } = require('./lib/en-ligne');
+const LOTS = require('./lib/lots');
 const { purgerObsoletes } = require('./lib/obsoletes');
 
 const { enMinutes, dateDe, heureDe, debutDeJour, hhmm, MIN_JOUR, HORIZON_JOURS, libelleFerie } = PL;
@@ -222,6 +228,9 @@ const handlerProtege = async (event) => {
     const indicesDe = (e) => (Array.isArray(e.predecesseurs)
       ? e.predecesseurs.map((s) => positionDe.get(s)).filter((i) => i !== undefined)
       : null);
+    // Part de travail restant d'une étape : saisie (restant), renfort sur tâche entamée, ou suite d'un titre entamé en attente de lot.
+    const restDe = (e) => (restant[e.gamme_id] !== undefined ? restant[e.gamme_id]
+      : (renforts.has(e.gamme_id) || (e.statut === 'à planifier' && avancementDe[e.gamme_id] > 0) ? Math.max(0, 1 - avancementDe[e.gamme_id] / 100) : undefined));
     const etapesMoteur = etapesCalc.map((e, index) => {
       if (!aPlanifier.has(e.gamme_id)) {
         const fins = lignesOf.filter((l) => l.gamme_operatoire_id === e.gamme_id)
@@ -242,7 +251,7 @@ const handlerProtege = async (event) => {
       }
       // Étape déjà entamée : seule la part restante est replanifiée. La mise en route et le réglage sont
       // déjà faits ; le nettoyage reste dû ; le reste (cadence, par élément, formule) est proratisé.
-      const rest = restant[e.gamme_id] !== undefined ? restant[e.gamme_id] : (renforts.has(e.gamme_id) ? Math.max(0, 1 - avancementDe[e.gamme_id] / 100) : undefined);
+      const rest = restDe(e);
       if (rest !== undefined && Number(rest) < 1) {
         const r = Math.max(0, Number(rest));
         const reste = phases
@@ -273,6 +282,50 @@ const handlerProtege = async (event) => {
         personnes_pour: (machineId) => Array.from(new Set([...parOperation(e.operation_id), ...(machineId ? parMachine(machineId) : [])])),
       };
     });
+
+    // ---------- 4 bis. Lots minimum (BDM, pressure en colle Pléiade) ----------
+    // Une étape à lot minimum qui n'atteint pas le minimum à elle seule n'est PAS planifiée : elle attend un lot (reorganiser-planning
+    // forme les lots avec les autres titres prêts). Les étapes qui en dépendent attendent avec elle. Rien n'est supprimé ni inventé :
+    // elles restent « à planifier ».
+    const regles = await LOTS.chargerRegles(supabase);
+    const liberes = body.lots_liberes && typeof body.lots_liberes === 'object' ? body.lots_liberes : {};
+    const toutLiberer = body.lots === 'liberes';
+    const lotDe = new Map();   // position de l'étape -> { regle, qte }
+    etapesCalc.forEach((e, i) => {
+      if (!aPlanifier.has(e.gamme_id)) return;
+      const regle = mode === 'avant' ? LOTS.regleDe(regles, e.operation_code, of.type_production) : null;   // planification « au plus tôt » seulement
+      if (!regle) return;
+      // Seules les étapes encore à planifier (ou, au recalage, la suite d'un titre en retard) peuvent attendre.
+      if (!(e.statut === 'à planifier' || (body.lots_report && idsReplan.has(e.gamme_id)))) return;
+      if (liberes[e.gamme_id] !== undefined) {   // lot libéré : démarre à la journée du lot
+        const g = lireDateHeure(liberes[e.gamme_id], '00:00');
+        if (g !== null && etapesMoteur[i] && !etapesMoteur[i].fixe) etapesMoteur[i].depart_min = g;
+        return;
+      }
+      if (toutLiberer) return;
+      const r = restDe(e);
+      const qte = Number(e.quantite_etape) * (r !== undefined ? r : 1);
+      if (!(qte > 0) || qte >= regle.quantite_min) return;   // un titre qui atteint le minimum à lui seul n'attend personne
+      lotDe.set(i, { regle, qte });
+    });
+    const retenues = new Set(lotDe.keys());
+    // lots_seul : on ne place QUE les étapes libérées ; le reste de l'OF (encore « à planifier ») est différé à l'appel suivant, pour que les
+    // machines du lot soient réservées avant que les étapes suivantes ne prennent le personnel.
+    if (body.lots_seul && Object.keys(liberes).length) {
+      etapesCalc.forEach((e, i) => { if (aPlanifier.has(e.gamme_id) && liberes[e.gamme_id] === undefined && etapesMoteur[i] && !etapesMoteur[i].fixe) retenues.add(i); });
+    }
+    const moteurOrig = etapesMoteur.slice();
+    if (retenues.size) {
+      const predsPos = moteurOrig.map((em, i) => em.predecesseurs ?? (i > 0 ? [i - 1] : []));
+      for (let change = true; change;) {
+        change = false;
+        moteurOrig.forEach((em, i) => {
+          if (retenues.has(i) || em.fixe || !aPlanifier.has(etapesCalc[i].gamme_id)) return;
+          if (predsPos[i].some((p) => retenues.has(p))) { retenues.add(i); change = true; }
+        });
+      }
+      retenues.forEach((i) => { etapesMoteur[i] = { index: i, fixe: true, fin_min: null, predecesseurs: moteurOrig[i].predecesseurs, retenue_lot: true }; });
+    }
 
     const lancer = (calendrier) => {
       const entree = { calendrier, occupation, conducteurs, etapes: etapesMoteur };
@@ -320,6 +373,7 @@ const handlerProtege = async (event) => {
         predecesseurs: pert.etapes[r.index].predecesseurs,
         dependances: pert.etapes[r.index].dependances,
         fixe: !!r.fixe,
+        retenue_lot: retenues.has(r.index),
         travail_manuel: !e.phases.some((p) => p.occupe_machine) && (e.duree_manuelle_h === null ? e.phases.length > 0 : e.machines_compatibles.length === 0),
         avancement_pct: avancementDe[e.gamme_id] || 0,
         renfort: renforts.has(e.gamme_id),
@@ -344,6 +398,35 @@ const handlerProtege = async (event) => {
         })),
         problemes: r.problemes,
       };
+    });
+
+    // Étapes en attente de lot : prêtes (leurs prédécesseurs sont placés) ou encore bloquées en amont.
+    // « Prête le » = l'heure où l'étape pourrait démarrer si elle n'attendait pas de lot : on simule le plan complet (sans retenue).
+    let planSimule = null;
+    if (retenues.size) planSimule = PL.planifierAvant({ calendrier: cal, occupation, conducteurs, etapes: moteurOrig }, debutMin);
+    const attenteLot = [];
+    lotDe.forEach(({ regle, qte }, i) => {
+      const e = etapesCalc[i]; const o = moteurOrig[i];
+      const preds = o.predecesseurs ?? (i > 0 ? [i - 1] : []);
+      const enAmont = preds.some((p) => retenues.has(p));
+      let pret = Math.max(maintenantMin, debutMin);
+      if (!enAmont) {
+        const sim = planSimule && planSimule.etapes.find((x) => x.index === i);
+        // La mise en route se fait à l'ouverture, avant l'arrivée du travail : « prête » = début du premier travail réel (réglage / roulage).
+        const debutsTravail = sim ? sim.phases.filter((ph) => !ph.mer && ph.type_phase !== 'nettoyage').flatMap((ph) => ph.tranches.map((t) => t.d)) : [];
+        if (debutsTravail.length) pret = Math.max(pret, Math.min(...debutsTravail));
+        else if (sim && sim.debut_min !== null && sim.debut_min !== undefined) pret = Math.max(pret, sim.debut_min);
+      }
+      const mach = (o.phases || []).filter((p) => p.besoin_machine);
+      attenteLot.push({
+        gamme_id: e.gamme_id, sequence: e.sequence, operation: e.operation, operation_code: e.operation_code,
+        of_id: of.id, of_numero: of.numero, delai: of.delai || null,
+        quantite: Math.round(qte), quantite_min: regle.quantite_min,
+        en_amont: enAmont, pret_le: enAmont ? null : iso(pret),
+        mer_min: o.journee ? o.journee.mer_min : 0,
+        regl_min: mach.filter((p) => p.type_phase === 'reglage' && !p.mer).reduce((t, p) => t + p.duree_min, 0),
+        roulage_min: mach.filter((p) => p.type_phase === 'production').reduce((t, p) => t + p.duree_min, 0),
+      });
     });
 
     // Jours fériés (en semaine) tombant dans la période du plan : signalés car non travaillés.
@@ -373,11 +456,19 @@ const handlerProtege = async (event) => {
         complet: plan.complet,
       },
       alternative_heures_sup: null,
+      attente_lot: attenteLot,
       bloquants,
       pert,
       jours_feries: joursFeriesPeriode,
       applique: false,
     };
+
+    // Plan partiel (étapes en attente de lot) : le délai de l'OF ne peut pas être jugé tant que tout n'est pas placé.
+    // (sauf si la partie déjà placée dépasse à elle seule le délai : le retard est alors certain)
+    if (retenues.size) {
+      reponse.resume.partiel = true;
+      if (!(delaiMin !== null && plan.fin_min !== null && plan.fin_min > delaiMin)) { reponse.resume.respecte_delai = null; reponse.resume.retard_min = 0; }
+    }
 
     // Variante avec heures supplémentaires, si le délai n'est pas tenu en horaires normaux.
     if (!/^heures_sup/.test(horairesCode) && delaiMin !== null && reponse.resume.respecte_delai === false) {
@@ -457,6 +548,12 @@ const handlerProtege = async (event) => {
     for (const e of etapesSortie.filter((x) => !x.fixe)) {
       const { error } = await supabase.from('gammes_operatoires')
         .update({ statut: e.statut === 'en cours' ? 'en cours' : 'planifié', machine_id: e.machine ? e.machine.id : null }).eq('id', e.gamme_id);
+      if (error) throw error;
+    }
+
+    // Étapes en attente de lot : plus aucun créneau, statut « à planifier » (même si elles étaient planifiées ou entamées).
+    for (const i of retenues) {
+      const { error } = await supabase.from('gammes_operatoires').update({ statut: 'à planifier' }).eq('id', etapesCalc[i].gamme_id);
       if (error) throw error;
     }
 
