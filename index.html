@@ -2228,6 +2228,7 @@
     const menu = el(`
       <div class="row-menu">
         <button data-action="chiffrage">1. Chiffrage des temps</button>
+        <button data-action="delais">Proposer des délais de livraison</button>
         <button data-action="gamme">2. Gamme opératoire</button>
         <button data-action="planifier">3. Planifier à l'heure</button>
         <button data-action="affecter">4. Affecter au planning</button>
@@ -2254,6 +2255,10 @@
     menu.querySelector('[data-action="affecter"]').addEventListener('click', () => {
       menu.remove();
       ouvrirModaleAffectation({ ofUuid });
+    });
+    menu.querySelector('[data-action="delais"]').addEventListener('click', () => {
+      menu.remove();
+      ouvrirModaleDelais(ofUuid, ofNumero);
     });
     menu.querySelector('[data-action="devis"]')?.addEventListener('click', () => {
       menu.remove();
@@ -7984,7 +7989,7 @@
       </div>
       <div class="field"><label>Opérations de la gamme <span class="plan-note">— listées dans l'ordre de fabrication ; cochez celles dont l'OF a besoin, les « après… » se calculent</span></label><div class="op-list">${opsHtml}</div></div>
       <div id="m-msg"></div>
-      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">Créer l'OF</button></div>
+      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn" id="m-submit-delais" title="Crée l'OF (sans le planifier) puis calcule 3 créneaux de livraison avec 3 tarifs">Créer l'OF et proposer 3 délais</button><button class="btn primary" id="m-submit">Créer l'OF</button></div>
     `);
     const majOps = () => {
       let n = 0, prec = null;
@@ -8039,7 +8044,7 @@
     });
 
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
-    document.getElementById('m-submit').addEventListener('click', async () => {
+    const creerOf = async (avecDelais) => {
       const nom = document.getElementById('m-titre-nom').value.trim();
       const client = document.getElementById('m-titre-client').value.trim();
       const quantite = parseInt(document.getElementById('m-qte').value, 10);
@@ -8064,10 +8069,77 @@
         msg.innerHTML = `<div class="msg ok">OF ${data.numero} créé.</div>`;
         toast(`OF ${data.numero} créé avec succès.`);
         fermerModale(); chargerDonneesReelles();
+        if (avecDelais) ouvrirModaleDelais(data.of_id, data.numero);
       } catch (e) {
         msg.innerHTML = `<div class="msg error">${e.message}</div>`;
       }
-    });
+    };
+    document.getElementById('m-submit').addEventListener('click', () => creerOf(false));
+    document.getElementById('m-submit-delais').addEventListener('click', () => creerOf(true));
+  }
+
+  // ---------- Délais de livraison proposés au client : au plus 3 créneaux, 3 tarifs ----------
+  async function ouvrirModaleDelais(ofUuid, ofNumero) {
+    afficherModale(`<h3>Délais de livraison — ${esc(ofNumero)}</h3><div id="dl-titre"></div><div id="dl-corps"><div class="msg">Calcul des créneaux disponibles sur le planning actuel…</div></div><div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>`, 'xlarge');
+    const $ = (id) => document.getElementById(id);
+    $('m-cancel').addEventListener('click', fermerModale);
+    const post = async (corps) => {
+      const r = await fetch(`${API}/proposer-delais`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: ofUuid, ...corps }) });
+      const d = await lireJson(r); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`); return d;
+    };
+    const euro = (n) => Number(n || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
+    const jourLong = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    try {
+      const [tar, nor, rap] = await Promise.all([post({ action: 'tarifs' }), post({ action: 'simuler', scenario: 'normal' }), post({ action: 'simuler', scenario: 'rapide' })]);
+      $('dl-titre').innerHTML = `<div style="margin:-4px 0 10px;font-size:15px;"><strong>${esc(tar.of.titre || '')}</strong>${tar.of.client ? ` <span class="plan-note">— ${esc(tar.of.client)}</span>` : ''} <span class="plan-note">· ${tar.of.quantite} ex.</span></div>`;
+      if (nor.erreur) {
+        $('dl-corps').innerHTML = `<div class="msg error" style="display:block;">${esc(nor.erreur)}${(nor.bloquants || []).map((x) => `<br>• ${esc(x.operation)} — ${esc(x.detail)}`).join('')}<br>Corrigez le chiffrage ou la gamme de l'OF (menu « Chiffrage des temps ») puis relancez.</div>`;
+        return;
+      }
+      const lon = await post({ action: 'simuler', scenario: 'long', debut_normal: nor.debut.slice(0, 10) });
+      const cartes = [];
+      const avertissements = [...(tar.avertissements || []), ...(nor.avertissements || [])];   // (l'avis « lot minimum » du rapide est affiché sur sa carte)
+      if (!rap.erreur && rap.date_livraison < nor.date_livraison) cartes.push({ code: 'rapide', sim: rap });
+      else avertissements.push('Le délai rapproché n\u2019avance pas la date de livraison : il n\u2019est pas proposé (au plus 3 créneaux, tous différents).');
+      cartes.push({ code: 'normal', sim: nor });
+      if (!lon.erreur && lon.date_livraison > nor.date_livraison) cartes.push({ code: 'long', sim: lon });
+      const style = { rapide: '#c2410c', normal: '#0f766e', long: '#4338ca' };
+      const note = (c) => {
+        if (c.code === 'rapide') return ((c.sim.of_decales || []).length
+          ? `Sans heures supplémentaires. Passe devant le travail non commencé de <strong>${c.sim.of_decales.length} OF sans délai ferme</strong> : ${c.sim.of_decales.map(esc).join(', ')}.`
+          : 'Sans heures supplémentaires. Aucun autre OF n\u2019est décalé.') + (c.sim.lot_leve ? ' <strong>Lot minimum Pléiade levé</strong> : l\u2019OF peut tourner seul.' : '');
+        if (c.code === 'normal') return 'Au plus tôt dans le planning actuel, sans rien décaler.';
+        return `Début décalé de ${tar.parametres.decalage_jours} jours ouvrés : l\u2019atelier a de la marge.`;
+      };
+      $('dl-corps').innerHTML = `<div style="display:grid;grid-template-columns:repeat(${cartes.length},minmax(0,1fr));gap:12px;">${cartes.map((c) => {
+        const t = tar.tarifs[c.code];
+        return `<div style="border:1px solid var(--line,#d9dee5);border-top:4px solid ${style[c.code]};border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;">
+          <div style="font-weight:700;color:${style[c.code]};">${esc(t.libelle)}</div>
+          <div style="font-size:18px;font-weight:700;">${esc(jourLong(c.sim.date_livraison))}</div>
+          <div class="plan-note">Production du ${dateCourte(c.sim.debut.slice(0, 10))} au ${dateCourte(c.sim.fin.slice(0, 10))}</div>
+          <div style="font-size:20px;font-weight:700;margin-top:4px;">${euro(t.ht)} <span class="plan-note" style="font-weight:400;">HT</span></div>
+          <div class="plan-note">${esc(t.texte)}${t.prix_mille_ht ? ` · ${euro(t.prix_mille_ht)} le mille` : ''}</div>
+          <div class="plan-note" style="flex:1;">${note(c)}</div>
+          <button class="btn primary dl-choisir" data-code="${c.code}" data-date="${c.sim.date_livraison}" style="margin-top:6px;">Choisir ce délai</button></div>`;
+      }).join('')}</div>
+      <div class="plan-note" style="margin-top:10px;">Prix d'après le chiffrage de l'OF (main d'œuvre et machines), <strong>hors matières premières</strong>. Réglages : supplément ${tar.parametres.supplement_pct} %, remise ${tar.parametres.remise_pct} %, décalage ${tar.parametres.decalage_jours} jours ouvrés (« Coûts & tarifs »). Le planning n'est pas modifié par cette proposition : après le choix, validez l'OF puis lancez « Réorganiser par priorité » pour que le délai soit appliqué.</div>
+      ${avertissements.length ? `<div class="msg" style="display:block;margin-top:8px;">${avertissements.map((a) => '• ' + esc(a)).join('<br>')}</div>` : ''}`;
+      $('dl-corps').querySelectorAll('.dl-choisir').forEach((b) => b.addEventListener('click', async () => {
+        $('dl-corps').querySelectorAll('.dl-choisir').forEach((x) => { x.disabled = true; });
+        $('m-msg').innerHTML = '<div class="msg">Enregistrement du délai et du devis…</div>';
+        try {
+          const r = await post({ action: 'choisir', option: b.dataset.code, date_livraison: b.dataset.date });
+          toast(`Délai du ${dateCourte(r.delai)} inscrit sur ${ofNumero} — devis ${r.devis.numero} (${euro(r.devis.total_ht)} HT) créé.${r.lot_minimum_leve ? ' Lot minimum Pléiade levé pour cet OF.' : ''}`);
+          fermerModale(); chargerDonneesReelles();
+        } catch (e) {
+          $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`;
+          $('dl-corps').querySelectorAll('.dl-choisir').forEach((x) => { x.disabled = false; });
+        }
+      }));
+    } catch (e) {
+      $('dl-corps').innerHTML = `<div class="msg error" style="display:block;">${esc(e.message)}</div>`;
+    }
   }
 
   async function ouvrirModaleAffectation({ machineUuid, machineName, dayIdx, ofUuid, gammeId, retour }) {
