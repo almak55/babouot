@@ -10,8 +10,9 @@
 // POST  { action:'proposer', mois?: 'AAAA-MM' }
 //        -> { mois: [ { mois, sequence: [ { id, titre, carte_dos, tete, serie, jour_bdm, change_reglage, change_tete } ],
 //                       jours_bdm, reglages, nettoyages, sans_carte: [...] } ], a_coudre, a_emboiter }
-//        Classement : 1) carte de dos (séries de largeurs voisines, écart <= ecart_carte_mm),
-//                     2) couleur de tête à l'intérieur d'une série (limite les nettoyages du jaspage).
+//        Classement : 1) carte de dos DÉCROISSANTE (séries de largeurs voisines, écart <= ecart_carte_mm, de la plus large à la plus étroite),
+//                     2) couleur de tête à l'intérieur d'une série (limite les nettoyages du jaspage),
+//                     3) à couleur égale, carte de dos décroissante.
 // POST  { action:'generer', ids:[...], rang_depart?:1 }   crée l'OF Pléiade de chaque ligne (dans l'ordre donné)
 
 const { getSupabase } = require('./lib/supabaseclient');
@@ -48,13 +49,13 @@ function dateReception(texte, livraison) {
   return d;
 }
 
-// Séries de cartes de dos voisines, puis couleurs de tête regroupées dans la série.
+// Séries de cartes de dos voisines (de la plus large à la plus étroite), puis couleurs de tête regroupées dans la série.
 function sequencer(lignes, ecart, parJour) {
-  const avec = lignes.filter((l) => l.carte_dos).sort((a, b) => a.carte_dos - b.carte_dos);
+  const avec = lignes.filter((l) => l.carte_dos).sort((a, b) => b.carte_dos - a.carte_dos || (a.ordre || 0) - (b.ordre || 0));
   const series = [];
   avec.forEach((l) => {
     const cur = series[series.length - 1];
-    if (cur && l.carte_dos - cur[cur.length - 1].carte_dos <= ecart) cur.push(l); else series.push([l]);
+    if (cur && cur[cur.length - 1].carte_dos - l.carte_dos <= ecart) cur.push(l); else series.push([l]);
   });
   const rang = (t) => { const i = ORDRE_TETES.indexOf(norm(t)); return i < 0 ? 99 : i; };
   let derniereTete = null;
@@ -63,7 +64,7 @@ function sequencer(lignes, ecart, parJour) {
     const tetes = Array.from(new Set(serie.map((l) => norm(l.tete)))).sort((a, b) => rang(a) - rang(b) || a.localeCompare(b));
     // La série commence par la couleur de tête de la précédente si elle en contient une.
     if (derniereTete && tetes.includes(derniereTete)) tetes.splice(tetes.indexOf(derniereTete), 1), tetes.unshift(derniereTete);
-    tetes.forEach((t) => serie.filter((l) => norm(l.tete) === t).sort((a, b) => a.carte_dos - b.carte_dos).forEach((l) => ordre.push({ l, serie: si + 1 })));
+    tetes.forEach((t) => serie.filter((l) => norm(l.tete) === t).sort((a, b) => b.carte_dos - a.carte_dos || (a.ordre || 0) - (b.ordre || 0)).forEach((l) => ordre.push({ l, serie: si + 1 })));
     derniereTete = tetes[tetes.length - 1];
   });
   let reglages = 0, nettoyages = 0;
@@ -75,7 +76,8 @@ function sequencer(lignes, ecart, parJour) {
     if (ct) nettoyages++;
     return { id: x.l.id, titre: x.l.titre, quantite: x.l.quantite, mp: x.l.mp, carte_dos: x.l.carte_dos, tete: x.l.tete, peau: x.l.peau, serie: x.serie, jour_bdm: Math.floor(i / parJour) + 1, change_reglage: cr, change_tete: ct, flags: x.l.flags, a_verifier: x.l.a_verifier };
   });
-  return { sequence, jours_bdm: Math.ceil(sequence.length / parJour), reglages, nettoyages, series: series.length };
+  const detail = series.map((serie, si) => ({ serie: si + 1, nb: serie.length, carte_max: serie[0].carte_dos, carte_min: serie[serie.length - 1].carte_dos, quantite: serie.reduce((t, l) => t + (Number(l.quantite) || 0), 0) }));
+  return { sequence, jours_bdm: Math.ceil(sequence.length / parJour), reglages, nettoyages, series: series.length, series_detail: detail };
 }
 
 const handlerProtege = async (event) => {
@@ -204,3 +206,4 @@ const handlerProtege = async (event) => {
 
 // Accès réservé aux utilisateurs connectés (voir lib/auth.js).
 exports.handler = require('./lib/auth').avecAuth(handlerProtege);
+exports.sequencer = sequencer;   // exposé pour les tests
