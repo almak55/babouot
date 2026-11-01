@@ -141,6 +141,7 @@ async function recalerSiRetard(supabase, ofId, date, gammeIds, planifierHandler)
     body: JSON.stringify({
       of_id: ofId, mode: 'avant', appliquer: true,
       etapes_a_replanifier: reprise, restant, depuis, debut_souhaite: depuis, maintenant: depuis,
+      lots_report: true,   // la suite d'un titre non terminé (BDM, pressure en colle Pléiade) attend un lot de 3 500 : pas de report automatique au lendemain
     }),
   });
   const data = JSON.parse(rep.body);
@@ -156,6 +157,7 @@ async function recalerSiRetard(supabase, ofId, date, gammeIds, planifierHandler)
     delai_tenu: data.resume.respecte_delai,
     retard_delai_min: data.resume.retard_min,
     alternative_heures_sup: data.alternative_heures_sup,
+    attente_lot: data.attente_lot || [],   // suites en attente d'un lot minimum (non reportées au lendemain)
   };
 }
 

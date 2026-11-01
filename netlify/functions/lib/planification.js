@@ -642,6 +642,9 @@ function planifierAvant(entree, debutMin) {
       if (pr && pr.reel && Number(minutes) > 0) depart = Math.max(depart, pr.fin + Number(minutes));
     });
 
+    // Lot minimum libéré (voir lib/lots.js) : l'étape ne démarre pas avant la journée du lot.
+    if (etape.depart_min) depart = Math.max(depart, etape.depart_min);
+
     if (etape.fixe) {
       const fin = etape.fin_min !== null && etape.fin_min !== undefined ? Math.max(depart, etape.fin_min) : depart;
       resultats.set(etape.index, { debut: depart, fin, duree: 0, brutes: null, reel: etape.fin_min !== null && etape.fin_min !== undefined });
