@@ -73,30 +73,41 @@ const handlerProtege = async (event) => {
       };
     }
 
-    // 3. Numéro d'OF auto-incrémenté (OF-YYYY-NNNN).
+    // 3. Numéro d'OF auto-incrémenté (OF-YYYY-NNNN) : dernier numéro existant + 1.
+    //    (Compter les lignes ne convient pas : après la suppression d'un OF, le décompte retombe sur un numéro déjà pris.)
+    //    Si deux créations se croisent et que le numéro est déjà pris, on réessaie avec le suivant.
     const annee = new Date().getFullYear();
-    const { count, error: countError } = await supabase
+    const { data: derniers, error: countError } = await supabase
       .from('ordres_fabrication')
-      .select('id', { count: 'exact', head: true })
-      .like('numero', `OF-${annee}-%`);
+      .select('numero')
+      .like('numero', `OF-${annee}-%`)
+      .order('numero', { ascending: false })
+      .limit(50);
     if (countError) throw countError;
-    const numero = `OF-${annee}-${String((count || 0) + 1).padStart(4, '0')}`;
+    let dernier = 0;
+    (derniers || []).forEach((r) => { const m = /^OF-\d{4}-(\d+)$/.exec(String(r.numero || '')); if (m) dernier = Math.max(dernier, parseInt(m[1], 10)); });
 
     // 4. Créer l'OF.
-    const ligneOf = {
-      numero,
-      titre_id: titreId,
-      quantite,
-      delai: delai || null,
-      priorite: priorite || 'normale',
-      statut: 'en attente de validation',
-    };
-    let { data: of, error: ofError } = await supabase
-      .from('ordres_fabrication').insert(typeProduction ? { ...ligneOf, type_production: typeProduction } : ligneOf)
-      .select('id, numero').single();
-    if (ofError && typeProduction && /type_production/.test(ofError.message || '')) {
-      // Migration 23 pas encore exécutée : on crée l'OF sans type de production.
-      ({ data: of, error: ofError } = await supabase.from('ordres_fabrication').insert(ligneOf).select('id, numero').single());
+    let of = null, ofError = null, numero = '';
+    for (let essai = 1; essai <= 8; essai++) {
+      numero = `OF-${annee}-${String(dernier + essai).padStart(4, '0')}`;
+      const ligneOf = {
+        numero,
+        titre_id: titreId,
+        quantite,
+        delai: delai || null,
+        priorite: priorite || 'normale',
+        statut: 'en attente de validation',
+      };
+      ({ data: of, error: ofError } = await supabase
+        .from('ordres_fabrication').insert(typeProduction ? { ...ligneOf, type_production: typeProduction } : ligneOf)
+        .select('id, numero').single());
+      if (ofError && typeProduction && /type_production/.test(ofError.message || '')) {
+        // Migration 23 pas encore exécutée : on crée l'OF sans type de production.
+        ({ data: of, error: ofError } = await supabase.from('ordres_fabrication').insert(ligneOf).select('id, numero').single());
+      }
+      const numeroPris = ofError && (ofError.code === '23505' || /duplicate key|ordres_fabrication_numero_key/i.test(ofError.message || ''));
+      if (!numeroPris) break;   // créé, ou autre erreur : on sort
     }
     if (ofError) throw ofError;
 
