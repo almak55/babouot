@@ -181,6 +181,9 @@ const handlerProtege = async (event) => {
     const { error: updateError } = await supabase
       .from('ordres_fabrication').update({ statut: nouveauStatut }).eq('id', of_id);
     if (updateError) throw updateError;
+    await require('./lib/journal').noter(supabase, of_id, 'validation',
+      tousOk ? 'OF validé : machines, matières et personnel disponibles.' : `Validation refusée : ${blocages.length} point(s) bloquant(s) (${[!machinesOk && 'machines', !matieresOk && 'matières', !personnelOk && 'personnel'].filter(Boolean).join(', ')}).`,
+      { statut: nouveauStatut, criteres: { machines: machinesOk, matieres: matieresOk, personnel: personnelOk }, blocages });
 
     return {
       statusCode: 200,

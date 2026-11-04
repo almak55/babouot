@@ -70,10 +70,13 @@ const handlerProtege = async (event) => {
     const [aujourdhui, heure] = maintenant.split('T');
 
     if (b.action === 'preparer') {
-      const { data: ofs, error } = await supabase.from('ordres_fabrication')
+      const { data: tousOfs, error } = await supabase.from('ordres_fabrication')
         .select('id, numero, quantite, delai, priorite, type_production, rang_priorite, date_reception, titres(nom)')
         .in('statut', ['en attente de validation', 'validé', 'en cours']);
       if (error) throw error;
+      // of_ids : ne traiter que ces OF (« Optimiser la production » : sélection d'OF) ; ils sont alors repris même s'ils n'ont jamais été planifiés.
+      const selection = Array.isArray(b.of_ids) && b.of_ids.length ? new Set(b.of_ids) : null;
+      const ofs = selection ? tousOfs.filter((o) => selection.has(o.id)) : tousOfs;
       const ids = ofs.map((o) => o.id);
       if (!ids.length) return rep(200, { session_id: null, ordre: [] });
       const { data: gammes, error: e2 } = await supabase.from('gammes_operatoires').select('id, of_id, statut, machine_id').in('of_id', ids);
@@ -134,7 +137,7 @@ const handlerProtege = async (event) => {
       // Un OF jamais planifié n'est repris que s'il est prioritaire (nouvelle commande Pléiade / urgente).
       const dejaLance = (ofId) => gammes.some((g) => g.of_id === ofId && ['planifié', 'en cours', 'terminé'].includes(g.statut));
       const aPlanifier = new Set(gammes.filter((g) => g.statut === 'à planifier' || idsLib.has(g.id))
-        .filter((g) => idsLib.has(g.id) || dejaLance(g.of_id) || (!actualiser && estPrioritaire(ofs.find((o) => o.id === g.of_id))))
+        .filter((g) => idsLib.has(g.id) || !!selection || dejaLance(g.of_id) || (!actualiser && estPrioritaire(ofs.find((o) => o.id === g.of_id))))
         .map((g) => g.of_id));
       const aReplanifier = ofs.filter((o) => aPlanifier.has(o.id));
       const classes = actualiser
@@ -156,6 +159,9 @@ const handlerProtege = async (event) => {
       const corps = { of_id: b.of_id, mode: 'avant', appliquer: true, maintenant };
       if (b.lots_liberes && typeof b.lots_liberes === 'object') corps.lots_liberes = b.lots_liberes;
       if (b.lots === 'liberes') corps.lots = 'liberes';
+      if (/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/.test(String(b.debut_souhaite || ''))) corps.debut_souhaite = b.debut_souhaite;   // ne pas démarrer avant (période choisie)
+      if (b.essai) corps.sans_journal = true;                      // simple essai : rien n'est écrit dans le journal de l'OF
+      if (b.origine) corps.origine = String(b.origine).slice(0, 120);
       if (b.lots_seul) corps.lots_seul = true;
       const res = await planifierOf.handler({ httpMethod: 'POST', body: JSON.stringify(corps) });
       const d = JSON.parse(res.body);
@@ -199,13 +205,14 @@ const handlerProtege = async (event) => {
         const min = Math.max(...groupe.map((x) => Number(x.quantite_min) || 0));
         const joursPris = new Set(lignesPlan.filter((l) => codeDe[l.operation_id] === code).map((l) => PL.enMinutes(l.date, '00:00')));
         const items = groupe.map((x) => ({ cle: x.gamme_id, x, qte: Number(x.quantite) || 0, pret: minutes(x.pret_le), mer_min: Number(x.mer_min) || 0, regl_min: Number(x.regl_min) || 0, roulage_min: Number(x.roulage_min) || 0, rang: Number(x.rang) || 0 }));
-        const f = LOTS.formerLots({ items, joursPris, apartir, min, cal });
+        const titresMin = Math.max(1, ...groupe.map((x) => Number(x.titres_min) || 1));
+        const f = LOTS.formerLots({ items, joursPris, apartir, min, cal, titresMin });
         f.lots.forEach((lot) => lot.membres.forEach((m) => lancements.push({
           of_id: m.x.of_id, gamme_id: m.cle, operation_code: code, depart: iso(lot.depart), lot_jour: PL.dateDe(lot.jour), lot_total: lot.total,
           jours: lot.jours.map((j) => ({ date: PL.dateDe(j.jour), quantite: j.qte })), rang: m.rang,
         })));
         const total = f.attente.reduce((t, i) => t + i.qte, 0);
-        f.attente.forEach((i) => attente.push({ of_id: i.x.of_id, gamme_id: i.cle, operation_code: code, quantite: i.qte, quantite_min: min, total_en_attente: total, manque: Math.max(0, min - total) }));
+        f.attente.forEach((i) => attente.push({ of_id: i.x.of_id, gamme_id: i.cle, operation_code: code, quantite: i.qte, quantite_min: min, titres_min: titresMin, nb_titres_en_attente: f.attente.length, total_en_attente: total, manque: Math.max(0, min - total) }));
       }
       return rep(200, { lancements, attente });
     }
@@ -240,10 +247,10 @@ const handlerProtege = async (event) => {
         if (!regle || l.date < aujourdhui) return;
         const part = totalGamme[l.gamme_operatoire_id] > 0 ? minutes(l) / totalGamme[l.gamme_operatoire_id] : 0;
         const cle = `${code}|${l.machine_id}|${l.date}`;
-        const j = jours.get(cle) || { operation_code: code, machine: nomMachine[l.machine_id] || '?', date: l.date, quantite: 0, quantite_min: regle.quantite_min, ofs: new Set() };
+        const j = jours.get(cle) || { operation_code: code, machine: nomMachine[l.machine_id] || '?', date: l.date, quantite: 0, quantite_min: regle.quantite_min, titres_min: regle.titres_min || 1, ofs: new Set() };
         j.quantite += Number(of.quantite) * part; j.ofs.add(of.numero); jours.set(cle, j);
       });
-      const liste = Array.from(jours.values()).map((j) => ({ ...j, quantite: Math.round(j.quantite), ofs: Array.from(j.ofs).sort(), ok: j.quantite >= j.quantite_min * 0.995 }))
+      const liste = Array.from(jours.values()).map((j) => ({ ...j, quantite: Math.round(j.quantite), ofs: Array.from(j.ofs).sort(), ok: j.quantite >= j.quantite_min * 0.995 && j.ofs.size >= (j.titres_min || 1) }))
         .sort((a, c) => (a.date === c.date ? String(a.operation_code).localeCompare(String(c.operation_code)) : a.date < c.date ? -1 : 1));
       return rep(200, { jours: liste, regles });
     }

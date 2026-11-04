@@ -138,6 +138,9 @@ const handlerProtege = async (event) => {
       .select('id, operation_id, sequence');
     if (gammesError) throw gammesError;
 
+    await require('./lib/journal').noter(supabase, of.id, 'creation',
+      `OF ${of.numero} créé : ${quantite} ex., ${delai ? 'livraison demandée le ' + delai : 'sans délai de livraison'}, priorité ${priorite || 'normale'}, ${operations.length} opération(s) dans la gamme.`,
+      { numero: of.numero, quantite, delai: delai || null, priorite: priorite || 'normale', type_production: typeProduction, operations });
     return {
       statusCode: 200,
       body: JSON.stringify({ of_id: of.id, numero: of.numero, gammes_operatoires: gammes }),

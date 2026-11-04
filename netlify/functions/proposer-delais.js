@@ -167,8 +167,10 @@ const handlerProtege = async (event) => {
       const option = b.option;
       if (!['rapide', 'normal', 'long'].includes(option)) return rep(400, { error: 'option invalide (rapide | normal | long).' });
       if (!dateValide(b.date_livraison) || b.date_livraison < aujourdhuiParis()) return rep(400, { error: 'date_livraison invalide.' });
+      const { data: avantDelai } = await supabase.from('ordres_fabrication').select('delai').eq('id', b.of_id).maybeSingle();
       const { error: eU } = await supabase.from('ordres_fabrication').update({ delai: b.date_livraison }).eq('id', b.of_id);
       if (eU) throw eU;
+      await require('./lib/journal').noter(supabase, b.of_id, 'delai', `Délai de livraison ${avantDelai && avantDelai.delai ? 'modifié : ' + avantDelai.delai + ' → ' : 'fixé au '}${b.date_livraison} (offre « ${option} »).`, { ancien: avantDelai ? avantDelai.delai : null, nouveau: b.date_livraison, option });
       // Délai rapproché : lot minimum levé pour cet OF ; autre choix : règle normale (colonne facultative, migration 56).
       const { error: eL } = await supabase.from('ordres_fabrication').update({ sans_lot_minimum: option === 'rapide' }).eq('id', b.of_id);
       const lotLeve = option === 'rapide' && !eL;

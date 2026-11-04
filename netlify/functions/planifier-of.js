@@ -300,6 +300,13 @@ const handlerProtege = async (event) => {
     try { const { data: fl, error: eFl } = await supabase.from('ordres_fabrication').select('sans_lot_minimum').eq('id', of.id).maybeSingle(); if (!eFl && fl) sansLotMinimum = fl.sans_lot_minimum === true; } catch (_) { /* colonne absente */ }
     const liberes = body.lots_liberes && typeof body.lots_liberes === 'object' ? body.lots_liberes : {};
     const toutLiberer = body.lots === 'liberes';
+    // Heure limite de démarrage de la machine (règle de lot, ex. BDM : 12:30) : appliquée aussi aux OF en délai rapproché.
+    etapesMoteur.forEach((em, i) => {
+      if (!em.journee) return;
+      const rl = LOTS.regleDe(regles, etapesCalc[i].operation_code, of.type_production);
+      const lim = rl && rl.limite_demarrage ? LOTS.minutesDuJour(rl.limite_demarrage) : null;
+      if (lim !== null) em.journee = { ...em.journee, limite_demarrage_min: lim };
+    });
     const lotDe = new Map();   // position de l'étape -> { regle, qte }
     etapesCalc.forEach((e, i) => {
       if (!aPlanifier.has(e.gamme_id)) return;
@@ -315,7 +322,8 @@ const handlerProtege = async (event) => {
       if (toutLiberer) return;
       const r = restDe(e);
       const qte = Number(e.quantite_etape) * (r !== undefined ? r : 1);
-      if (!(qte > 0) || qte >= regle.quantite_min) return;   // un titre qui atteint le minimum à lui seul n'attend personne
+      // Un titre qui atteint le minimum d'exemplaires à lui seul n'attend personne, SAUF si la règle impose plusieurs titres (BDM : 2 titres minimum).
+      if (!(qte > 0) || (qte >= regle.quantite_min && !(regle.titres_min > 1))) return;
       lotDe.set(i, { regle, qte });
     });
     const retenues = new Set(lotDe.keys());
@@ -431,7 +439,7 @@ const handlerProtege = async (event) => {
       attenteLot.push({
         gamme_id: e.gamme_id, sequence: e.sequence, operation: e.operation, operation_code: e.operation_code,
         of_id: of.id, of_numero: of.numero, delai: of.delai || null,
-        quantite: Math.round(qte), quantite_min: regle.quantite_min,
+        quantite: Math.round(qte), quantite_min: regle.quantite_min, titres_min: regle.titres_min || 1,
         en_amont: enAmont, pret_le: enAmont ? null : iso(pret),
         mer_min: o.journee ? o.journee.mer_min : 0,
         regl_min: mach.filter((p) => p.type_phase === 'reglage' && !p.mer).reduce((t, p) => t + p.duree_min, 0),
@@ -581,6 +589,19 @@ const handlerProtege = async (event) => {
 
     reponse.applique = true;
     reponse.lignes_creees = creees.length;
+
+    // Journal de traçabilité : plan initial ou replanification, avec sa cause (sauf simple essai : sans_journal).
+    if (!body.sans_journal) try {
+      const replanif = lignesARemplacer.length > 0 || aTronquer.length > 0;
+      const origine = body.origine ? String(body.origine)
+        : (Array.isArray(body.etapes_a_replanifier) && body.etapes_a_replanifier.length ? 'recalage automatique après un retard de production'
+          : (body.lots_liberes ? 'formation d\'un lot minimum' : (body.depuis ? `replanification à partir du ${String(body.depuis).slice(0, 10)}` : (replanif ? 'replanification' : 'planification'))));
+      const fin = reponse.resume.fin ? String(reponse.resume.fin).slice(0, 10) : null;
+      const detailEtapes = etapesSortie.filter((x) => !x.fixe).map((x) => ({ sequence: x.sequence, operation: x.operation, machine: x.machine ? x.machine.nom : null, debut: x.debut || null, fin: x.fin || null }));
+      await require('./lib/journal').noter(supabase, of.id, replanif ? 'replanification' : 'planification',
+        `${replanif ? 'Replanification' : 'Planification'} (${origine}) : ${reponse.resume.debut ? String(reponse.resume.debut).slice(0, 10) : '?'} → ${fin || '?'}${reponse.resume.delai ? ', délai ' + String(reponse.resume.delai).slice(0, 10) + (reponse.resume.respecte_delai === false ? ' NON tenu' : (reponse.resume.respecte_delai === true ? ' tenu' : '')) : ''}.`,
+        { origine, mode, debut: reponse.resume.debut, fin: reponse.resume.fin, delai: reponse.resume.delai, respecte_delai: reponse.resume.respecte_delai, retard_min: reponse.resume.retard_min, partiel: !!reponse.resume.partiel, horaires: horairesCode, lignes_creees: creees.length, lignes_remplacees: lignesARemplacer.length, etapes: detailEtapes });
+    } catch (e) { console.warn('journal planification ignoré :', e.message); }
     return { statusCode: 200, body: JSON.stringify(reponse) };
   } catch (err) {
     console.error('planifier-of error:', err);
