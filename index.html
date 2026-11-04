@@ -593,6 +593,19 @@
   .gantt .bar.compact { flex-direction: column; align-items: flex-start; justify-content: center; gap: 0; padding: 2px 7px; min-height: 30px; }
   .gantt .bar.compact .b-text { width: 100%; }
   .gantt .bar.compact .b-time { font-size: 9px; }
+  /* Grille atelier : un bloc par travail (titre en gras, n° d'OF en petit, une ligne par étape) */
+  .gantt td.slot { vertical-align: top; }
+  .gantt .job { border-left: 4px solid var(--jc, var(--accent-teal)); background: var(--paper-raised); border-radius: 6px; padding: 4px 6px 3px 7px; margin-bottom: 4px; color: var(--ink-900); box-shadow: var(--shadow-sm); min-width: 0; }
+  .gantt .job:last-child { margin-bottom: 0; }
+  .gantt .job.clic-tache { cursor: pointer; }
+  .gantt .job.clic-tache:hover { background: var(--accent-teal-soft); }
+  .gantt .job-t { font-weight: 700; font-size: 12px; line-height: 1.22; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .gantt .job-of { font-family: "IBM Plex Mono", monospace; font-size: 9px; color: var(--ink-500); margin-top: 1px; overflow-wrap: anywhere; }
+  .gantt .job-ph { display: block; font-size: 10px; line-height: 1.35; color: var(--ink-700); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 3px; padding: 0 2px; margin: 1px -2px 0; }
+  .gantt .job-ph:first-of-type { margin-top: 3px; }
+  .gantt .job-ph b { font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: 9.5px; color: var(--ink-900); }
+  .gantt .job-ph:hover { background: var(--accent-teal-soft); }
+  @media (max-width: 1024px) { .gantt .job-t { font-size: 11px; } .gantt .job { padding: 3px 5px 3px 6px; } }
   .gantt.masque-vides tr.ligne-vide { display: none; }
   @media (max-width: 1024px) { .gantt .row-icon { display: none; } .gantt td.slot { height: 46px; } }
   .plan-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 14px; align-items: end; margin-bottom: 14px; }
@@ -1235,6 +1248,7 @@
             <button class="btn" id="sem-auj">Aujourd'hui</button>
             <button class="btn" id="sem-suiv" title="Semaine suivante">▶</button>
             <button class="btn" id="feuille-jour">Feuille du jour (PDF)</button>
+            <button class="btn" id="feuille-semaine" title="Planning de la semaine par personne, à titre indicatif">Feuille de la semaine (PDF)</button>
             <button class="btn" id="saisie-prod">Saisie de production</button>
             <button class="btn" id="temps-libres-btn" title="Affecter le personnel qui a des temps libres dans la journée">Temps libres</button>
             <button class="btn" id="vides-btn" title="Masquer ou afficher les machines qui n'ont aucun travail cette semaine"></button>
@@ -1254,6 +1268,7 @@
 
     legend.querySelector('#saisie-prod').addEventListener('click', () => ouvrirModaleSaisieProduction());
     legend.querySelector('#feuille-jour').addEventListener('click', ouvrirModaleFeuilleJournaliere);
+    legend.querySelector('#feuille-semaine').addEventListener('click', ouvrirModaleFeuilleSemaine);
     legend.querySelector('#temps-libres-btn').addEventListener('click', () => ouvrirModaleTempsLibres());
     legend.querySelector('#sem-prec').addEventListener('click', () => changerSemaine(-1));
     legend.querySelector('#sem-suiv').addEventListener('click', () => changerSemaine(1));
@@ -1281,25 +1296,39 @@
       rows += `<tr class="${sansTravail ? 'ligne-vide' : ''}"><td class="machine-cell row-accent-${accent}"><div class="m-row"><span class="row-icon ${accent}">${svgIcon(ICON_MACHINE)}</span><div><div class="m-name">${m.name}</div><div class="m-sub">${m.code}</div>${pastille}</div></div></td>`;
       for(let d=0; d<7; d++){
         const slotsJour = (state.planning[m.id]||[]).filter(s=>s.day===d);
-        const slot = slotsJour[0];
-        if (slotsJour.length > 1 || (slot && slot.debut)) {
-          // Créneaux horaires : une mini-barre par créneau, avec ses heures.
-          const barres = slotsJour.map(s => {
-            const col = s.statut==='danger' ? 'var(--danger)' : s.statut==='warn' ? 'var(--accent-amber)' : 'var(--accent-teal)';
-            const heures = s.debut ? `${s.debut}–${s.fin}` : 'journée';
-            const nom = s.phase ? `${s.of} · ${s.phase}` : s.of;
-            if (s.libre) {   // temps libre / travail hors planning : pas d'étape de gamme, on ouvre la fenêtre « Temps libres » du jour
-              const nomLibre = s.phase ? (s.of && s.of !== 'Hors OF' ? `${s.of} · ${s.phase}` : s.phase) : s.of;
-              return `<div class="bar compact clic-libre" data-date="${s.date||''}" style="background:#7A6FD0;cursor:pointer;" title="Temps libre — ${esc(nomLibre)} — ${heures}${s.nbPers > 1 ? ' — ' + s.nbPers + ' pers.' : ''}"><span class="b-text"><span class="b-name">${esc(nomLibre.replace(/^OF-\d{4}-/, ''))}</span></span><span class="b-time">${heures}</span></div>`;
-            }
-            return `<div class="bar compact clic-tache" data-gamme="${s.gamme||''}" data-date="${s.date||''}" data-of="${esc(s.of)}" style="background:${col};cursor:pointer;" title="Cliquer pour saisir l'avancement — ${esc(nom)} — ${heures}${s.nbPers > 1 ? ' — ' + s.nbPers + ' pers.' : ''}"><span class="b-text"><span class="b-name">${esc(nom.replace(/^OF-\d{4}-/, ''))}</span></span><span class="b-time">${heures}</span></div>`;
+        if (slotsJour.length) {
+          // Un bloc par travail (OF) et par jour : le TITRE en gras, le n° d'OF en petit, puis une ligne par étape avec ses heures.
+          const groupes = [];
+          slotsJour.forEach(sj => {
+            const cle = sj.libre ? 'libre:' + (sj.phase || sj.of) : sj.of;
+            let g = groupes.find(x => x.cle === cle);
+            if (!g) { g = { cle, libre: !!sj.libre, of: sj.of, slots: [] }; groupes.push(g); }
+            g.slots.push(sj);
+          });
+          const cartes = groupes.map(g => {
+            const s0 = g.slots[0];
+            const ordre = g.libre ? null : state.ordres.find(o => o.id === g.of);
+            const statut = g.slots.some(x => x.statut === 'danger') ? 'danger' : g.slots.some(x => x.statut === 'warn') ? 'warn' : 'ok';
+            const col = g.libre ? '#7A6FD0' : (statut === 'danger' ? 'var(--danger)' : statut === 'warn' ? 'var(--accent-amber)' : 'var(--accent-teal)');
+            const nbPers = Math.max(...g.slots.map(x => x.nbPers || 0));
+            const titre = g.libre ? (s0.phase ? s0.phase : String(s0.of || '').replace(/^OF-\d{4}-/, '')) : ((ordre && ordre.produit) || g.of);
+            const petit = g.libre
+              ? ['Temps libre', g.of && g.of !== 'Hors OF' ? g.of : ''].filter(Boolean).join(' · ')
+              : [g.of, ordre ? ordre.avancement + ' %' : '', nbPers > 1 ? nbPers + ' pers.' : ''].filter(Boolean).join(' · ');
+            const info = `${titre}${g.libre ? '' : ' — ' + g.of}${ordre && ordre.client ? ' — ' + ordre.client : ''}`;
+            const seul = !g.libre && g.slots.length === 1 && !s0.debut;   // journée entière sans horaire : tout le bloc est cliquable
+            const attr = (x) => `data-gamme="${x.gamme || ''}" data-date="${x.date || ''}" data-of="${esc(x.of)}"`;
+            const lignes = seul ? '' : g.slots.map(x => {
+              const heures = x.debut ? `${x.debut}–${x.fin}` : 'journée';
+              const lib = g.libre ? '' : (x.phase || '');
+              const txt = `<b>${heures}</b>${lib ? ' ' + esc(lib) : ''}`;
+              return g.libre
+                ? `<span class="job-ph clic-libre" data-date="${x.date || ''}" title="${esc(info)} — ${heures}">${txt}</span>`
+                : `<span class="job-ph clic-tache" ${attr(x)} title="Cliquer pour saisir l'avancement — ${esc(info)} — ${heures}">${txt}</span>`;
+            }).join('');
+            return `<div class="job${seul ? ' clic-tache' : ''}" style="--jc:${col}" ${seul ? attr(s0) : ''} title="${esc(info)}"><div class="job-t">${esc(titre)}</div><div class="job-of">${esc(petit)}</div>${lignes}</div>`;
           }).join('');
-          rows += `<td class="slot"><div class="stack">${barres}</div></td>`;
-        } else if(slot){
-          const of = state.ordres.find(o=>o.id===slot.of);
-          const color = slot.statut==='danger' ? 'var(--danger)' : slot.statut==='warn' ? 'var(--accent-amber)' : 'var(--accent-teal)';
-          const pctBadge = of ? `<span class="b-pct">${of.avancement}%</span>` : '';
-          rows += `<td class="slot"><div class="bar clic-tache" data-gamme="${slot.gamme||''}" data-date="${slot.date||''}" data-of="${esc(slot.of)}" title="Cliquer pour saisir l'avancement" style="background:${color};cursor:pointer;"><span class="b-text"><span class="b-of">${slot.of}${slot.nbPers > 1 ? ` · ${slot.nbPers} pers.` : ''}</span><span class="b-name">${of?of.produit:''}</span></span>${pctBadge}</div></td>`;
+          rows += `<td class="slot">${cartes}</td>`;
         } else {
           const iv = interventionDuJour(m.uuid, DAYS_ISO[d]);
           if (iv) rows += `<td class="slot ${iv.bloquant ? (iv.type === 'reparation' || iv.type === 'retour_sigis' ? 'hs' : 'maint') : ''} intervention-cell" data-machine-uuid="${m.uuid||''}" data-machine-name="${esc(m.name)}" title="${esc(iv.texte)}"><div class="hs-txt">${esc(iv.type_libelle)}${iv.heure_debut ? ' ' + iv.heure_debut + '–' + (iv.heure_fin || '…') : ''}</div></td>`;
@@ -3268,30 +3297,37 @@
       y = doc.lastAutoTable.finalY + 3;
     }
 
-    const COLS = ['Horaire', 'Operation', 'Machine', 'OF', 'Titre / Client / Caracteristiques', 'Qte', 'Livraison', 'Equipe', 'Observations', 'Visa'];
+    // Le titre du travail est la colonne principale (gras, grande taille) ; le n° d'OF est une petite colonne grisée.
+    const COLS = ['Horaire', 'Titre du travail', 'OF', 'Operation', 'Machine', 'Client / Caracteristiques', 'Qte', 'Livraison', 'Equipe', 'Observations', 'Visa'];
     const ligne = (c) => [
       c.debut && c.fin ? `${c.debut}\n${c.fin}` : 'Journee',
+      pdfTxt(c.titre || c.operation || c.of),
+      pdfTxt(c.of + (c.priorite && c.priorite !== 'normale' ? `\n(${c.priorite})` : '')),
       pdfTxt(c.operation),
       pdfTxt(c.machine),
-      pdfTxt(c.of + (c.priorite && c.priorite !== 'normale' ? `\n(${c.priorite})` : '')),
-      pdfTxt([c.titre, c.client].filter(Boolean).join(' - ') + (c.caracteristiques.length ? '\n' + c.caracteristiques.join('  |  ') : '')),
+      pdfTxt([c.client, ...c.caracteristiques].filter(Boolean).join('\n')),
       c.quantite != null ? pdfTxt(Number(c.quantite).toLocaleString('fr-FR')) : '',
       dateCourte(c.delai),
       pdfTxt(c.equipe.join(', ')),
       '', '',
     ];
-    const colStyles = { 0: { cellWidth: 16, fontStyle: 'bold' }, 1: { cellWidth: 32 }, 2: { cellWidth: 34 }, 3: { cellWidth: 22 }, 4: { cellWidth: 58 }, 5: { cellWidth: 14, halign: 'right' }, 6: { cellWidth: 18 }, 7: { cellWidth: 36 }, 8: { cellWidth: 'auto' }, 9: { cellWidth: 14 } };
+    const colStyles = { 0: { cellWidth: 15, fontStyle: 'bold' }, 1: { cellWidth: 54 }, 2: { cellWidth: 19 }, 3: { cellWidth: 28 }, 4: { cellWidth: 28 }, 5: { cellWidth: 34, fontSize: 7 }, 6: { cellWidth: 12, halign: 'right' }, 7: { cellWidth: 20 }, 8: { cellWidth: 26 }, 9: { cellWidth: 'auto' }, 10: { cellWidth: 12 } };
+    const styleCellule = (h) => {
+      if (h.section !== 'body') return;
+      if (h.column.index === 1) { h.cell.styles.fontStyle = 'bold'; h.cell.styles.fontSize = 10.5; }
+      if (h.column.index === 2) { h.cell.styles.fontSize = 6.5; h.cell.styles.textColor = [110, 110, 110]; }
+    };
 
     data.personnes.filter(p => p.creneaux.length).forEach(p => {
       if (y > 175) { doc.addPage(); y = 12; }
       doc.autoTable({
         startY: y, margin: { left: 10, right: 10 }, theme: 'grid',
-        head: [[{ content: pdfTxt(`${p.nom}${p.poste ? '  -  ' + p.poste : ''}${p.plage ? '   (disponible ' + p.plage + ')' : ''}`), colSpan: 10, styles: { fillColor: [30, 90, 100], textColor: 255, fontSize: 10, halign: 'left' } }], COLS],
+        head: [[{ content: pdfTxt(`${p.nom}${p.poste ? '  -  ' + p.poste : ''}${p.plage ? '   (disponible ' + p.plage + ')' : ''}`), colSpan: 11, styles: { fillColor: [30, 90, 100], textColor: 255, fontSize: 10, halign: 'left' } }], COLS],
         body: p.creneaux.map(ligne), showHead: 'everyPage',
         styles: { fontSize: 8, cellPadding: 1.6, valign: 'middle', lineColor: [200, 200, 200] },
         headStyles: { fillColor: [235, 238, 240], textColor: 40, fontStyle: 'bold' },
         columnStyles: colStyles,
-        didParseCell: (h) => { if (h.section === 'head' && h.row.index === 0) h.cell.styles.fillColor = [30, 90, 100]; if (h.section === 'head' && h.row.index === 0) h.cell.styles.textColor = 255; },
+        didParseCell: (h) => { if (h.section === 'head' && h.row.index === 0) h.cell.styles.fillColor = [30, 90, 100]; if (h.section === 'head' && h.row.index === 0) h.cell.styles.textColor = 255; styleCellule(h); },
       });
       y = doc.lastAutoTable.finalY + 5;
     });
@@ -3300,9 +3336,9 @@
       if (y > 165) { doc.addPage(); y = 12; }
       doc.autoTable({
         startY: y, margin: { left: 10, right: 10 }, theme: 'grid',
-        head: [[{ content: 'ATTENTION - Creneaux sans personnel affecte', colSpan: 10, styles: { fillColor: [180, 80, 40], textColor: 255, fontSize: 10, halign: 'left' } }], COLS],
+        head: [[{ content: 'ATTENTION - Creneaux sans personnel affecte', colSpan: 11, styles: { fillColor: [180, 80, 40], textColor: 255, fontSize: 10, halign: 'left' } }], COLS],
         body: data.sans_personnel.map(ligne),
-        styles: { fontSize: 8, cellPadding: 1.6, valign: 'middle' }, headStyles: { fillColor: [235, 238, 240], textColor: 40 }, columnStyles: colStyles,
+        styles: { fontSize: 8, cellPadding: 1.6, valign: 'middle' }, headStyles: { fillColor: [235, 238, 240], textColor: 40 }, columnStyles: colStyles, didParseCell: styleCellule,
       });
       y = doc.lastAutoTable.finalY + 5;
     }
@@ -3361,22 +3397,28 @@
         const equipe = c.equipe.filter(n => n !== p.nom);
         return [
           pdfTxt(l.horaires.join('\n')),
-          pdfTxt(`${c.of}\n${[c.titre, c.client].filter(Boolean).join(' - ')}`),
+          pdfTxt([c.titre || c.operation || c.of, c.client].filter(Boolean).join(' - ')),
+          pdfTxt(c.of),
           pdfTxt(`${c.operation}\n${c.machine}${equipe.length ? '\navec ' + equipe.join(', ') : ''}`),
           c.quantite != null ? pdfTxt(Number(c.quantite).toLocaleString('fr-FR')) : '',
           '', '', '', '', '',
         ];
       });
-      for (let i = 0; i < 2; i++) corps.push(['', { content: 'Autre travail (preciser) :', styles: { textColor: 120, fontStyle: 'italic' } }, '', '', '', '', '', '', '']);
+      for (let i = 0; i < 2; i++) corps.push(['', { content: 'Autre travail (preciser) :', styles: { textColor: 120, fontStyle: 'italic' } }, '', '', '', '', '', '', '', '']);
       doc.autoTable({
         startY: 30, margin: { left: 10, right: 10 }, theme: 'grid',
-        head: [['Horaire', 'OF / Titre', 'Operation / Machine', 'Qte OF', 'Reglage\n(h)', 'Production\n(h)', 'Qte produite\naujourd\'hui', 'Termine', 'Remarque']],
+        head: [['Horaire', 'Titre du travail', 'OF', 'Operation / Machine', 'Qte OF', 'Reglage\n(h)', 'Production\n(h)', 'Qte produite\naujourd\'hui', 'Termine', 'Remarque']],
         body: corps,
         styles: { fontSize: 9, cellPadding: 2, valign: 'middle', lineColor: [150, 150, 150], minCellHeight: 17 },
         headStyles: { fillColor: [30, 90, 100], textColor: 255, fontStyle: 'bold', halign: 'center', minCellHeight: 10 },
-        columnStyles: { 0: { cellWidth: 30, fontStyle: 'bold' }, 1: { cellWidth: 50 }, 2: { cellWidth: 52 }, 3: { cellWidth: 16, halign: 'right' }, 4: { cellWidth: 20 }, 5: { cellWidth: 22 }, 6: { cellWidth: 28 }, 7: { cellWidth: 16 }, 8: { cellWidth: 'auto' } },
+        columnStyles: { 0: { cellWidth: 26, fontStyle: 'bold' }, 1: { cellWidth: 54 }, 2: { cellWidth: 20 }, 3: { cellWidth: 44 }, 4: { cellWidth: 14, halign: 'right' }, 5: { cellWidth: 18 }, 6: { cellWidth: 23 }, 7: { cellWidth: 26 }, 8: { cellWidth: 19 }, 9: { cellWidth: 'auto' } },
+        didParseCell: (h) => {   // titre du travail en gras et en grand, n° d'OF en petit
+          if (h.section !== 'body') return;
+          if (h.column.index === 1 && h.cell.raw !== 'Autre travail (preciser) :' && !(h.cell.raw && h.cell.raw.content)) { h.cell.styles.fontStyle = 'bold'; h.cell.styles.fontSize = 10.5; }
+          if (h.column.index === 2) { h.cell.styles.fontSize = 6.5; h.cell.styles.textColor = [110, 110, 110]; }
+        },
         didDrawCell: (h) => {   // case à cocher dans la colonne « Terminé »
-          if (h.section === 'body' && h.column.index === 7) {
+          if (h.section === 'body' && h.column.index === 8) {
             const x = h.cell.x + h.cell.width / 2 - 3, y = h.cell.y + h.cell.height / 2 - 3;
             doc.setDrawColor(60); doc.rect(x, y, 6, 6);
           }
@@ -3516,12 +3558,19 @@
         const nomMachine = c.machine.replace(/\s*\(.*\)$/, '');
         const horaire = `${c.debut}-${c.fin}`;
         const titre = [c.titre, c.client].filter(Boolean).join(' - ') || c.of;
+        // Le titre du travail en gros et en gras ; l'opération, la machine ; le n° d'OF et l'horaire en petit.
+        const titreGros = [c.titre, c.client].filter(Boolean).join(' - ') || c.operation || c.of;
         const items = grandBloc
-          ? [['b', c.operation], ['bi', titre], ['n', nomMachine], ['n', [c.of, horaire].filter(Boolean).join('  ')]]
-          : [['b', c.operation], ['bi', titre], ['n', [nomMachine, c.of, horaire].filter(Boolean).join(' | ')]];
-        doc.setFontSize(fs);
-        items.forEach(([st, txt], k) => {
-          doc.setFont('helvetica', st === 'b' ? 'bold' : st === 'bi' ? 'bolditalic' : 'normal');
+          ? [['b', titreGros, 1.12], ['n', c.operation, 1], ['n', nomMachine, 1], ['n', [c.of, horaire].filter(Boolean).join('  '), 0.82]]
+          : [['b', titreGros, 1.1], ['n', [c.operation, nomMachine].filter(Boolean).join(' | '), 1], ['n', [c.of, horaire].filter(Boolean).join('  '), 0.82]];
+        if (bw < 22) {
+          // Bloc étroit : seul le titre, sur plusieurs lignes courtes (le détail figure sur la feuille détaillée).
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(fs);
+          const coupe = (t) => { let r = t; while (r.length > 1 && doc.getTextWidth(r) > bw - 1.6) r = r.slice(0, -1); return r; };
+          const maxL = Math.max(1, Math.floor((bh - 1) / pas));
+          doc.splitTextToSize(pdfTxt(titreGros), bw - 1.6).slice(0, maxL).forEach((l, k) => doc.text(coupe(l), bx + 1, by + 0.8 + (k + 1) * pas));
+        } else items.forEach(([st, txt, echelle], k) => {
+          doc.setFont('helvetica', st === 'b' ? 'bold' : 'normal'); doc.setFontSize(fs * echelle);
           const l = doc.splitTextToSize(pdfTxt(txt), bw - 2)[0] || '';
           doc.text(l, bx + 1.2, by + 0.8 + (k + 1) * pas);
         });
@@ -3540,7 +3589,7 @@
     ofs.forEach((o, i) => {
       const c = detail[o]; const cx = M + (i % 2) * colW, cy = y + 5 + Math.floor(i / 2) * 5;
       doc.setFillColor(...couleurOf[o]); doc.setDrawColor(90); doc.rect(cx, cy - 3, 6, 3.6, 'FD');
-      doc.text(pdfTxt(`${o} - ${c.titre || ''}${c.client ? ' (' + c.client + ')' : ''}${c.quantite != null ? ' - ' + Number(c.quantite).toLocaleString('fr-FR') + ' ex.' : ''}${c.delai ? ' - livraison ' + dateCourte(c.delai) : ''}`), cx + 8, cy, { maxWidth: colW - 10 });
+      doc.text(pdfTxt(`${c.titre || o}${c.client ? ' (' + c.client + ')' : ''}${c.quantite != null ? ' - ' + Number(c.quantite).toLocaleString('fr-FR') + ' ex.' : ''}${c.delai ? ' - livraison ' + dateCourte(c.delai) : ''}  [${o}]`), cx + 8, cy, { maxWidth: colW - 10 });
     });
     if (data.sans_personnel.length) {
       doc.setTextColor(180, 60, 30); doc.setFont('helvetica', 'bold');
@@ -3550,6 +3599,184 @@
     doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(110);
     doc.text(MODE === 'samedi' ? 'Samedi exceptionnel : 6h00-12h00, sans pause.' : (MODE === 'heures_sup' ? 'Heures supplementaires : 7h00-12h00 et 12h30-17h30 - zone grisee : pause 12h00-12h30.' : 'Horaires atelier : 8h00-12h00 et 12h30-16h30 - zone grisee : pause 12h00-12h30.'), M, H - 7); doc.setTextColor(0);
     doc.save(`affichage-personnel-${date}.pdf`);
+  }
+
+  // ---------- Feuille de la semaine (à titre indicatif) : personnel × jours, titre en gros, n° d'OF en petit ----------
+  async function genererFeuilleSemaine(dateIso) {
+    const res = await fetch(`${API}/feuille-semaine?date=${dateIso}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erreur inconnue');
+    await chargerLibsPdf();
+    const jours = data.jours;
+    const JOURS_LONGS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+    const nomJour = (iso) => JOURS_LONGS[new Date(iso + 'T12:00:00Z').getUTCDay()];
+    const maj = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+    const jm = (iso) => `${Number(iso.slice(8, 10))} ${MOIS_FR[Number(iso.slice(5, 7)) - 1]}`;
+    const longJour = (iso) => `${nomJour(iso)} ${jm(iso)}`;
+    const d0 = data.semaine.debut, d1 = data.semaine.fin;
+    const libSemaine = `Semaine du ${Number(d0.slice(8, 10))}${d0.slice(5, 7) !== d1.slice(5, 7) ? ' ' + MOIS_FR[Number(d0.slice(5, 7)) - 1] : ''} au ${jm(d1)} ${d1.slice(0, 4)}`;
+
+    const grand = data.personnes.length > 8;
+    const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: grand ? 'a3' : 'a4' });
+    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), k = W / 297;
+    const M = 8 * k, nomW = 34 * k, dayW = (W - 2 * M - nomW) / jours.length, maxY = H - 14 * k;
+    const LH = (pt) => pt * 0.3528 * 1.2;                  // hauteur d'une ligne (mm) pour une taille en points
+    const F = { titre: 9.5 * k, of: 6.8 * k, mach: 7.6 * k, nom: 10 * k, poste: 7 * k };
+    const PALETTE = [[200, 230, 225], [250, 220, 190], [210, 220, 245], [245, 210, 225], [225, 240, 190], [235, 215, 250], [255, 240, 170], [200, 235, 245], [250, 205, 200], [215, 235, 215], [240, 225, 205], [220, 220, 235]];
+    const cles = [];
+    data.personnes.forEach((p) => jours.forEach((j) => p.jours[j].travaux.forEach((t) => { if (!cles.includes(t.cle)) cles.push(t.cle); })));
+    const couleur = (t) => (t.libre ? [232, 228, 244] : PALETTE[cles.indexOf(t.cle) % PALETTE.length]);
+    const couper = (lignes, max) => { if (lignes.length <= max) return lignes; const l = lignes.slice(0, max); l[max - 1] = l[max - 1].replace(/\s*\S{0,2}$/, '') + '...'; return l; };
+
+    // Bloc d'un travail pour une largeur donnée : titre (gros), n° d'OF et quantité (petit), machines ou équipement.
+    const mesurer = (t, bw) => {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(F.titre);
+      const lt = couper(doc.splitTextToSize(pdfTxt(t.titre || t.of), bw - 3 * k), 3);       // titre inconnu : le n° d'OF en tient lieu
+      const ofTxt = t.titre && t.of ? pdfTxt([t.of, t.quantite != null ? Number(t.quantite).toLocaleString('fr-FR') + ' ex.' : ''].filter(Boolean).join('   -   ')) : '';
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(F.mach);
+      const equip = t.machines.length ? t.machines : (t.libre ? [] : t.operations);        // travail manuel : l'opération tient lieu d'équipement
+      const lm = equip.length ? couper(doc.splitTextToSize(pdfTxt(equip.join(' + ')), bw - 3 * k), 2) : [];
+      return { t, lt, ofTxt, lm, h: 1.4 * k + lt.length * LH(F.titre) + (ofTxt ? LH(F.of) : 0) + lm.length * LH(F.mach) + 1.4 * k };
+    };
+    // Jours consécutifs avec exactement les mêmes travaux : un seul bloc qui s'étend sur ces jours.
+    const decouper = (p) => {
+      const cle = jours.map((j) => { const x = p.jours[j]; return x.travaux.length ? x.travaux.map((t) => t.cle).sort().join('||') : (x.absent ? 'ABS' : ''); });
+      const segs = [];
+      for (let i = 0; i < jours.length;) {
+        let n = 1; while (i + n < jours.length && cle[i + n] === cle[i]) n++;
+        const seg = { i, n, cle: cle[i], blocs: [], h: 0 };
+        if (seg.cle && seg.cle !== 'ABS') { seg.blocs = p.jours[jours[i]].travaux.map((t) => mesurer(t, n * dayW - 2 * k)); seg.h = 2 * k + seg.blocs.reduce((a, b) => a + b.h, 0) + (seg.blocs.length - 1) * 1 * k; }
+        else if (seg.cle === 'ABS') seg.h = 9 * k;
+        segs.push(seg); i += n;
+      }
+      return segs;
+    };
+
+    const nbPages = () => doc.internal.getNumberOfPages();
+    const enteteTable = (yTop) => {
+      doc.setFillColor(30, 90, 100); doc.rect(M, yTop, W - 2 * M, 7 * k, 'F');
+      doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5 * k);
+      doc.text('Personnel', M + 2 * k, yTop + 4.8 * k);
+      jours.forEach((j, c) => doc.text(pdfTxt(`${maj(nomJour(j))} ${Number(j.slice(8, 10))}`), M + nomW + c * dayW + dayW / 2, yTop + 4.8 * k, { align: 'center' }));
+      doc.setTextColor(0);
+      return yTop + 7 * k;
+    };
+
+    // ---- Première page : titre, mention « à titre indicatif » ----
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(18 * k); doc.setTextColor(0);
+    doc.text('Planning de la semaine - placement du personnel', M, 13 * k);
+    doc.setFontSize(13 * k); doc.text(pdfTxt(libSemaine), W - M, 13 * k, { align: 'right' });
+    doc.setFillColor(255, 236, 200); doc.setDrawColor(230, 160, 20); doc.setLineWidth(0.3 * k);
+    doc.roundedRect(M, 17 * k, W - 2 * M, 7 * k, 1.2 * k, 1.2 * k, 'FD');
+    doc.setFontSize(9.5 * k); doc.setTextColor(120, 70, 0);
+    doc.text(pdfTxt("A TITRE INDICATIF - ce planning peut évoluer selon les aléas de production, les absences et les urgences."), M + 3 * k, 21.7 * k);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5 * k); doc.setTextColor(100);
+    doc.text(pdfTxt(`Ateliers Babouot  -  ${data.personnes.length} personne(s) affectée(s)  -  édité le ${new Date().toLocaleString('fr-FR')}`), M, 28 * k);
+    doc.setTextColor(0);
+    let y = enteteTable(31 * k);
+    const nouvellePage = (avecTableau = true) => {
+      doc.addPage();
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11 * k); doc.setTextColor(60); doc.text(pdfTxt(`Planning de la semaine (suite) - ${libSemaine}`), M, 9 * k); doc.setTextColor(0);
+      y = avecTableau ? enteteTable(12 * k) : 12 * k;
+    };
+
+    if (!data.personnes.length) {
+      doc.setFont('helvetica', 'italic'); doc.setFontSize(11 * k); doc.text('Aucun créneau planifié cette semaine-là.', M, y + 8 * k); y += 14 * k;
+    }
+    data.personnes.forEach((p, idx) => {
+      const segs = decouper(p);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(F.nom);
+      const lignesNom = doc.splitTextToSize(pdfTxt(p.nom), nomW - 3 * k).slice(0, 2);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(F.poste);
+      const lignesPoste = p.poste ? doc.splitTextToSize(pdfTxt(p.poste), nomW - 3 * k).slice(0, 3) : [];
+      const yPoste = 5 * k + (lignesNom.length - 1) * F.nom * 0.3528 * 1.15 + 4.4 * k;
+      const rowH = Math.max(15 * k, yPoste + (lignesPoste.length ? (lignesPoste.length - 1) * F.poste * 0.3528 * 1.15 + 2.5 * k : 0), ...segs.map((s) => s.h));
+      if (y + rowH > maxY) nouvellePage();
+      if (idx % 2 === 0) { doc.setFillColor(247, 248, 249); doc.rect(M, y, W - 2 * M, rowH, 'F'); }
+      doc.setDrawColor(205); doc.setLineWidth(0.15 * k);
+      for (let c = 0; c <= jours.length; c++) { const x = M + nomW + c * dayW; doc.line(x, y, x, y + rowH); }
+      doc.line(M, y + rowH, W - M, y + rowH); doc.line(M, y, M, y + rowH);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(F.nom); doc.setTextColor(0);
+      doc.text(lignesNom, M + 2 * k, y + 5 * k);
+      if (lignesPoste.length) { doc.setFont('helvetica', 'normal'); doc.setFontSize(F.poste); doc.setTextColor(100); doc.text(lignesPoste, M + 2 * k, y + yPoste); doc.setTextColor(0); }
+      segs.forEach((s) => {
+        const bx = M + nomW + s.i * dayW + 1 * k, bw = s.n * dayW - 2 * k;
+        if (s.cle === 'ABS') {
+          doc.setFillColor(232, 232, 232); doc.setDrawColor(190); doc.setLineWidth(0.2 * k); doc.roundedRect(bx, y + 1 * k, bw, rowH - 2 * k > 8 * k ? 7 * k : rowH - 2 * k, 1 * k, 1 * k, 'FD');
+          doc.setFont('helvetica', 'italic'); doc.setFontSize(8.5 * k); doc.setTextColor(110); doc.text('Absent(e)', bx + bw / 2, y + 5.4 * k, { align: 'center' }); doc.setTextColor(0);
+          return;
+        }
+        let by = y + 1 * k;
+        s.blocs.forEach((b) => {
+          doc.setFillColor(...couleur(b.t)); doc.setDrawColor(120); doc.setLineWidth(0.2 * k); doc.roundedRect(bx, by, bw, b.h, 1.2 * k, 1.2 * k, 'FD');
+          let cy = by + 1.4 * k;
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(F.titre); doc.setTextColor(0);
+          b.lt.forEach((l) => { doc.text(l, bx + 1.6 * k, cy + LH(F.titre) * 0.8); cy += LH(F.titre); });
+          if (b.ofTxt) { doc.setFont('helvetica', 'normal'); doc.setFontSize(F.of); doc.setTextColor(95); doc.text(b.ofTxt, bx + 1.6 * k, cy + LH(F.of) * 0.8); cy += LH(F.of); }
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(F.mach); doc.setTextColor(25, 55, 65);
+          b.lm.forEach((l) => { doc.text(l, bx + 1.6 * k, cy + LH(F.mach) * 0.8); cy += LH(F.mach); });
+          doc.setTextColor(0);
+          by += b.h + 1 * k;
+        });
+      });
+      y += rowH;
+    });
+    doc.setDrawColor(150); doc.setLineWidth(0.3 * k);
+
+    // ---- Zones sous le tableau : absents (sans motif) et dates de reprise prévisionnelles, sans affectation, sans personnel ----
+    const zone = (titre, lignes, fond, encre) => {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5 * k);
+      const toutes = lignes.flatMap((l) => doc.splitTextToSize(pdfTxt(l), W - 2 * M - 6 * k));
+      const lh = LH(8.5 * k), hBox = 8 * k + toutes.length * lh;
+      if (y + 4 * k + hBox > maxY) { nouvellePage(false); y -= 4 * k; }
+      y += 4 * k;
+      doc.setFillColor(...fond); doc.roundedRect(M, y, W - 2 * M, hBox, 1.5 * k, 1.5 * k, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5 * k); doc.setTextColor(...encre); doc.text(pdfTxt(titre), M + 3 * k, y + 5 * k);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5 * k); doc.setTextColor(30);
+      toutes.forEach((l, i) => doc.text(l, M + 3 * k, y + 8.6 * k + i * lh));
+      doc.setTextColor(0); y += hBox;
+    };
+    if (data.absents.length) {
+      zone('Absents de la semaine - dates de reprise prévisionnelles', [
+        ...data.absents.map((a) => `${a.nom}${a.poste ? ' (' + a.poste + ')' : ''}   -   ${a.reprise_inconnue ? 'absent(e) depuis le ' + longJour(a.du) : (a.du === a.au ? 'absent(e) le ' + longJour(a.du) : 'absent(e) du ' + longJour(a.du) + ' au ' + longJour(a.au))}   -   ${a.reprise ? 'reprise prévue le ' + longJour(a.reprise) : 'date de reprise non communiquée'}`),
+        "Dates de reprise données à titre prévisionnel : elles peuvent évoluer.",
+      ], [250, 236, 228], [150, 60, 30]);
+    }
+    if (data.sans_affectation.length) zone('Présents sans affectation cette semaine', [data.sans_affectation.map((x) => x.nom).join(', ')], [236, 244, 238], [40, 110, 70]);
+    if (data.sans_personnel.length) {
+      zone('Attention - travaux planifiés sans personne affectée', data.sans_personnel.map((t) => `${maj(longJour(t.jour))}   -   ${t.titre || t.of}${t.titre && t.of ? ' (' + t.of + ')' : ''}${t.machines.length ? '   -   ' + t.machines.join(' + ') : ''}`), [253, 232, 224], [180, 60, 30]);
+    }
+
+    // ---- Pied de page ----
+    const n = nbPages();
+    for (let i = 1; i <= n; i++) {
+      doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5 * k); doc.setTextColor(110);
+      doc.text(pdfTxt("Document à titre indicatif - planning susceptible d'évoluer.     Chef d'atelier : ____________________"), M, H - 6 * k);
+      doc.text(`Page ${i} / ${n}`, W - M, H - 6 * k, { align: 'right' });
+    }
+    doc.save(`planning-semaine-${d0}.pdf`);
+  }
+
+  function ouvrirModaleFeuilleSemaine() {
+    const lundiDe = (iso) => { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); };
+    const plus = (iso, n) => { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    afficherModale(`
+      <h3>Feuille de la semaine (à titre indicatif)</h3>
+      <div class="plan-note" style="margin-bottom:10px;">Un tableau personnel × jours : pour chaque personne, le titre des travaux (n° d'OF en plus petit) et les machines ou équipements, sur un ou plusieurs jours. Les absents de la semaine sont listés avec leur date de reprise prévisionnelle, sans motif.</div>
+      <div class="field"><label>Semaine (choisissez un jour de la semaine voulue)</label><input id="fs-date" type="date" value="${DAYS_ISO[0]}"><div id="fs-indice" style="font-size:12px;color:var(--ink-500);margin-top:4px;"></div></div>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="fs-go">Télécharger le PDF</button></div>
+    `);
+    const maj = () => { const v = document.getElementById('fs-date').value; document.getElementById('fs-indice').textContent = v ? `Semaine du ${dateFr(lundiDe(v))} au ${dateFr(plus(lundiDe(v), 4))}` : ''; };
+    document.getElementById('fs-date').addEventListener('input', maj); maj();
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.getElementById('fs-go').addEventListener('click', async () => {
+      const date = document.getElementById('fs-date').value; const msg = document.getElementById('m-msg');
+      if (!date) { msg.innerHTML = '<div class="msg error">Choisissez une semaine.</div>'; return; }
+      msg.innerHTML = '<div class="msg">Génération du PDF…</div>';
+      try { await genererFeuilleSemaine(date); toast('Feuille de la semaine téléchargée.'); fermerModale(); }
+      catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
   }
 
   function ouvrirModaleFeuilleJournaliere() {
