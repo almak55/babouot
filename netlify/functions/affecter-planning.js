@@ -292,6 +292,9 @@ const handlerProtege = async (event) => {
       .update({ statut: 'planifié', machine_id: machineId })
       .eq('id', gamme.id);
     if (updateError) throw updateError;
+    await require('./lib/journal').noter(supabase, gamme.of_id, 'affectation',
+      `Affectation manuelle de l'étape ${gamme.sequence} : ${morceaux.length} créneau(x), du ${morceaux.map((m) => m.date).sort()[0]} au ${morceaux.map((m) => m.date).sort().pop()}${personnelIds.length ? ', ' + personnelIds.length + ' personne(s)' : ''}.`,
+      { sequence: gamme.sequence, machine_id: machineId, personnel_ids: personnelIds, dates: Array.from(new Set(morceaux.map((m) => m.date))).sort() });
 
     // Une seule mise en route et un seul nettoyage par journée et par machine (opérations cochées dans les profils machine).
     try {

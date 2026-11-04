@@ -23,6 +23,7 @@ const { getSupabase } = require('./lib/supabaseclient');
 const { aujourdhuiParis } = require('./lib/debut-etape');
 const { majAvancementOf, recalerSiRetard } = require('./lib/recalage');
 const planifier = require('./planifier-of');
+const journal = require('./lib/journal');
 
 const nombre = (v) => { if (v === null || v === undefined || v === '') return null; const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : null; };
 
@@ -164,6 +165,15 @@ const handlerProtege = async (event) => {
       const { error: mErr } = await supabase.from('gammes_operatoires').update(maj).eq('id', g.id);
       if (mErr) throw mErr;
 
+      // Journal de traçabilité : chaque saisie (et chaque correction) est conservée, même si la ligne de production est modifiée ensuite.
+      const fmtH = (h) => (h === null || h === undefined ? null : `${String(h).replace('.', ',')} h`);
+      const morceauxJ = [s.supprimer ? 'saisie supprimée' : null, quantite !== null && !s.supprimer ? `${quantite} ex.` : null, pctSaisi !== null && !s.supprimer ? `avancement ${pctSaisi} %` : null,
+        hReg !== null ? `réglage ${fmtH(hReg)}` : null, hProd !== null ? `production ${fmtH(hProd)}` : null].filter(Boolean);
+      await journal.noter(supabase, g.of_id, 'saisie',
+        `${g.operations.nom} — ${date} : ${morceauxJ.join(', ') || 'saisie'}${s.commentaire ? ' — « ' + String(s.commentaire).slice(0, 160) + ' »' : ''}.`,
+        { gamme_id: g.id, sequence: null, operation: g.operations.nom, date, quantite, pct: pctSaisi, heures_reglage: hReg, heures_production: hProd, heures_reelles: nombre(s.heures_reelles), personnel_id: parPersonne ? (s.personnel_id || null) : null, termine: !!s.termine, supprime: !!s.supprimer, commentaire: s.commentaire || null, avancement_etape: pct });
+      if (termine && statutAvant !== 'terminé') await journal.noter(supabase, g.of_id, 'etape_terminee', `${g.operations.nom} terminée le ${date}.`, { gamme_id: g.id, operation: g.operations.nom, date });
+
       // Étape terminée : les créneaux encore prévus après ce jour n'ont plus lieu d'être.
       if (termine) {
         const { error: dErr } = await supabase.from('planning_jour').delete().eq('gamme_operatoire_id', g.id).gt('date', date).neq('statut', 'terminé');
@@ -182,6 +192,13 @@ const handlerProtege = async (event) => {
       if (recaler) {
         try { recalage = await recalerSiRetard(supabase, ofId, dateRecalage, gids, planifier.handler); }
         catch (e) { recalage = { retard: true, applique: false, raison: e.message }; }
+      }
+      if (recalage && recalage.retard) {
+        await journal.noter(supabase, ofId, 'recalage',
+          recalage.applique
+            ? `Retard constaté sur ${(recalage.retards || []).map((r) => r.operation).join(', ')} : planning recalé${recalage.nouvelle_fin ? ', nouvelle fin ' + String(recalage.nouvelle_fin).slice(0, 10) : ''}${recalage.delai_tenu === false ? ' — délai NON tenu' : (recalage.delai_tenu === true ? ' — délai tenu' : '')}.`
+            : `Retard constaté sur ${(recalage.retards || []).map((r) => r.operation).join(', ')} : recalage impossible (${recalage.raison || 'raison inconnue'}).`,
+          { retards: recalage.retards || [], applique: !!recalage.applique, ancienne_fin: recalage.ancienne_fin || null, nouvelle_fin: recalage.nouvelle_fin || null, delai: recalage.delai || null, delai_tenu: recalage.delai_tenu ?? null, retard_delai_min: recalage.retard_delai_min || 0, raison: recalage.raison || null });
       }
       const av = await majAvancementOf(supabase, ofId);
       recalages.push({ of_id: ofId, numero: of ? of.numero : '', avancement_of: av ? av.avancement_pct : null, recalage });

@@ -117,8 +117,10 @@ const handlerProtege = async (event) => {
       const { error } = await supabase.from('pleiade_annuel').update(maj).eq('id', b.id);
       if (error) throw error;
       if (ligne && ligne.of_id && maj.date_livraison) {
+        const { data: avantDelai } = await supabase.from('ordres_fabrication').select('delai').eq('id', ligne.of_id).maybeSingle();
         const { error: eOf } = await supabase.from('ordres_fabrication').update({ delai: maj.date_livraison }).eq('id', ligne.of_id);
         if (eOf) console.warn('planning-annuel : délai de l\'OF non mis à jour', eOf.message);
+        else if (!avantDelai || avantDelai.delai !== maj.date_livraison) await require('./lib/journal').noter(supabase, ligne.of_id, 'delai', `Délai de livraison ${avantDelai && avantDelai.delai ? 'modifié : ' + avantDelai.delai + ' → ' : 'fixé au '}${maj.date_livraison} (planning annuel Pléiade).`, { ancien: avantDelai ? avantDelai.delai : null, nouveau: maj.date_livraison, origine: 'planning annuel' });
       }
       return rep(200, { ok: true });
     }

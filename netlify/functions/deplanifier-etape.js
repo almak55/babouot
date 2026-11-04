@@ -63,6 +63,11 @@ const handlerProtege = async (event) => {
       const { error: majError } = await supabase
         .from('gammes_operatoires').update({ statut: 'à planifier' }).in('id', idsAFaire);
       if (majError) throw majError;
+      const J = require('./lib/journal');
+      for (const ofId of Array.from(new Set(aDeplanifier.map((g) => g.of_id).filter(Boolean)))) {
+        const siennes = aDeplanifier.filter((g) => g.of_id === ofId).map((g) => g.sequence).sort((a, b) => a - b);
+        await J.noter(supabase, ofId, 'deplanification', `Déplanification : étape(s) ${siennes.join(', ')} retirée(s) du planning (${lignesSupprimees} créneau(x) supprimé(s)).`, { sequences: siennes });
+      }
     }
 
     return {
