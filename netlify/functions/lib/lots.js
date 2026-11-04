@@ -9,25 +9,45 @@
 //   • les titres prêts sont regroupés sur une même journée, par ordre de priorité, sans dépasser ce que la machine peut faire
 //     en une journée (mise en route + réglages + roulage, nettoyage de fin de journée réservé).
 //
+// Règles complémentaires (migration 57), réglables par ligne de `regles_lot` :
+//   • titres_min          : nombre minimum de titres DIFFÉRENTS lancés ensemble le premier jour du lot (BDM : 2 — on ne démarre pas la
+//                           machine pour un seul titre, même s'il dépasse à lui seul le minimum d'exemplaires) ;
+//   • limite_demarrage    : heure au-delà de laquelle la machine n'est plus démarrée (BDM : 12:30) ; le travail est reporté au
+//                           lendemain à l'ouverture. Une machine déjà démarrée le matin continue normalement l'après-midi.
+//
 // Les règles viennent de la table `regles_lot` (migration 54) ; sans cette table, les règles ci-dessous s'appliquent.
 // Les saisies manuelles (« Affecter un OF ») ne sont jamais bloquées par cette règle.
 
 const PL = require('./planification');
 
 const REGLES_DEFAUT = [
-  { operation_code: 'MONTAGE_COUVERTURE_PLEAIDE', type_production: 'pleiade', quantite_min: 3500 },
-  { operation_code: 'MONTAGE_COUVERTURE_PLEIADE', type_production: 'pleiade', quantite_min: 3500 },
-  { operation_code: 'PRESSURE_COLLE', type_production: 'pleiade', quantite_min: 3500 },
+  { operation_code: 'MONTAGE_COUVERTURE_PLEAIDE', type_production: 'pleiade', quantite_min: 3500, titres_min: 2, limite_demarrage: '12:30' },
+  { operation_code: 'MONTAGE_COUVERTURE_PLEIADE', type_production: 'pleiade', quantite_min: 3500, titres_min: 2, limite_demarrage: '12:30' },
+  { operation_code: 'PRESSURE_COLLE', type_production: 'pleiade', quantite_min: 3500, titres_min: 1, limite_demarrage: null },
 ];
+
+// 'HH:MM' -> minutes depuis minuit (null si absent ou invalide).
+function minutesDuJour(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm || ''));
+  if (!m) return null;
+  const v = Number(m[1]) * 60 + Number(m[2]);
+  return v >= 0 && v <= 24 * 60 ? v : null;
+}
 
 // Table facultative : absente -> règles par défaut ; présente -> uniquement les lignes actives (table vide = règle désactivée).
 async function chargerRegles(supabase) {
   try {
-    const { data, error } = await supabase.from('regles_lot').select('operation_code, type_production, quantite_min, actif');
+    const { data, error } = await supabase.from('regles_lot').select('*');   // « * » : fonctionne aussi avant la migration 57 (colonnes titres_min / limite_demarrage absentes)
     if (error || !Array.isArray(data)) return REGLES_DEFAUT.slice();
     return data
-      .filter((r) => r.actif !== false && r.operation_code && Number(r.quantite_min) > 0)
-      .map((r) => ({ operation_code: String(r.operation_code), type_production: r.type_production || null, quantite_min: Number(r.quantite_min) }));
+      .map((r) => ({
+        actif: r.actif, operation_code: r.operation_code ? String(r.operation_code) : '', type_production: r.type_production || null,
+        quantite_min: Math.max(0, Number(r.quantite_min) || 0),
+        titres_min: Math.max(1, parseInt(r.titres_min, 10) || 1),
+        limite_demarrage: minutesDuJour(r.limite_demarrage) !== null ? String(r.limite_demarrage).slice(0, 5) : null,
+      }))
+      .filter((r) => r.actif !== false && r.operation_code && (r.quantite_min > 0 || r.titres_min > 1 || r.limite_demarrage))
+      .map(({ actif, ...r }) => r);
   } catch (e) {
     return REGLES_DEFAUT.slice();
   }
@@ -35,7 +55,8 @@ async function chargerRegles(supabase) {
 
 // Règle applicable à une opération d'un OF (null = aucune).
 function regleDe(regles, operationCode, typeProduction) {
-  return (regles || []).find((r) => r.operation_code === operationCode && (!r.type_production || r.type_production === typeProduction)) || null;
+  const candidates = (regles || []).filter((r) => r.operation_code === operationCode && (!r.type_production || r.type_production === typeProduction));
+  return candidates.find((r) => r.type_production) || candidates[0] || null;   // la règle propre au type de production l'emporte sur la règle générale
 }
 
 // Fenêtres de travail d'un jour : ouverture et minutes de travail disponibles (nettoyage de fin de journée réservé).
@@ -68,6 +89,7 @@ function derouler(suite, depart, cal) {
     const J = jourMachine(D, cal);
     if (!J) continue;
     let utilise = Math.max(...suite.slice(k).map((i) => i.mer_min || 0).concat(0)); let qte = 0;
+    const titresDuJour = new Set();   // titres réellement fabriqués ce jour-là
     while (k < suite.length) {
       const it = suite[k];
       if (reste === null) {
@@ -79,10 +101,11 @@ function derouler(suite, depart, cal) {
       if (dispo <= 0) break;
       const pris = Math.min(dispo, reste);
       qte += it.roulage_min > 0 ? it.qte * pris / it.roulage_min : it.qte;
+      if (pris > 0) titresDuJour.add(k);
       utilise += pris; reste -= pris;
       if (reste <= 1e-9) { k++; reste = null; }
     }
-    if (qte > 0) jours.push({ jour: D, qte: Math.round(qte) });
+    if (qte > 0) jours.push({ jour: D, qte: Math.round(qte), nb_titres: titresDuJour.size });
   }
   return jours;
 }
@@ -97,7 +120,8 @@ function derouler(suite, depart, cal) {
 // suite ne convient, personne ne démarre : les titres attendent qu'un autre titre devienne prêt.
 // Un titre rejoint la journée T s'il est prêt assez tôt pour être traité ce jour-là (la machine l'attend, ce temps compte dans la journée).
 // Renvoie { lots: [{ jour, depart, membres: [item…], jours: [{ jour, qte }], total }], attente: [item…] }.
-function formerLots({ items, joursPris, apartir, min, cal }) {
+function formerLots({ items, joursPris, apartir, min, cal, titresMin }) {
+  const tMin = Math.max(1, Number(titresMin) || 1);   // ne jamais démarrer la machine pour moins de titres que cela (1er jour du lot)
   const pris = new Set(joursPris || []);
   let restants = items.slice().sort((a, b) => (a.rang - b.rang) || (a.pret - b.pret) || String(a.cle).localeCompare(String(b.cle)));
   const lots = [];
@@ -108,10 +132,10 @@ function formerLots({ items, joursPris, apartir, min, cal }) {
     if (!J || pris.has(T) || J.ouverture < (apartir || 0)) { T += PL.MIN_JOUR; continue; }
     const prets = restants.filter((i) => decalage(T, i.pret, cal) + 1 < J.capacite_min);
     let choix = null;
-    for (let n = prets.length; n >= 1; n--) {
+    for (let n = prets.length; n >= tMin; n--) {
       const suite = prets.slice(0, n);
       const jours = derouler(suite, T, cal);
-      if (jours.length && jours.every((x) => x.qte >= min) && jours.every((x) => !pris.has(x.jour))) { choix = { suite, jours }; break; }
+      if (jours.length && jours[0].nb_titres >= tMin && jours.every((x) => x.qte >= min) && jours.every((x) => !pris.has(x.jour))) { choix = { suite, jours }; break; }
     }
     if (choix) {
       lots.push({ jour: T, depart: J.ouverture, membres: choix.suite, jours: choix.jours, total: choix.jours.reduce((t, x) => t + x.qte, 0) });
@@ -129,4 +153,4 @@ function formerLots({ items, joursPris, apartir, min, cal }) {
   return { lots, attente: restants };
 }
 
-module.exports = { REGLES_DEFAUT, chargerRegles, regleDe, jourMachine, decalage, derouler, formerLots };
+module.exports = { REGLES_DEFAUT, minutesDuJour, chargerRegles, regleDe, jourMachine, decalage, derouler, formerLots };

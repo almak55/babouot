@@ -82,6 +82,7 @@ async function majAvancementOf(supabase, ofId) {
   else if (av.global > 0 && of && ['planifié', 'validé', 'en attente de validation'].includes(of.statut)) maj.statut = 'en cours';
   const { error } = await supabase.from('ordres_fabrication').update(maj).eq('id', ofId);
   if (error) throw error;
+  if (maj.statut === 'terminé' && !(of && of.statut === 'terminé')) await require('./journal').noter(supabase, ofId, 'termine', 'OF terminé : toutes les étapes de la gamme sont terminées.', { avancement_pct: 100 });
   return { ...maj };
 }
 
