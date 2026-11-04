@@ -261,6 +261,12 @@ const handlerProtege = async (event) => {
       const rest = restDe(e);
       if (rest !== undefined && Number(rest) < 1) {
         const r = Math.max(0, Number(rest));
+        // Étape pratiquement terminée (il reste moins d'une minute et demie de travail, arrondi à 1 minute) : rien à planifier. Sans cette règle, le moteur posait un « roulage »
+        // d'une minute (durée minimale) suivi d'une mise en route et d'un nettoyage complets pour un travail déjà fait.
+        const travailRestant = phases
+          .filter((p) => !(p.type_calcul === 'fixe' && /mise en route|r[ée]glage|\bMER\b/i.test(p.nom)) && !/nettoy/i.test(p.nom))
+          .reduce((t, p) => t + p.duree_min * r, 0);
+        if (travailRestant < 1.5) return { index, fixe: true, fin_min: maintenantMin, predecesseurs: indicesDe(e), deja_faite: true };
         const reste = phases
           .filter((p) => !(p.type_calcul === 'fixe' && /mise en route|r[ée]glage|\bMER\b/i.test(p.nom)))
           .map((p) => (p.type_calcul === 'fixe' && /nettoy/i.test(p.nom)) ? p : { ...p, duree_min: Math.max(1, Math.round(p.duree_min * r)) });
@@ -474,6 +480,7 @@ const handlerProtege = async (event) => {
         complet: plan.complet,
       },
       alternative_heures_sup: null,
+      etapes_deja_faites: etapesMoteur.map((em, i) => (em.deja_faite ? { gamme_id: etapesCalc[i].gamme_id, sequence: etapesCalc[i].sequence, operation: etapesCalc[i].operation, avancement_pct: avancementDe[etapesCalc[i].gamme_id] || 0 } : null)).filter(Boolean),
       attente_lot: attenteLot,
       bloquants,
       pert,
@@ -567,6 +574,16 @@ const handlerProtege = async (event) => {
       const { error } = await supabase.from('gammes_operatoires')
         .update({ statut: e.statut === 'en cours' ? 'en cours' : 'planifié', machine_id: e.machine ? e.machine.id : null }).eq('id', e.gamme_id);
       if (error) throw error;
+    }
+
+    // Étapes déjà faites (rien à planifier) : plus aucun créneau à venir ; elles passent « en cours » (déjà entamées, à déclarer terminées dans
+    // l'avancement) au lieu de rester « à planifier » ou « planifié » sans créneau.
+    for (const x of reponse.etapes_deja_faites) {
+      const e = etapesCalc.find((c) => c.gamme_id === x.gamme_id);
+      if (e && ['à planifier', 'planifié'].includes(e.statut)) {
+        const { error } = await supabase.from('gammes_operatoires').update({ statut: 'en cours' }).eq('id', x.gamme_id);
+        if (error) throw error;
+      }
     }
 
     // Étapes en attente de lot : plus aucun créneau, statut « à planifier » (même si elles étaient planifiées ou entamées).
