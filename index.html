@@ -2318,6 +2318,7 @@
         <button data-action="affecter">4. Affecter au planning</button>
         <button data-action="valider">5. Valider l'OF</button>
         <button data-action="avancement">6. Avancement / production</button>
+        <button data-action="rapport">7. Rapport de production (traçabilité)</button>
         <button data-action="message">Envoyer un message</button>
         <button data-action="deplanifier">Déplanifier l'OF</button>
         <button data-action="supprimer" class="danger">Supprimer l'OF</button>
@@ -2351,6 +2352,10 @@
     menu.querySelector('[data-action="avancement"]').addEventListener('click', () => {
       menu.remove();
       ouvrirModaleAvancementOf(ofUuid, ofNumero);
+    });
+    menu.querySelector('[data-action="rapport"]').addEventListener('click', () => {
+      menu.remove();
+      ouvrirModaleRapportOf(ofUuid, ofNumero, ofStatut);
     });
     menu.querySelector('[data-action="deplanifier"]').addEventListener('click', () => {
       menu.remove();
@@ -3616,10 +3621,14 @@
     const d0 = data.semaine.debut, d1 = data.semaine.fin;
     const libSemaine = `Semaine du ${Number(d0.slice(8, 10))}${d0.slice(5, 7) !== d1.slice(5, 7) ? ' ' + MOIS_FR[Number(d0.slice(5, 7)) - 1] : ''} au ${jm(d1)} ${d1.slice(0, 4)}`;
 
-    const grand = data.personnes.length > 8;
-    const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: grand ? 'a3' : 'a4' });
-    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), k = W / 297;
-    const M = 8 * k, nomW = 34 * k, dayW = (W - 2 * M - nomW) / jours.length, maxY = H - 14 * k;
+    // Affichage collectif : TOUJOURS une seule page A3 paysage. Si le contenu déborde, on réduit l'échelle (polices et blocs)
+    // et on recommence jusqu'à ce que tout tienne.
+    const kp = 420 / 297;                    // échelle A3 (référence : A4 = 1)
+    let k = kp, doc = null, y = 0;
+    for (let essai = 0; essai < 30; essai++) {
+    doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
+    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+    const M = 8 * kp, nomW = 34 * kp, dayW = (W - 2 * M - nomW) / jours.length, maxY = H - 14 * kp;
     const LH = (pt) => pt * 0.3528 * 1.2;                  // hauteur d'une ligne (mm) pour une taille en points
     const F = { titre: 9.5 * k, of: 6.8 * k, mach: 7.6 * k, nom: 10 * k, poste: 7 * k };
     const PALETTE = [[200, 230, 225], [250, 220, 190], [210, 220, 245], [245, 210, 225], [225, 240, 190], [235, 215, 250], [255, 240, 170], [200, 235, 245], [250, 205, 200], [215, 235, 215], [240, 225, 205], [220, 220, 235]];
@@ -3652,7 +3661,6 @@
       return segs;
     };
 
-    const nbPages = () => doc.internal.getNumberOfPages();
     const enteteTable = (yTop) => {
       doc.setFillColor(30, 90, 100); doc.rect(M, yTop, W - 2 * M, 7 * k, 'F');
       doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5 * k);
@@ -3673,13 +3681,7 @@
     doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5 * k); doc.setTextColor(100);
     doc.text(pdfTxt(`Ateliers Babouot  -  ${data.personnes.length} personne(s) affectée(s)  -  édité le ${new Date().toLocaleString('fr-FR')}`), M, 28 * k);
     doc.setTextColor(0);
-    let y = enteteTable(31 * k);
-    const nouvellePage = (avecTableau = true) => {
-      doc.addPage();
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(11 * k); doc.setTextColor(60); doc.text(pdfTxt(`Planning de la semaine (suite) - ${libSemaine}`), M, 9 * k); doc.setTextColor(0);
-      y = avecTableau ? enteteTable(12 * k) : 12 * k;
-    };
-
+    y = enteteTable(31 * k);
     if (!data.personnes.length) {
       doc.setFont('helvetica', 'italic'); doc.setFontSize(11 * k); doc.text('Aucun créneau planifié cette semaine-là.', M, y + 8 * k); y += 14 * k;
     }
@@ -3691,7 +3693,6 @@
       const lignesPoste = p.poste ? doc.splitTextToSize(pdfTxt(p.poste), nomW - 3 * k).slice(0, 3) : [];
       const yPoste = 5 * k + (lignesNom.length - 1) * F.nom * 0.3528 * 1.15 + 4.4 * k;
       const rowH = Math.max(15 * k, yPoste + (lignesPoste.length ? (lignesPoste.length - 1) * F.poste * 0.3528 * 1.15 + 2.5 * k : 0), ...segs.map((s) => s.h));
-      if (y + rowH > maxY) nouvellePage();
       if (idx % 2 === 0) { doc.setFillColor(247, 248, 249); doc.rect(M, y, W - 2 * M, rowH, 'F'); }
       doc.setDrawColor(205); doc.setLineWidth(0.15 * k);
       for (let c = 0; c <= jours.length; c++) { const x = M + nomW + c * dayW; doc.line(x, y, x, y + rowH); }
@@ -3728,7 +3729,6 @@
       doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5 * k);
       const toutes = lignes.flatMap((l) => doc.splitTextToSize(pdfTxt(l), W - 2 * M - 6 * k));
       const lh = LH(8.5 * k), hBox = 8 * k + toutes.length * lh;
-      if (y + 4 * k + hBox > maxY) { nouvellePage(false); y -= 4 * k; }
       y += 4 * k;
       doc.setFillColor(...fond); doc.roundedRect(M, y, W - 2 * M, hBox, 1.5 * k, 1.5 * k, 'F');
       doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5 * k); doc.setTextColor(...encre); doc.text(pdfTxt(titre), M + 3 * k, y + 5 * k);
@@ -3748,13 +3748,242 @@
     }
 
     // ---- Pied de page ----
-    const n = nbPages();
-    for (let i = 1; i <= n; i++) {
-      doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5 * k); doc.setTextColor(110);
-      doc.text(pdfTxt("Document à titre indicatif - planning susceptible d'évoluer.     Chef d'atelier : ____________________"), M, H - 6 * k);
-      doc.text(`Page ${i} / ${n}`, W - M, H - 6 * k, { align: 'right' });
+    doc.setPage(1); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5 * kp); doc.setTextColor(110);
+    doc.text(pdfTxt("Document à titre indicatif - planning susceptible d'évoluer.     Chef d'atelier : ____________________"), M, H - 6 * kp);
+    if (y <= maxY) break;                  // tout tient sur la page
+    k *= 0.96;                             // sinon : on réduit et on recommence
     }
+    if (doc.internal.getNumberOfPages() > 1) throw new Error('Mise en page de la feuille de la semaine : plusieurs pages inattendues.');
     doc.save(`planning-semaine-${d0}.pdf`);
+  }
+
+  // ───────────── Rapport de production d'un OF (traçabilité + retour d'expérience + plan d'amélioration) ─────────────
+  async function genererRapportOf(ofUuid) {
+    const res = await fetch(`${API}/rapport-of?of_id=${encodeURIComponent(ofUuid)}`);
+    const R = await lireJson(res);
+    if (!res.ok) throw new Error(R.error || R.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
+    await chargerLibsPdf();
+    const doc = new window.jspdf.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+    const ML = 12, MR = 12, LARG = W - ML - MR;
+    const T = (v) => pdfTxt(String(v == null ? '' : v).replace(/→/g, '->').replace(/≤/g, '<=').replace(/≥/g, '>=').replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '$3/$2/$1')).replace(/[—–]/g, '-').replace(/≈/g, '~').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[  ]/g, ' ');
+    const hFr = (h) => { if (h === null || h === undefined || !Number.isFinite(Number(h))) return '-'; const m = Math.round(Math.abs(Number(h)) * 60); return (Number(h) < 0 ? '-' : '') + Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0'); };
+    const sgn = (v, u) => (v === null || v === undefined || !Number.isFinite(Number(v))) ? '-' : (Number(v) > 0 ? '+' : '') + String(Math.round(Number(v) * 10) / 10).replace('.', ',') + (u || '');
+    const dc = (iso) => iso ? dateCourte(String(iso).slice(0, 10)) : '-';
+    const nb = (v) => (v === null || v === undefined) ? '-' : Number(v).toLocaleString('fr-FR').replace(/[  ]/g, ' ');
+    const euro = (v) => (v === null || v === undefined) ? '-' : Math.round(Number(v)).toLocaleString('fr-FR').replace(/[  ]/g, ' ') + ' EUR';
+    const VERDICT = { conforme: 'Conforme', depassement: 'Dépassement', avance: 'En avance', en_cours: 'En cours', non_saisi: 'Non saisi' };
+    const COUL = { rouge: [185, 28, 28], vert: [21, 128, 61], orange: [194, 100, 10], gris: [100, 110, 125], encre: [30, 41, 59] };
+    const ENTETE = { fillColor: [51, 65, 85], textColor: 255, fontSize: 8, fontStyle: 'bold' };
+    const BASE = { fontSize: 8, cellPadding: 1.6, lineColor: [215, 220, 228], lineWidth: 0.1, valign: 'top', textColor: 30 };
+    const M = { top: 16, bottom: 14, left: ML, right: MR };
+    let y = 18;
+
+    const place = (h) => { if (y + h > H - 16) { doc.addPage(); y = 18; } };
+    const section = (num, titre) => {
+      y += 3; place(16); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...COUL.encre);
+      doc.text(T(`${num}. ${titre}`), ML, y); doc.setDrawColor(51, 65, 85); doc.setLineWidth(0.4); doc.line(ML, y + 1.5, W - MR, y + 1.5);
+      y += 5; doc.setFont('helvetica', 'normal'); doc.setTextColor(0);
+    };
+    const paragraphe = (txt, o = {}) => {
+      doc.setFont('helvetica', o.gras ? 'bold' : 'normal'); doc.setFontSize(o.taille || 9); doc.setTextColor(...(o.couleur || [30, 41, 59]));
+      const l = doc.splitTextToSize(T(txt), LARG - (o.retrait || 0));
+      place(l.length * (o.taille || 9) * 0.42 + 2); doc.text(l, ML + (o.retrait || 0), y + 3);
+      y += l.length * (o.taille || 9) * 0.42 + 2.5; doc.setTextColor(0); doc.setFont('helvetica', 'normal');
+    };
+    const tableau = (tete, corps, o = {}) => {
+      if (!corps.length) return;
+      doc.autoTable({ startY: y, margin: M, theme: 'grid', head: [tete.map(T)], body: corps.map(r => r.map(c => (c && typeof c === 'object' && 'content' in c) ? { ...c, content: T(c.content) } : T(c))),
+        styles: BASE, headStyles: ENTETE, alternateRowStyles: { fillColor: [247, 248, 250] }, columnStyles: o.cols || {}, rowPageBreak: 'avoid', ...(o.extra || {}) });
+      y = doc.lastAutoTable.finalY + 4;
+    };
+    const vide = (txt) => paragraphe(txt, { couleur: COUL.gris });
+
+    const I = R.identite, D = R.delai, K = R.kpi, C = R.cycle;
+
+    // ── En-tête ──
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(...COUL.encre);
+    doc.text('Rapport de production', ML, y);
+    doc.setFontSize(10); doc.setTextColor(...(R.provisoire ? COUL.orange : COUL.vert));
+    doc.text(R.provisoire ? 'RAPPORT PROVISOIRE (OF non terminé)' : 'RAPPORT DEFINITIF (OF terminé)', W - MR, y, { align: 'right' });
+    y += 6; doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(...COUL.gris);
+    doc.text(T(`Ateliers Babouot - traçabilité, retour d'expérience et plan d'amélioration - édité le ${dc(R.genere_le)}`), ML, y);
+    y += 5; doc.setTextColor(0);
+
+    // ── 1. Identité & verdict délai ──
+    section(1, 'Identification et respect du délai');
+    doc.autoTable({ startY: y, margin: M, theme: 'grid', styles: BASE, body: [
+      [{ content: 'Titre', styles: { fontStyle: 'bold', fillColor: [241, 244, 248] } }, T(I.titre || '-'), { content: 'N° d\'OF', styles: { fontStyle: 'bold', fillColor: [241, 244, 248] } }, T(I.numero)],
+      [{ content: 'Client', styles: { fontStyle: 'bold', fillColor: [241, 244, 248] } }, T(I.client || '-'), { content: 'Quantité commandée', styles: { fontStyle: 'bold', fillColor: [241, 244, 248] } }, nb(I.quantite) + ' ex.'],
+      [{ content: 'Type de production', styles: { fontStyle: 'bold', fillColor: [241, 244, 248] } }, T(I.type_production || '-'), { content: 'Priorité', styles: { fontStyle: 'bold', fillColor: [241, 244, 248] } }, T(I.priorite || '-')],
+      [{ content: 'Créé le', styles: { fontStyle: 'bold', fillColor: [241, 244, 248] } }, dc(I.cree_le), { content: 'Matières reçues le', styles: { fontStyle: 'bold', fillColor: [241, 244, 248] } }, I.date_reception ? dc(I.date_reception) : 'non renseigné'],
+    ], columnStyles: { 0: { cellWidth: 34 }, 1: { cellWidth: 62 }, 2: { cellWidth: 38 } } });
+    y = doc.lastAutoTable.finalY + 3;
+    const okDelai = D.respecte === true, nonDelai = D.respecte === false;
+    const coul = okDelai ? COUL.vert : nonDelai ? COUL.rouge : COUL.orange;
+    doc.setFillColor(...coul.map(c => 255 - (255 - c) * 0.12)); doc.setDrawColor(...coul); doc.setLineWidth(0.5);
+    const lignesDelai = doc.splitTextToSize(T(`Délai demandé : ${dc(D.delai)}   |   Fin réelle : ${D.fin_reelle ? dc(D.fin_reelle) : 'en cours'}   |   Fin prévue au lancement : ${D.fin_prevue_initiale ? dc(D.fin_prevue_initiale) : 'non journalisée'}`), LARG - 6);
+    const hBloc = 11 + lignesDelai.length * 4.2; place(hBloc);
+    doc.roundedRect(ML, y, LARG, hBloc, 1.5, 1.5, 'FD');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...coul); doc.text(T(D.texte), ML + 3, y + 6);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(30, 41, 59); doc.text(lignesDelai, ML + 3, y + 11);
+    y += hBloc + 3; doc.setTextColor(0);
+    if (D.ecart_plan_initial_ouvres !== null && D.ecart_plan_initial_ouvres !== undefined) paragraphe(`Écart de la fin réelle par rapport à la fin prévue au lancement : ${sgn(D.ecart_plan_initial_ouvres)} jour(s) ouvré(s).`, { taille: 8.5 });
+    if (D.changements && D.changements.length) paragraphe('Le délai de livraison a été modifié ' + D.changements.length + ' fois : ' + D.changements.map(c => `le ${dc(c.date)} de ${dc(c.ancien)} à ${dc(c.nouveau)}${c.origine ? ' (' + c.origine + ')' : ''}`).join(' ; ') + '.', { taille: 8.5 });
+
+    // ── 2. Synthèse chiffrée ──
+    section(2, 'Synthèse chiffrée');
+    const kv = (a, b) => [{ content: a, styles: { fontStyle: 'bold', fillColor: [241, 244, 248] } }, b];
+    doc.autoTable({ startY: y, margin: M, theme: 'grid', styles: BASE, columnStyles: { 0: { cellWidth: 50 }, 1: { cellWidth: 40 }, 2: { cellWidth: 50 } }, body: [
+      [...kv('Cycle (1er -> dernier jour)', C && C.debut ? `${dc(C.debut)} -> ${dc(C.fin)}` : '-'), ...kv('Durée du cycle', C && C.debut ? `${C.jours_ouvres} j ouvrés (${C.jours_calendaires} j calendaires)` : '-')],
+      [...kv('Jours de production effectifs', C && C.debut ? String(C.jours_production) : '-'), ...kv('Délai entre réception et lancement', C && C.avant_lancement_jours !== null && C.avant_lancement_jours !== undefined ? `${C.avant_lancement_jours} j calendaires (création -> 1er jour)` : '-')],
+      [...kv('Heures standard (personnes)', hFr(K.heures_standard)), ...kv('Heures réelles saisies', hFr(K.heures_reelles))],
+      [...kv('Écart global (étapes saisies)', K.ecart_global_pct === null || K.ecart_global_pct === undefined ? '-' : sgn(K.ecart_global_pct, ' %')), ...kv('Complétude de la saisie', K.completude_saisie_pct === null || K.completude_saisie_pct === undefined ? '-' : K.completude_saisie_pct + ' % des étapes')],
+      [...kv('Coût main-d\'œuvre standard', K.cout_standard !== null && K.cout_standard !== undefined ? euro(K.cout_standard) : '-'), ...kv('Coût main-d\'œuvre réel', K.cout_reel !== null && K.cout_reel !== undefined ? euro(K.cout_reel) + (K.taux_horaire ? ` (à ${K.taux_horaire} EUR/h)` : '') : '-')],
+      [...kv('Quantité produite (dernière étape)', K.quantite_produite_derniere_etape !== null && K.quantite_produite_derniere_etape !== undefined ? nb(K.quantite_produite_derniere_etape) + ' / ' + nb(K.quantite_commandee) : '-'), ...kv('Étapes terminées', `${K.nb_etapes_terminees} / ${K.nb_etapes}`)],
+      [...kv('Replanifications / recalages', `${K.nb_replanifications} / ${K.nb_recalages}`), ...kv('Interventions machine / jours d\'absence', `${K.nb_interventions} / ${K.nb_absences_jours}`)],
+    ] });
+    y = doc.lastAutoTable.finalY + 2;
+    paragraphe('Les écarts d\'heures sont calculés en heures·personne sur les seules étapes dont les heures ont été saisies ; les temps standards comparés sont les temps standards actuels de la gamme.', { taille: 7.5, couleur: COUL.gris });
+
+    // ── 3. Prévu / réel par étape ──
+    section(3, 'Prévu et réel par étape');
+    tableau(['Étape', 'Machine', 'Std', 'Réel', 'Écart', 'Cadence std / réelle', 'Début réel', 'Fin prévue (lancement)', 'Fin réelle', 'Verdict'],
+      R.etapes.map(e => {
+        const col = e.verdict === 'depassement' ? COUL.rouge : e.verdict === 'avance' ? COUL.vert : e.verdict === 'conforme' ? COUL.vert : COUL.gris;
+        return [`${e.sequence}. ${e.operation}`, (e.machines && e.machines.length ? e.machines.join(', ') : e.machine_prevue || '-'), hFr(e.std.total_h), hFr(e.reel.total_h),
+          e.ecart_h === null || e.ecart_h === undefined ? '-' : `${sgn(e.ecart_h, ' h')}\n${sgn(e.ecart_pct, ' %')}`,
+          e.cadence_std ? `${nb(e.cadence_std)} / ${e.cadence_reelle ? nb(e.cadence_reelle) : '-'} par h` : '-', dc(e.debut_reel), e.fin_prevue_initiale ? dc(e.fin_prevue_initiale) + (e.ecart_fin_jours ? `\n(${sgn(e.ecart_fin_jours)} j ouvrés)` : '') : '-', dc(e.fin_reelle),
+          { content: VERDICT[e.verdict] || e.verdict, styles: { textColor: col, fontStyle: 'bold' } }];
+      }), { cols: { 0: { cellWidth: 24 }, 1: { cellWidth: 16 }, 2: { cellWidth: 14 }, 3: { cellWidth: 14 }, 4: { cellWidth: 14 }, 5: { cellWidth: 20 }, 6: { cellWidth: 18 }, 7: { cellWidth: 20 }, 8: { cellWidth: 18 }, 9: { cellWidth: 22 } }, extra: { styles: { ...BASE, fontSize: 7.5 } } });
+
+    // ── 4. Détail par étape ──
+    section(4, 'Détail de chaque étape');
+    R.etapes.forEach(e => {
+      place(26);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...COUL.encre); doc.text(T(`${e.sequence}. ${e.operation}`) + (e.machines && e.machines.length ? T('  -  ' + e.machines.join(', ')) : ''), ML, y + 3); y += 4.5;
+      doc.setTextColor(0);
+      const reg = (a) => a === null || a === undefined ? 'non saisi' : hFr(a);
+      const lignes = [
+        ['Heures standard / réelles', `Standard ${hFr(e.std.total_h)} (réglage ${reg(e.std.reglage_h)}, production ${reg(e.std.production_h)}) - Réel ${e.reel.total_h === null || e.reel.total_h === undefined ? 'non saisi' : hFr(e.reel.total_h)} (réglage ${reg(e.reel.reglage_h)}, production ${reg(e.reel.production_h)}) sur ${e.reel.jours_saisis || 0} jour(s) saisi(s)`],
+        ['Quantité', `${e.quantite_realisee > 0 ? nb(e.quantite_realisee) : 'non saisie'} réalisée(s) sur ${nb(e.quantite_etape)}${e.unite_quantite ? ' ' + e.unite_quantite : ''} - avancement ${e.avancement_pct === null || e.avancement_pct === undefined ? '-' : e.avancement_pct + ' %'}`],
+        ['Personnes', e.heures_par_personne && Object.keys(e.heures_par_personne).length ? Object.entries(e.heures_par_personne).map(([n, h]) => `${n} (${hFr(h)})`).join(', ') : (e.personnes && e.personnes.length ? e.personnes.join(', ') + ' (heures individuelles non saisies)' : 'non renseigné')],
+        ['Créneaux', `${e.nb_creneaux} créneau(x) planifié(s), ${hFr((e.minutes_planifiees || 0) / 60)} de temps machine prévu`],
+      ];
+      if (e.attente_jours !== null && e.attente_jours !== undefined) lignes.push(['Attente avant l\'étape', `${e.attente_jours} jour(s) ouvré(s) entre la fin de l'étape précédente et le début réel`]);
+      if (e.commentaires && e.commentaires.length) lignes.push(['Commentaires saisis', e.commentaires.map(c => `${dc(c.date)} : ${c.texte}`).join('\n')]);
+      doc.autoTable({ startY: y, margin: { ...M, left: ML + 3 }, theme: 'plain', styles: { ...BASE, fontSize: 8, cellPadding: 1, lineWidth: 0 }, columnStyles: { 0: { cellWidth: 38, fontStyle: 'bold', textColor: COUL.gris }, 1: { cellWidth: LARG - 41 } },
+        body: lignes.map(r => [T(r[0]), T(r[1])]), rowPageBreak: 'avoid' });
+      y = doc.lastAutoTable.finalY + 3;
+    });
+
+    // ── 5. Chronologie complète ──
+    section(5, 'Chronologie complète');
+    if (!R.changements.journal_disponible) paragraphe('Le journal de l\'OF n\'existait pas pendant cette production : seules les dates planifiées et saisies sont reconstituées.', { couleur: COUL.orange, taille: 8.5 });
+    if (R.chronologie.length) tableau(['Date', 'Heure', 'Catégorie', 'Événement'], R.chronologie.map(c => [dc(c.date), c.heure || '', c.categorie, c.titre + (c.detail ? '\n' + c.detail : '')]), { cols: { 0: { cellWidth: 20 }, 1: { cellWidth: 12 }, 2: { cellWidth: 26 } } });
+    else vide('Aucun événement enregistré.');
+
+    // ── 6. Changements ──
+    section(6, 'Changements intervenus pendant la production');
+    const CH = R.changements;
+    paragraphe(`Replanifications : ${CH.replanifications.length}  |  Recalages après retard : ${CH.recalages.length}  |  Changements de délai : ${CH.delais.length}  |  Saisies de production : ${CH.saisies.length}  |  Déplanifications : ${CH.deplanifications.length}  |  Affectations : ${CH.affectations.length}`, { gras: true, taille: 8.5 });
+    if (CH.replanifications.length) tableau(['Date', 'Origine', 'Nouvelle fin', 'Délai'], CH.replanifications.map(r => [`${dc(r.date)} ${r.heure || ''}`, r.origine || '-', r.fin ? dc(r.fin) : '-', r.delai_tenu === true ? 'tenu' : r.delai_tenu === false ? 'NON tenu' : '-']), { cols: { 0: { cellWidth: 30 }, 2: { cellWidth: 26 }, 3: { cellWidth: 22 } } });
+    if (CH.recalages.length) tableau(['Date', 'Retard constaté sur', 'Ancienne fin -> nouvelle fin', 'Appliqué'], CH.recalages.map(r => [`${dc(r.date)} ${r.heure || ''}`, (r.operations || []).join(', ') || '-', `${r.ancienne_fin ? dc(r.ancienne_fin) : '-'} -> ${r.nouvelle_fin ? dc(r.nouvelle_fin) : '-'}`, r.applique ? 'oui' : 'non']), { cols: { 0: { cellWidth: 30 }, 2: { cellWidth: 48 }, 3: { cellWidth: 18 } } });
+    if (CH.deplanifications.length || CH.affectations.length) tableau(['Date', 'Changement'], [...CH.deplanifications, ...CH.affectations].sort((a, b) => String(a.date).localeCompare(String(b.date))).map(c => [`${dc(c.date)} ${c.heure || ''}`, c.resume || c.texte || '']), { cols: { 0: { cellWidth: 30 } } });
+    if (CH.saisies.some(s => s.supprime)) paragraphe('Certaines saisies ont été corrigées ou supprimées : ' + CH.saisies.filter(s => s.supprime).map(s => `${dc(s.jour)} ${s.operation}`).join(', ') + '.', { taille: 8.5 });
+    if (!CH.replanifications.length && !CH.recalages.length && !CH.delais.length && !CH.deplanifications.length && !CH.affectations.length) vide(CH.journal_disponible ? 'Aucun changement de planning enregistré : le plan initial a été suivi.' : 'Changements non reconstituables (journal absent).');
+    if (CH.observations.length) { paragraphe('Observations saisies :', { gras: true, taille: 8.5 }); CH.observations.forEach(o => paragraphe(`${o.date ? dc(o.date) + ' - ' : ''}${o.texte}`, { retrait: 3, taille: 8.5 })); }
+
+    // ── 7. Personnel, machines, interventions, absences ──
+    section(7, 'Personnel, machines, interventions et absences');
+    if (R.personnel.length) tableau(['Personne', 'Poste', 'Heures saisies', 'Jours saisis / planifiés', 'Étapes'], R.personnel.map(p => [p.nom, p.poste || '-', hFr(p.heures_saisies), `${p.jours_saisis} / ${p.jours_planifies}`, (p.etapes || []).join(', ')]), { cols: { 2: { cellWidth: 22 }, 3: { cellWidth: 30 } } });
+    else vide('Aucun personnel identifié sur cet OF.');
+    if (R.machines.length) tableau(['Machine', 'Jours planifiés', 'Partagée avec', 'Interventions'], R.machines.map(m => [m.nom, String(m.jours_planifies), m.titres_partageant ? `${m.titres_partageant} autre(s) titre(s) : ${(m.autres_of || []).join(', ')}` : 'aucun autre OF', m.interventions && m.interventions.length ? m.interventions.length + ' (voir ci-dessous)' : 'aucune']), { cols: { 1: { cellWidth: 24 } } });
+    if (R.interventions.length) tableau(['Machine', 'Type', 'Période', 'Fin annoncée', 'Bloquante', 'Description'], R.interventions.map(i => [i.machine, i.type || '-', `${dc(i.date_debut)} -> ${i.date_fin ? dc(i.date_fin) : 'en cours'} (${i.duree_jours_ouvres} j ouvrés)`, i.date_fin_prevue ? dc(i.date_fin_prevue) + (i.depassement_jours > 0 ? `\n(dépassée de ${i.depassement_jours} j)` : '') : '-', i.bloquant ? 'oui' : 'non', i.description || '']), { cols: { 2: { cellWidth: 42 }, 3: { cellWidth: 26 }, 4: { cellWidth: 16 } } });
+    else vide('Aucune intervention de maintenance sur les machines utilisées pendant la production.');
+    if (R.absences.length) {
+      tableau(['Personne absente', 'Du', 'Au', 'Jours ouvrés'], R.absences.map(a => [a.nom, dc(a.du), dc(a.au), String(a.jours)]));
+      if (R.absences_impact.length) paragraphe('Créneaux affectés par une absence : ' + R.absences_impact.map(a => `${a.nom} le ${dc(a.date)} (${a.operation})`).join(' ; ') + '.', { taille: 8.5 });
+      paragraphe('Les motifs d\'absence ne figurent pas dans ce rapport.', { taille: 7.5, couleur: COUL.gris });
+    } else vide('Aucune absence parmi le personnel affecté.');
+
+    // ── 8. Retour d'expérience ──
+    section(8, 'Retour d\'expérience');
+    paragraphe('Points forts', { gras: true, couleur: COUL.vert });
+    if (R.rex.points_forts.length) R.rex.points_forts.forEach(p => { paragraphe(`+ ${p.titre}`, { gras: true, retrait: 3, taille: 8.5 }); if (p.detail) paragraphe(p.detail, { retrait: 7, taille: 8, couleur: COUL.gris }); }); else vide('Aucun point fort identifié par les données saisies.');
+    paragraphe('Points à améliorer', { gras: true, couleur: COUL.rouge });
+    if (R.rex.points_faibles.length) R.rex.points_faibles.forEach(p => { paragraphe(`- ${p.titre}`, { gras: true, retrait: 3, taille: 8.5 }); if (p.detail) paragraphe(p.detail, { retrait: 7, taille: 8, couleur: COUL.gris }); }); else vide('Aucun point faible identifié.');
+    if (R.remarques.length) { paragraphe('Remarques saisies par le personnel en production', { gras: true }); tableau(['Date', 'Étape', 'Remarque'], R.remarques.map(r => [dc(r.date), r.operation, r.texte]), { cols: { 0: { cellWidth: 20 }, 1: { cellWidth: 42 } } }); }
+
+    // ── 9. Plan d'amélioration ──
+    section(9, 'Plan d\'amélioration pour une prochaine production identique ou similaire');
+    const SEV = { haute: ['Haute', COUL.rouge], moyenne: ['Moyenne', COUL.orange], basse: ['Basse', COUL.gris] };
+    if (R.plan.actions.length) tableau(['N°', 'Priorité', 'Thème', 'Action recommandée', 'Pourquoi (constat)', 'Indicateur de suivi', 'Pilote / échéance'],
+      R.plan.actions.map(a => [String(a.numero), { content: (SEV[a.severite] || [a.severite])[0], styles: { textColor: (SEV[a.severite] || [0, COUL.encre])[1], fontStyle: 'bold' } }, a.theme, a.action, a.pourquoi, a.indicateur, `${a.responsable}\n${a.echeance}`]),
+      { cols: { 0: { cellWidth: 8 }, 1: { cellWidth: 15 }, 2: { cellWidth: 19 }, 3: { cellWidth: 42 }, 4: { cellWidth: 33 }, 5: { cellWidth: 29 }, 6: { cellWidth: 28 } }, extra: { styles: { ...BASE, fontSize: 7.5 } } });
+    else vide('Aucune action corrective n\'est nécessaire : production conforme au plan.');
+    if (R.plan.parametres.etapes.length) {
+      paragraphe('Temps standards à retenir pour la prochaine production (pour la même quantité)', { gras: true, taille: 9 });
+      tableau(['Étape', 'Quantité', 'Standard actuel', 'Observé', 'Écart', 'Temps proposé', 'Décision'], R.plan.parametres.etapes.map(p => [p.operation, nb(p.quantite), hFr(p.standard_h), hFr(p.observe_h), sgn(p.ecart_pct, ' %'), hFr(p.propose_h), p.decision]), { cols: { 1: { cellWidth: 18 }, 2: { cellWidth: 24 }, 3: { cellWidth: 18 }, 4: { cellWidth: 16 }, 5: { cellWidth: 24 } } });
+    }
+    const L = R.plan.parametres.lancement;
+    if (L && L.lancer_au_plus_tard_jours_ouvres) paragraphe(`Lancement recommandé : cycle observé de ${L.cycle_observe_jours_ouvres} jour(s) ouvré(s) + marge de ${L.marge_jours_ouvres} jour(s) = lancer au plus tard ${L.lancer_au_plus_tard_jours_ouvres} jour(s) ouvré(s) avant la date de livraison.`, { gras: true, taille: 8.5 });
+    if (R.plan.conditions.length) { paragraphe('Conditions de réussite à réunir avant le lancement', { gras: true, taille: 9 }); R.plan.conditions.forEach(c => paragraphe(`• ${c}`, { retrait: 3, taille: 8.5 })); }
+
+    // ── 10. Qualité des données ──
+    section(10, 'Fiabilité des données de ce rapport');
+    if (R.qualite_donnees.length) R.qualite_donnees.forEach(q => paragraphe(`• ${q}`, { taille: 8.5, retrait: 2 })); else paragraphe('Données complètes : toutes les étapes ont leurs heures et quantités saisies.', { taille: 8.5 });
+    paragraphe('Aucune donnée manquante n\'est estimée dans ce rapport. Le plan d\'amélioration est établi à partir des seules données enregistrées ; il propose, la décision revient à la direction de l\'atelier.', { taille: 7.5, couleur: COUL.gris });
+
+    // ── 11. Observations et visas ──
+    section(11, 'Analyse de l\'atelier et visas');
+    place(60);
+    doc.setFontSize(8.5); doc.setTextColor(...COUL.gris);
+    doc.text('Causes identifiées / décisions prises / actions retenues :', ML, y + 3);
+    doc.setDrawColor(190); doc.setLineWidth(0.2); doc.rect(ML, y + 5, LARG, 36); y += 44;
+    doc.text('Contremaître :', ML, y + 3); doc.text('Direction :', ML + LARG / 2 + 4, y + 3);
+    doc.rect(ML, y + 5, LARG / 2 - 4, 14); doc.rect(ML + LARG / 2 + 4, y + 5, LARG / 2 - 4, 14); doc.setTextColor(0);
+
+    // ── En-têtes / pieds de page ──
+    const n = doc.getNumberOfPages();
+    for (let i = 1; i <= n; i++) {
+      doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(120);
+      doc.text(T(`Rapport de production - ${I.numero} - ${I.titre || ''}`), ML, 9);
+      doc.text(R.provisoire ? 'PROVISOIRE' : 'DEFINITIF', W - MR, 9, { align: 'right' });
+      doc.setDrawColor(210); doc.setLineWidth(0.2); doc.line(ML, 10.5, W - MR, 10.5);
+      doc.text(T(`Ateliers Babouot - édité le ${dc(R.genere_le)}`), ML, H - 7);
+      doc.text(`Page ${i} / ${n}`, W - MR, H - 7, { align: 'right' });
+    }
+    doc.save(`rapport-production-${I.numero}.pdf`);
+  }
+
+  function ouvrirModaleRapportOf(ofUuid, ofNumero, ofStatut) {
+    const termine = /termin/i.test(ofStatut || '');
+    afficherModale(`
+      <h3>Rapport de production — ${esc(ofNumero)}</h3>
+      <div class="plan-note" style="margin-bottom:10px;">Traçabilité complète de l'OF : chronologie, changements de planning, prévu / réel par étape (heures, cadences, dates), personnel, machines, interventions, absences (sans motif), respect du délai, retour d'expérience et <strong>plan d'amélioration</strong> pour une prochaine production identique ou similaire.</div>
+      ${termine ? '' : '<div class="msg" style="margin-bottom:10px;">Cet OF n\'est pas terminé : le rapport sera <strong>provisoire</strong> (le respect du délai ne peut pas encore être jugé).</div>'}
+      <div class="field"><label>Observation à ajouter au journal de l'OF (facultatif)</label>
+        <textarea id="ro-obs" rows="3" maxlength="600" placeholder="Ex. : retard dû à la panne de la BDM et au papier livré avec 2 jours de retard…"></textarea>
+        <div style="font-size:12px;color:var(--ink-500);margin-top:4px;">Cette observation est enregistrée définitivement dans le journal et figurera dans le rapport.</div></div>
+      <div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="ro-go">Télécharger le rapport PDF</button></div>
+    `);
+    document.getElementById('m-cancel').addEventListener('click', fermerModale);
+    document.getElementById('ro-go').addEventListener('click', async () => {
+      const msg = document.getElementById('m-msg'); const obs = document.getElementById('ro-obs').value.trim();
+      const bouton = document.getElementById('ro-go'); bouton.disabled = true;
+      msg.innerHTML = '<div class="msg">Analyse de la production et génération du PDF…</div>';
+      try {
+        if (obs) {
+          const r = await fetch(`${API}/rapport-of`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: ofUuid, observation: obs }) });
+          const d = await lireJson(r);
+          if (!r.ok) throw new Error(d.error || d.errorMessage || ('Erreur serveur (HTTP ' + r.status + ')'));
+        }
+        await genererRapportOf(ofUuid);
+        toast('Rapport de production téléchargé.'); fermerModale();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; bouton.disabled = false; }
+    });
   }
 
   function ouvrirModaleFeuilleSemaine() {
@@ -5845,7 +6074,7 @@
         // Règle des lots minimum (BDM / pressure en colle Pléiade) : ces étapes ne sont pas programmées seules.
         const nbr = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '\u202f');
         $('pl-resultat').insertAdjacentHTML('afterbegin', `
-          <div class="msg" style="margin:0 0 12px;display:block;"><strong>⏳ Lot minimum non atteint :</strong> ${plan.attente_lot.map((a) => `« ${esc(a.operation)} » (${nbr(a.quantite)} ex., minimum ${nbr(a.quantite_min)} par journée)`).join(' ; ')} ne sera${plan.attente_lot.length > 1 ? 'ont' : ''} <strong>pas programmé${plan.attente_lot.length > 1 ? 's' : ''}</strong> seul${plan.attente_lot.length > 1 ? 's' : ''} : ${plan.attente_lot.length > 1 ? 'elles attendent' : 'elle attend'} que d'autres titres soient prêts. Les lots se forment avec « Réorganiser / Recalculer » (menu planning), qui regroupe les titres Pléiade.
+          <div class="msg" style="margin:0 0 12px;display:block;"><strong>⏳ Lot minimum non atteint :</strong> ${plan.attente_lot.map((a) => `« ${esc(a.operation)} » (${nbr(a.quantite)} ex.${a.quantite_min > 0 ? ', minimum ' + nbr(a.quantite_min) + ' par journée' : ''}${a.titres_min > 1 ? ', au moins ' + a.titres_min + ' titres ensemble' : ''})`).join(' ; ')} ne sera${plan.attente_lot.length > 1 ? 'ont' : ''} <strong>pas programmé${plan.attente_lot.length > 1 ? 's' : ''}</strong> seul${plan.attente_lot.length > 1 ? 's' : ''} : ${plan.attente_lot.length > 1 ? 'elles attendent' : 'elle attend'} que d'autres titres soient prêts. Les lots se forment avec « Réorganiser / Recalculer » (menu planning), qui regroupe les titres Pléiade.
             <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-top:6px;"><input type="checkbox" id="pl-lots-libres" ${etat.lotsLibres ? 'checked' : ''} style="margin-top:3px;"> <span>Programmer quand même, sans attendre le minimum</span></label></div>`);
         $('pl-lots-libres').addEventListener('change', (ev) => { etat.lotsLibres = ev.target.checked; calculer(); });
       } else if (etat.lotsLibres) {
@@ -6476,8 +6705,9 @@
     const nbArret = machines.filter(alArret).length;
 
     const wrap = el(`<div></div>`);
-    const barreVg = el(`<div style="display:flex; justify-content:flex-end; margin-bottom:14px;"><button class="btn primary" id="vg-ouvrir">Vue globale de la charge</button></div>`);
-    barreVg.querySelector('button').addEventListener('click', () => { state.repVue = 'globale'; render(); });
+    const barreVg = el(`<div style="display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap; margin-bottom:14px;"><button class="btn" id="op-ouvrir">Optimiser la Production</button><button class="btn primary" id="vg-ouvrir">Vue globale de la charge</button></div>`);
+    barreVg.querySelector('#vg-ouvrir').addEventListener('click', () => { state.repVue = 'globale'; render(); });
+    barreVg.querySelector('#op-ouvrir').addEventListener('click', () => ouvrirModaleOptimisation());
     wrap.appendChild(barreVg);
     const kpis = el(`
       <div class="kpis">
@@ -7839,7 +8069,7 @@
             const lignesOp = codes.map((c) => {
               const g = liste.filter((a) => a.operation_code === c); const prets = g.filter((a) => !a.en_amont);
               const total = prets.reduce((t, a) => t + a.quantite, 0); const min = g[0].quantite_min;
-              return `<li><strong>${esc(nomOp(g[0]))}</strong> : ${nbr(total)} ex. prêts à fabriquer${total < min ? `, il manque <strong>${nbr(min - total)} ex.</strong> pour déclencher la mise en route (minimum ${mini(g[0])} par journée)` : ''}${g.length > prets.length ? ` · ${g.length - prets.length} titre(s) pas encore prêt(s) (étape précédente en attente)` : ''}</li>`;
+              return `<li><strong>${esc(nomOp(g[0]))}</strong> : ${nbr(total)} ex. prêts à fabriquer${total < min ? `, il manque <strong>${nbr(min - total)} ex.</strong> pour déclencher la mise en route (minimum ${mini(g[0])} par journée)` : ''}${(g[0].titres_min || 1) > 1 ? ` · la machine ne démarre pas pour un seul titre (au moins ${g[0].titres_min} titres ensemble${prets.length < g[0].titres_min ? ' — ' + prets.length + ' titre(s) prêt(s) pour l\'instant' : ''})` : ''}${g.length > prets.length ? ` · ${g.length - prets.length} titre(s) pas encore prêt(s) (étape précédente en attente)` : ''}</li>`;
             }).join('');
             const parOf = []; liste.forEach((a) => { if (!parOf.includes(a.of_id)) parOf.push(a.of_id); });
             bloc += `<div class="msg" style="margin-top:8px;display:block;"><strong>⏳ En attente d'un lot minimum</strong> — pas d'exemplaires programmés tant que la journée n'atteint pas le minimum ; la suite attend que d'autres titres soient prêts (aucun report automatique).<ul style="margin:4px 0 6px 18px;">${lignesOp}</ul>
@@ -7876,6 +8106,274 @@
         $('ro-go').textContent = depuisMode ? 'Valider la replanification' : actualiser ? 'Valider le recalcul' : 'Valider la nouvelle organisation'; $('ro-go').disabled = false; $('ro-annuler').style.display = '';
         chargerDonneesReelles();
       } catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; $('ro-go').disabled = false; }
+    });
+  }
+
+  // ---------- Optimiser la production (Reporting) ----------
+  // Choix d'une période et d'OF ; le moteur de planification essaie plusieurs ordres de passage (règles métier + proposition de l'IA),
+  // mesure chaque résultat (retards, réglages, nettoyages, temps morts, heures supplémentaires, charge du personnel) puis remet le planning
+  // EXACTEMENT comme avant chaque essai. La meilleure organisation n'est appliquée que sur demande, à titre provisoire (valider ou annuler).
+  function ouvrirModaleOptimisation() {
+    const $ = (id) => document.getElementById(id) || document.createElement('div');   // fenêtre fermée pendant un calcul : écritures sans effet
+    const modaleOuverte = () => !!document.getElementById('op-go');
+    const MAX_OF = 15;
+    const aujourdhui = dateLocaleIso();
+    const plus = (iso, n) => { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    const lundiDe = (iso) => { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); };
+    const dur = (min) => { const m = Math.round(Math.abs(min)); return `${Math.floor(m / 60)} h${String(m % 60).padStart(2, '0')}`; };
+    const fmtDt = (iso) => iso ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + (iso.length > 10 ? ' ' + iso.slice(11, 16) : '') : '—';
+    const typeLib = (o) => (o.type_production === 'pleiade' ? 'Pléiade' : o.type_production === 'coffret' ? 'Coffret' : o.priorite === 'urgente' ? 'Urgente' : 'Standard');
+    const pt = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    const postOpt = async (corps) => { const r = await fetch(`${API}/optimiser-production`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) }); const d = await lireJson(r); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`); return d; };
+    const postReorg = async (corps) => { const r = await fetch(`${API}/reorganiser-planning`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corps) }); const d = await lireJson(r); if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`); return d; };
+
+    let periode = null, liste = [], choisis = [], base = null, essais = [], comparaison = null, session = null, enCours = false, arret = false, termine = false, ia = null, iaRaison = '', travail = null;
+    const suivre = async (fn) => { travail = fn(); try { await travail; } finally { travail = null; } };
+
+    afficherModale(`
+      <h3>Optimiser la production</h3>
+      <div class="plan-note" style="margin-bottom:8px;">Choisissez une <strong>période</strong> puis les <strong>OF</strong> à optimiser. L'outil <strong>essaie plusieurs organisations</strong> (échéances, priorités, marges, regroupement des machines, proposition de l'IA) avec le vrai moteur de planification, <strong>mesure</strong> chacune (retards, réglages et nettoyages, temps morts des machines, heures supplémentaires, charge du personnel) et vous <strong>propose la meilleure</strong>. Rien n'est modifié sans votre accord : vous comparez, puis vous appliquez à titre provisoire (valider ou annuler).</div>
+      <div id="op-choix">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px;">
+          <label style="display:flex;flex-direction:column;font-size:12px;color:var(--muted);">Période
+            <select id="op-mode" style="padding:5px 8px;color:var(--ink,#222);"><option value="jour">1 jour</option><option value="semaine" selected>Une semaine</option><option value="mois">Un mois</option><option value="plage">Plage de dates</option></select></label>
+          <label id="op-l-jour" style="display:flex;flex-direction:column;font-size:12px;color:var(--muted);">Jour<input type="date" id="op-jour" value="${aujourdhui}" style="padding:4px 6px;color:var(--ink,#222);"></label>
+          <label id="op-l-sem" style="display:flex;flex-direction:column;font-size:12px;color:var(--muted);">Semaine contenant le<input type="date" id="op-sem" value="${aujourdhui}" style="padding:4px 6px;color:var(--ink,#222);"></label>
+          <label id="op-l-mois" style="display:none;flex-direction:column;font-size:12px;color:var(--muted);">Mois<input type="month" id="op-mois" value="${aujourdhui.slice(0, 7)}" style="padding:4px 6px;color:var(--ink,#222);"></label>
+          <label id="op-l-du" style="display:none;flex-direction:column;font-size:12px;color:var(--muted);">Du<input type="date" id="op-du" value="${aujourdhui}" style="padding:4px 6px;color:var(--ink,#222);"></label>
+          <label id="op-l-au" style="display:none;flex-direction:column;font-size:12px;color:var(--muted);">Au<input type="date" id="op-au" value="${plus(aujourdhui, 13)}" style="padding:4px 6px;color:var(--ink,#222);"></label>
+          <button class="btn" id="op-chercher">Rechercher les OF</button>
+          <span id="op-bornes" style="font-size:12.5px;color:var(--ink-500);"></span>
+        </div>
+        <div id="op-liste"></div>
+      </div>
+      <div id="op-corps"></div><div id="m-msg"></div>
+      <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn" id="op-annuler" style="display:none;">Annuler l'application</button><button class="btn primary" id="op-go" disabled>Lancer l'optimisation</button></div>`, 'xlarge');
+
+    // ── Fermeture : si un essai est en cours, le planning est remis comme avant ──
+    const nettoyer = async () => { if (session && !termine) { const s = session; session = null; try { await postReorg({ action: 'annuler', session_id: s }); chargerDonneesReelles(); } catch (e) { /* rien */ } } };
+    $('m-cancel').addEventListener('click', async () => {
+      arret = true;
+      if (travail) { $('m-msg').innerHTML = '<div class="msg">Arrêt en cours : le planning est remis comme avant…</div>'; try { await travail; } catch (e) { /* arrêt */ } }
+      await nettoyer(); fermerModale();
+    });
+
+    // ── Période ──
+    const bornes = () => {
+      const m = $('op-mode').value;
+      if (m === 'jour') { const d = $('op-jour').value; return d ? [d, d] : null; }
+      if (m === 'semaine') { const d = $('op-sem').value; if (!d) return null; const l = lundiDe(d); return [l, plus(l, 6)]; }
+      if (m === 'mois') { const v = $('op-mois').value; if (!/^\d{4}-\d{2}$/.test(v)) return null; const fin = new Date(Date.UTC(Number(v.slice(0, 4)), Number(v.slice(5, 7)), 0)).getUTCDate(); return [`${v}-01`, `${v}-${String(fin).padStart(2, '0')}`]; }
+      const du = $('op-du').value, au = $('op-au').value; return du && au && au >= du ? [du, au] : null;
+    };
+    const majBornes = () => {
+      const m = $('op-mode').value;
+      $('op-l-jour').style.display = m === 'jour' ? 'flex' : 'none'; $('op-l-sem').style.display = m === 'semaine' ? 'flex' : 'none';
+      $('op-l-mois').style.display = m === 'mois' ? 'flex' : 'none'; $('op-l-du').style.display = m === 'plage' ? 'flex' : 'none'; $('op-l-au').style.display = m === 'plage' ? 'flex' : 'none';
+      const b = bornes(); $('op-bornes').textContent = b ? (b[0] === b[1] ? `Le ${dateCourte(b[0])}` : `Du ${dateCourte(b[0])} au ${dateCourte(b[1])}`) : 'Période incomplète';
+    };
+    ['op-mode', 'op-jour', 'op-sem', 'op-mois', 'op-du', 'op-au'].forEach((id) => $(id).addEventListener('input', majBornes)); majBornes();
+
+    const majSelection = () => {
+      choisis = Array.from(document.querySelectorAll('.op-coche:checked')).map((c) => c.value);
+      const trop = choisis.length > MAX_OF;
+      $('op-nb').textContent = `${choisis.length} OF sélectionné(s)${trop ? ` — maximum ${MAX_OF} : décochez-en pour garder le calcul rapide` : ''}`;
+      $('op-nb').style.color = trop ? 'var(--danger,#c0392b)' : '';
+      $('op-go').disabled = !choisis.length || trop || enCours;
+    };
+    $('op-chercher').addEventListener('click', async () => {
+      const b = bornes(); const msg = $('m-msg');
+      if (!b) { msg.innerHTML = '<div class="msg error">Choisissez une période valide.</div>'; return; }
+      msg.innerHTML = '<div class="msg">Recherche des OF de la période…</div>'; $('op-go').disabled = true;
+      try {
+        const d = await postOpt({ action: 'lister', debut: b[0], fin: b[1] });
+        periode = { debut: d.debut, fin: d.fin }; liste = d.ofs; msg.innerHTML = '';
+        if (!liste.length) { $('op-liste').innerHTML = '<div class="msg">Aucun OF à optimiser sur cette période (aucun créneau, aucune livraison ni aucune étape restant à planifier).</div>'; return; }
+        $('op-liste').innerHTML = `<div style="display:flex;gap:10px;align-items:center;margin-bottom:4px;font-size:13px;"><strong>${liste.length} OF trouvé(s)</strong> <button class="btn" id="op-tout" type="button" style="padding:1px 8px;font-size:12px;">Tout cocher</button> <button class="btn" id="op-rien" type="button" style="padding:1px 8px;font-size:12px;">Tout décocher</button> <span id="op-nb"></span></div>
+          <div style="overflow-x:auto;max-height:260px;overflow-y:auto;"><table class="sp-table"><thead><tr><th></th><th>OF</th><th>Titre</th><th>Type</th><th>Qté</th><th>Livraison</th><th>Fin planifiée</th><th>État</th><th>Étapes restantes</th><th>Machines</th></tr></thead><tbody>${liste.map((o) => {
+            const etat = o.non_planifie ? '<span style="color:var(--warn,#b9770e);">à planifier</span>' : o.en_retard ? `<strong style="color:var(--danger,#c0392b);">retard ${o.retard_jours} j</strong>` : o.delai ? '<span style="color:var(--ok,#1a7f5a);">délai tenu</span>' : 'sans délai';
+            return `<tr><td><input type="checkbox" class="op-coche" value="${esc(o.id)}" ${liste.length <= MAX_OF ? 'checked' : ''}></td><td><strong>${esc(o.numero)}</strong></td><td>${esc(o.titre)}</td><td>${typeLib(o)}</td><td>${o.quantite ? pt(o.quantite) : ''}</td><td>${o.delai ? dateCourte(o.delai) : '—'}</td><td>${o.fin_planifiee ? fmtDt(o.fin_planifiee) : '—'}</td><td>${etat}</td><td>${o.etapes_restantes}${o.etapes_a_planifier ? ` (dont ${o.etapes_a_planifier} à planifier)` : ''}</td><td>${esc((o.machines || []).join(', '))}</td></tr>`;
+          }).join('')}</tbody></table></div>
+          <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:8px 0 4px;"><input type="checkbox" id="op-ia" checked style="margin-top:3px;"> <span>Consulter l'<strong>IA</strong> : un ordre de passage supplémentaire et une analyse rédigée des résultats <span class="plan-note">(le moteur de planification vérifie et mesure tout ce que l'IA propose)</span></span></label>
+          <div class="plan-note">Pendant l'analyse (1 à 3 minutes), le planning de ces OF est <strong>modifié temporairement puis remis exactement comme avant</strong> après chaque essai : évitez de modifier le planning en même temps. Seul ce qui n'a pas démarré est replanifié, au plus tôt, à partir de ${periode.debut > aujourdhui ? dateCourte(periode.debut) : 'maintenant'}.</div>`;
+        document.querySelectorAll('.op-coche').forEach((c) => c.addEventListener('change', majSelection));
+        $('op-tout').addEventListener('click', () => { document.querySelectorAll('.op-coche').forEach((c) => { c.checked = true; }); majSelection(); });
+        $('op-rien').addEventListener('click', () => { document.querySelectorAll('.op-coche').forEach((c) => { c.checked = false; }); majSelection(); });
+        majSelection();
+      } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
+
+    // ── Calcul d'une organisation : libère les créneaux non commencés, replanifie dans l'ordre donné (avec formation des lots minimum) ──
+    const calculer = async (ordreIds, essai, progres) => {
+      const prep = await postReorg({ action: 'preparer', mode: 'actualiser', of_ids: choisis, depuis_date: periode.debut > aujourdhui ? periode.debut : undefined });
+      session = prep.session_id;
+      const place = {}; ordreIds.forEach((id, i) => { place[id] = i; });
+      const ordre = prep.ordre.slice().sort((a, c) => (place[a.of_id] ?? 1e6) - (place[c.of_id] ?? 1e6));
+      const rangDe = {}; ordre.forEach((o, i) => { rangDe[o.of_id] = i; });
+      const resultats = {}, attentes = new Map();
+      const extra0 = { essai: !!essai, origine: essai ? undefined : 'optimisation de la production', debut_souhaite: periode.debut > aujourdhui ? periode.debut : undefined };
+      const planifier = async (i, extra) => {
+        if (arret || !modaleOuverte()) { arret = true; throw new Error('ARRET'); }
+        const o = ordre[i]; if (progres) progres(`${i + 1}/${ordre.length} : ${o.numero}`);
+        let r;
+        try { r = await postReorg({ action: 'planifier', session_id: session, of_id: o.of_id, ...extra0, ...(extra || {}) }); } catch (e) { r = { ok: false, erreur: e.message }; }
+        resultats[o.of_id] = r;
+        Array.from(attentes.keys()).forEach((k) => { if (attentes.get(k).of_id === o.of_id) attentes.delete(k); });
+        if (r.ok) (r.attente_lot || []).forEach((a) => attentes.set(a.gamme_id, a));
+        return r;
+      };
+      const dernierLots = ordre.reduce((m, o, i) => (o.avec_lots ? i : m), -1);
+      for (let i = 0; i <= dernierLots; i++) await planifier(i);
+      let tour = 0;
+      while (attentes.size && tour++ < 12) {
+        if (arret || !modaleOuverte()) { arret = true; throw new Error('ARRET'); }
+        let l; try { l = await postReorg({ action: 'lots', session_id: session, attentes: Array.from(attentes.values()) }); } catch (e) { break; }
+        if (!(l.lancements || []).length) break;
+        const parOf = {}; l.lancements.forEach((x) => { (parOf[x.of_id] = parOf[x.of_id] || {})[x.gamme_id] = x.depart; });
+        const ids = Object.keys(parOf).sort((x, y) => rangDe[x] - rangDe[y]);
+        for (const id of ids) await planifier(rangDe[id], { lots_liberes: parOf[id], lots_seul: true });
+        for (const id of ids) await planifier(rangDe[id]);
+      }
+      for (let i = dernierLots + 1; i < ordre.length; i++) await planifier(i);
+      const mes = await postOpt({ action: 'mesurer', of_ids: choisis, debut: periode.debut, fin: periode.fin });
+      return { mesure: mes.mesure, resultats, attentes_lot: attentes.size, echecs: Object.values(resultats).filter((r) => !r.ok).length, nb: ordre.length, session_id: prep.session_id };
+    };
+
+    // ── Lancement de l'analyse ──
+    $('op-go').addEventListener('click', async () => {
+      if (enCours) return;
+      if (comparaison) { await suivre(appliquer); return; }
+      await suivre(analyser);
+    });
+    async function analyser() {
+      enCours = true; arret = false; $('op-go').disabled = true; $('op-chercher').disabled = true; document.querySelectorAll('.op-coche').forEach((c) => { c.disabled = true; });
+      $('op-choix').style.display = 'none';
+      const aff = (html) => { $('m-msg').innerHTML = html; };
+      $('op-corps').innerHTML = `<div id="op-etapes"></div>`;
+      const lignes = [];
+      const ligne = (cle, texte, etat) => { let el0 = $('op-l-' + cle); if (!el0) { $('op-etapes').insertAdjacentHTML('beforeend', `<div id="op-l-${cle}" style="padding:4px 0;font-size:13px;"></div>`); el0 = $('op-l-' + cle); } el0.innerHTML = `${etat === 'ok' ? '✓' : etat === 'ko' ? '⚠' : '⏳'} ${texte}`; };
+      try {
+        ligne('base', 'Mesure du planning actuel…');
+        const mb = await postOpt({ action: 'mesurer', of_ids: choisis, debut: periode.debut, fin: periode.fin }); base = mb.mesure;
+        ligne('base', `Planning actuel : ${base.nb_en_retard} OF en retard sur ${base.nb_of}, réglages et nettoyages ${dur(base.minutes.reglage + base.minutes.nettoyage)}, temps morts machines ${dur(base.trous_min)}.`, 'ok');
+        ligne('cand', 'Préparation des organisations à essayer…');
+        const cd = await postOpt({ action: 'candidats', of_ids: choisis, debut: periode.debut, fin: periode.fin });
+        let cands = cd.candidats;
+        if ($('op-ia') && $('op-ia').checked && choisis.length > 1) {
+          try {
+            ligne('ia', 'Consultation de l\'IA pour un ordre de passage…');
+            const r = await postOpt({ action: 'ia_ordre', of_ids: choisis, debut: periode.debut, fin: periode.fin });
+            if (r.ok) {
+              ia = r; const meme = cands.find((c) => c.ordre.join('|') === r.ordre.join('|'));
+              if (meme) { meme.aussi.push('proposition de l\'IA'); ligne('ia', `Proposition de l'IA : identique à « ${esc(meme.nom)} ».`, 'ok'); }
+              else { cands.push({ code: 'ia', nom: 'Proposition de l\'IA', description: r.justification || 'Ordre de passage proposé par l\'IA.', aussi: [], ordre: r.ordre }); ligne('ia', 'Proposition de l\'IA reçue : sera essayée comme les autres.', 'ok'); }
+            } else { iaRaison = r.raison || 'indisponible'; ligne('ia', `IA non utilisée : ${esc(iaRaison)}`, 'ko'); }
+          } catch (e) { iaRaison = e.message; ligne('ia', `IA non utilisée : ${esc(e.message)}`, 'ko'); }
+        }
+        ligne('cand', `${cands.length} organisation(s) à essayer.`, 'ok');
+        $('op-etapes').insertAdjacentHTML('beforeend', `<div class="plan-note" style="margin:6px 0;">Chaque essai replanifie réellement les OF, mesure le résultat, puis remet le planning comme avant.</div><div style="margin-bottom:6px;"><button class="btn" id="op-stop" type="button">Arrêter</button></div>`);
+        $('op-stop').addEventListener('click', () => { arret = true; $('op-stop').disabled = true; aff('<div class="msg">Arrêt demandé : le planning est remis comme avant…</div>'); });
+        essais = [];
+        for (let k = 0; k < cands.length; k++) {
+          const c = cands[k];
+          ligne('e' + k, `Essai ${k + 1}/${cands.length} — ${esc(c.nom)}…`);
+          try {
+            const r = await calculer(c.ordre, true, (t) => ligne('e' + k, `Essai ${k + 1}/${cands.length} — ${esc(c.nom)} : OF ${t}…`));
+            await postReorg({ action: 'annuler', session_id: session }); session = null;
+            essais.push({ code: c.code, nom: c.nom, description: c.description, aussi: c.aussi, ordre: c.ordre, mesure: r.mesure, attentes_lot: r.attentes_lot, echecs: r.echecs, heures_sup: Object.entries(r.resultats).filter(([, x]) => x.ok && x.respecte_delai === false).map(([id, x]) => ({ of_id: id, heures_sup: x.heures_sup || null, renforts: x.renforts || [] })) });
+            ligne('e' + k, `Essai ${k + 1}/${cands.length} — ${esc(c.nom)} : ${r.mesure.nb_en_retard} OF en retard${r.echecs ? `, ${r.echecs} OF non planifié(s)` : ''}.`, 'ok');
+          } catch (e) {
+            await nettoyer();
+            if (e.message === 'ARRET') throw e;
+            ligne('e' + k, `Essai ${k + 1}/${cands.length} — ${esc(c.nom)} : échec (${esc(e.message)}). Planning remis comme avant.`, 'ko');
+          }
+        }
+        chargerDonneesReelles();
+        if (!essais.length) throw new Error('Aucun essai n\'a abouti : le planning est inchangé.');
+        const cmp = await postOpt({ action: 'comparer', of_ids: choisis, debut: periode.debut, fin: periode.fin, base, essais: essais.map((e) => ({ code: e.code, nom: e.nom, description: e.description, aussi: e.aussi, ordre: e.ordre, mesure: e.mesure, attentes_lot: e.attentes_lot, echecs: e.echecs, heures_sup: e.heures_sup })) });
+        comparaison = cmp; afficherResultat();
+        if ($('op-ia') && $('op-ia').checked) {
+          postOpt({ action: 'ia_synthese', of_ids: choisis, debut: periode.debut, fin: periode.fin, base, comparaison: cmp }).then((r) => { if (r.ok && $('op-ia-txt')) $('op-ia-txt').innerHTML = `<strong>Analyse de l'IA</strong><br>${esc(r.texte).replace(/\n+/g, '<br>')}`; }).catch(() => {});
+        }
+      } catch (e) {
+        await nettoyer();
+        if (e.message === 'ARRET') aff('<div class="msg">Analyse arrêtée. Le planning est resté comme avant.</div>');
+        else aff(`<div class="msg error">${esc(e.message)}</div>`);
+      } finally { enCours = false; $('op-chercher').disabled = false; if (!comparaison) { $('op-choix').style.display = ''; document.querySelectorAll('.op-coche').forEach((c) => { c.disabled = false; }); majSelection(); } }
+    }
+
+    // ── Affichage du comparatif ──
+    function afficherResultat() {
+      const m0 = base; const rec = comparaison.recommande_code;
+      const lignesEssais = comparaison.essais;
+      const defaut = rec || null;
+      const cell = (v, v0, texte, basMieux = true) => { const mieux = basMieux ? v < v0 : v > v0, pire = basMieux ? v > v0 : v < v0; return `<td style="${mieux ? 'color:var(--ok,#1a7f5a);font-weight:600;' : pire ? 'color:var(--danger,#c0392b);' : ''}">${texte}</td>`; };
+      const ligneMetriques = (nom, m, note, gain, extra) => `<td>${nom}</td>
+        ${cell(m.nb_en_retard, m0.nb_en_retard, `${m.nb_en_retard}${m.retard_jours_total ? ` <span style="font-weight:400;">(${m.retard_jours_total} j)</span>` : ''}`)}
+        <td>${m.fin_globale ? fmtDt(m.fin_globale) : '—'}</td>
+        ${cell(m.minutes.reglage + m.minutes.nettoyage, m0.minutes.reglage + m0.minutes.nettoyage, dur(m.minutes.reglage + m.minutes.nettoyage))}
+        ${cell(m.trous_min, m0.trous_min, dur(m.trous_min))}
+        ${cell(m.heures_sup_min, m0.heures_sup_min, m.heures_sup_min ? dur(m.heures_sup_min) : '—')}
+        ${cell(m.jours_machine, m0.jours_machine, String(m.jours_machine))}
+        ${cell(m.personnel.jours_surcharge, m0.personnel.jours_surcharge, `${dur(m.personnel.max_jour_min)}${m.personnel.jours_surcharge ? ` (${m.personnel.jours_surcharge} j > 8 h)` : ''}`)}
+        <td style="white-space:nowrap;">${pt(note)}</td><td style="white-space:nowrap;">${gain}</td>`;
+      $('op-corps').innerHTML = `
+        <div class="msg ${rec ? 'ok' : ''}" style="display:block;margin-bottom:8px;"><strong>${rec ? '✓ Une meilleure organisation existe' : 'Le planning actuel est déjà le meilleur trouvé'}</strong><br>${esc(comparaison.texte)}</div>
+        <div id="op-ia-txt" class="plan-note" style="margin-bottom:8px;">${ia && ia.justification ? `<strong>Ordre proposé par l'IA</strong> : ${esc(ia.justification)}${(ia.points_attention || []).length ? '<ul style="margin:4px 0 0 18px;">' + ia.points_attention.map((p) => `<li>${esc(p)}</li>`).join('') + '</ul>' : ''}` : (iaRaison ? `IA non utilisée : ${esc(iaRaison.replace(/\.$/, ''))}. Les organisations ci-dessous reposent sur les règles métier de l'atelier.` : '')}</div>
+        <div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th></th><th>Organisation</th><th>OF en retard</th><th>Fin du dernier OF</th><th>Réglages + nettoyages</th><th>Temps morts machines</th><th>Heures sup</th><th>Jours machine</th><th>Charge max / pers. / jour</th><th>Note</th><th>Gain</th></tr></thead><tbody>
+          <tr style="background:var(--surface-2,#f6f7f9);"><td></td>${ligneMetriques('<strong>Planning actuel</strong>', m0, comparaison.note_base.total, '—')}</tr>
+          ${lignesEssais.map((e) => `<tr><td><input type="radio" name="op-choix" value="${esc(e.code)}" ${e.code === defaut ? 'checked' : ''} ${e.echecs ? 'disabled title="Des OF n\'ont pas pu être planifiés"' : ''}></td>${ligneMetriques(`<strong>${esc(e.nom)}</strong>${e.code === rec ? ' <span style="color:var(--ok,#1a7f5a);">★ recommandé</span>' : ''}<div style="font-size:11.5px;color:var(--ink-500);">${esc(e.description || '')}${(e.aussi || []).length ? ' · identique à : ' + esc(e.aussi.join(', ')) : ''}</div>`, e.mesure, e.note.total, `${e.gain_pct > 0 ? '+' : ''}${String(e.gain_pct).replace('.', ',')} %`)}</tr>`).join('')}
+        </tbody></table></div>
+        <div class="plan-note" style="margin:6px 0;">La <strong>note</strong> additionne des pénalités (plus bas = mieux) : OF en retard et jours de retard, OF non planifiés ou en attente de lot, date de fin, réglages et nettoyages, temps morts, heures supplémentaires, déséquilibre de charge du personnel. Vert = mieux que le planning actuel, rouge = moins bien.</div>
+        <div id="op-detail"></div>`;
+      document.querySelectorAll('input[name="op-choix"]').forEach((r) => r.addEventListener('change', detail));
+      $('op-go').textContent = 'Appliquer l\'organisation sélectionnée'; $('op-go').disabled = !defaut;
+      document.querySelectorAll('input[name="op-choix"]').forEach((r) => r.addEventListener('change', () => { $('op-go').disabled = !document.querySelector('input[name="op-choix"]:checked'); }));
+      $('m-msg').innerHTML = '';
+      detail();
+    }
+    function detail() {
+      const sel = document.querySelector('input[name="op-choix"]:checked'); const zone = $('op-detail'); if (!zone) return;
+      if (!sel) { zone.innerHTML = '<div class="plan-note">Sélectionnez une organisation pour voir le détail OF par OF. « Aucune » = garder le planning actuel (fermer la fenêtre).</div>'; return; }
+      const e = comparaison.essais.find((x) => x.code === sel.value); const parOf = Object.fromEntries(base.ofs.map((o) => [o.of_id, o]));
+      const ordreNum = e.ordre.map((id) => (parOf[id] || {}).numero).filter(Boolean);
+      const hs = (e.heures_sup || []).filter((x) => x.heures_sup || (x.renforts || []).length);
+      zone.innerHTML = `<h4 style="margin:10px 0 4px;">Détail : ${esc(e.nom)}</h4>
+        <div style="font-size:13px;margin-bottom:4px;"><strong>Ordre de passage</strong> : ${ordreNum.map((n, i) => `${i + 1}. ${esc(n)}`).join(' → ')}</div>
+        <div style="overflow-x:auto;"><table class="sp-table"><thead><tr><th>OF</th><th>Titre</th><th>Livraison</th><th>Fin actuelle</th><th>Fin proposée</th><th>Écart</th><th>Délai</th></tr></thead><tbody>${e.mesure.ofs.map((o) => {
+          const a = parOf[o.of_id] || {}; const dj = a.fin && o.fin ? Math.round((new Date(o.fin.slice(0, 10)) - new Date(a.fin.slice(0, 10))) / 86400000) : null;
+          const etat = (x) => (x.non_planifie ? '<span style="color:var(--warn,#b9770e);">non planifié</span>' : x.en_retard ? `<strong style="color:var(--danger,#c0392b);">retard ${x.retard_jours} j</strong>` : x.delai ? '<span style="color:var(--ok,#1a7f5a);">tenu</span>' : '—');
+          return `<tr><td><strong>${esc(o.numero)}</strong></td><td>${esc(o.titre)}</td><td>${o.delai ? dateCourte(o.delai) : '—'}</td><td>${a.fin ? fmtDt(a.fin) : '—'}</td><td>${o.fin ? fmtDt(o.fin) : '—'}</td><td>${dj === null ? '' : dj === 0 ? '=' : (dj > 0 ? '+' : '') + dj + ' j'}</td><td>${etat(a)} → ${etat(o)}</td></tr>`;
+        }).join('')}</tbody></table></div>
+        ${hs.length ? `<div class="msg" style="margin-top:6px;display:block;"><strong>Pour les délais encore non tenus</strong><ul style="margin:4px 0 0 18px;">${hs.map((x) => { const o = parOf[x.of_id] || {}; return `<li>${esc(o.numero || '')} : ${x.heures_sup ? (x.heures_sup.respecte_delai ? `les heures supplémentaires (07h00–17h30) permettraient de tenir le délai (fin ${fmtDt(x.heures_sup.fin)})` : `même avec des heures supplémentaires, le délai reste dépassé (fin ${fmtDt(x.heures_sup.fin)})`) : ''}${(x.renforts || []).map((r) => ` · renfort « ${esc(r.operation)} » : ${r.effectif_actuel} → ${r.effectif_necessaire} personnes`).join('')}</li>`; }).join('')}</ul></div>` : ''}
+        ${e.attentes_lot ? `<div class="plan-note" style="margin-top:6px;">⏳ ${e.attentes_lot} étape(s) restent en attente d'un lot minimum dans cette organisation.</div>` : ''}`;
+    }
+
+    // ── Application de l'organisation choisie (provisoire : valider ou annuler) ──
+    async function appliquer() {
+      const sel = document.querySelector('input[name="op-choix"]:checked'); if (!sel) return;
+      if (session) {   // deuxième clic : validation
+        try { await postReorg({ action: 'valider', session_id: session }); termine = true; session = null; toast('Organisation optimisée validée.'); fermerModale(); chargerDonneesReelles(); }
+        catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+        return;
+      }
+      const e = comparaison.essais.find((x) => x.code === sel.value);
+      enCours = true; arret = false; $('op-go').disabled = true; document.querySelectorAll('input[name="op-choix"]').forEach((r) => { r.disabled = true; });
+      $('m-msg').innerHTML = '<div class="msg">Application de l\'organisation choisie…</div>';
+      try {
+        const r = await calculer(e.ordre, false, (t) => { $('m-msg').innerHTML = `<div class="msg">Application : OF ${esc(t)}…</div>`; });
+        const m = r.mesure; const prevu = e.mesure;
+        const ecart = m.nb_en_retard !== prevu.nb_en_retard || m.fin_globale !== prevu.fin_globale;
+        $('m-msg').innerHTML = `<div class="msg ${m.nb_en_retard ? '' : 'ok'}"><strong>Organisation « ${esc(e.nom)} » appliquée à titre provisoire.</strong> ${m.nb_en_retard} OF en retard sur ${m.nb_of}. ${ecart ? 'Le résultat diffère un peu de la prévision (le planning a changé entre-temps) : vérifiez avant de valider.' : 'Résultat conforme à la prévision.'} Contrôlez le planning, puis <strong>validez</strong> ou <strong>annulez</strong> (retour exact à l'état précédent).</div>`;
+        $('op-go').textContent = 'Valider l\'organisation'; $('op-go').disabled = false; $('op-annuler').style.display = ''; chargerDonneesReelles();
+      } catch (err) {
+        await nettoyer(); $('m-msg').innerHTML = `<div class="msg error">${esc(err.message === 'ARRET' ? 'Application interrompue : planning remis comme avant.' : err.message)}</div>`;
+        $('op-go').disabled = false; document.querySelectorAll('input[name="op-choix"]').forEach((r) => { r.disabled = false; });
+      } finally { enCours = false; }
+    }
+    $('op-annuler').addEventListener('click', async () => {
+      try { if (session) await postReorg({ action: 'annuler', session_id: session }); session = null; toast('Planning remis comme avant.'); fermerModale(); chargerDonneesReelles(); }
+      catch (e) { $('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
     });
   }
 
