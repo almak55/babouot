@@ -4278,6 +4278,7 @@
         <div class="field" style="flex:1;"><label>Jusqu'au (inclus)</label><input id="d-date-fin" type="date" value="${AUJOURDHUI_ISO}"></div>
       </div>
       <div class="field" id="d-inconnue-wrap"><label><input type="checkbox" id="d-fin-inconnue"> Date de fin inconnue (période indéterminée)</label></div>
+      <div class="field" id="d-periodes"></div>
       <div class="field hidden" id="d-horaires-wrap">
         <label>Disponible seulement de… à…</label>
         <div style="display:flex; gap:10px;">
@@ -4302,6 +4303,50 @@
     const fin400 = (d) => new Date(new Date(d + 'T12:00:00Z').getTime() + 400 * 86400000).toISOString().slice(0, 10);
     const nbJours = (d, f) => Math.round((new Date(f + 'T12:00:00Z') - new Date(d + 'T12:00:00Z')) / 86400000) + 1;
 
+    // Périodes déjà enregistrées à partir d'aujourd'hui (absences, arrêts, plages réduites) : affichées et supprimables en entier.
+    // Sans cela, « Annuler une absence » sur la seule date du jour laissait l'absence en place les jours suivants.
+    let periodes = [];
+    const plus1 = (d) => new Date(new Date(d + 'T12:00:00Z').getTime() + 86400000).toISOString().slice(0, 10);
+    const h5 = (h) => (h ? String(h).slice(0, 5) : '');
+    const libelleType = (p) => (p.type === 'absent' ? 'Absent(e)' : p.type === 'en arrêt' ? 'En arrêt' : `Disponible ${p.h.replace('-', ' à ')} seulement`);
+    function afficherPeriodes() {
+      const zone = document.getElementById('d-periodes');
+      if (!periodes.length) { zone.innerHTML = ''; return; }
+      zone.innerHTML = `<label>Situations déjà enregistrées (à partir d'aujourd'hui)</label>` + periodes.map((p, i) => `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--border,#e3e6ee);font-size:13px;">
+          <span>${libelleType(p)} — ${p.debut === p.fin ? 'le ' + fr(p.debut) : 'du ' + fr(p.debut) + ' au ' + fr(p.fin)}${p.inconnue ? ' <em>(fin inconnue)</em>' : ''}</span>
+          <button type="button" class="btn" data-per="${i}">Supprimer</button>
+        </div>`).join('');
+      zone.querySelectorAll('button[data-per]').forEach((b) => b.addEventListener('click', async () => {
+        const p = periodes[Number(b.dataset.per)];
+        b.disabled = true;
+        try {
+          const res = await fetch(`${API}/gerer-disponibilite?personnel_id=${personne.id}&date=${p.debut}&date_fin=${p.fin}`, { method: 'DELETE' });
+          if (!res.ok) throw new Error((await res.json()).error || 'Erreur inconnue');
+          toast(`${personne.name} : disponible normalement ${p.debut === p.fin ? 'le ' + fr(p.debut) : 'du ' + fr(p.debut) + ' au ' + fr(p.fin)}.`);
+          fermerModale(); chargerDonneesReelles();
+        } catch (e) { b.disabled = false; document.getElementById('m-msg').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+      }));
+    }
+    async function chargerPeriodes() {
+      try {
+        const res = await fetch(`${API}/gerer-disponibilite?personnel_id=${personne.id}&date_debut=${AUJOURDHUI_ISO}&date_fin=${fin400(AUJOURDHUI_ISO)}`);
+        const lignes = res.ok ? await res.json() : [];
+        periodes = [];
+        lignes.filter((x) => x.statut !== 'disponible' || (x.heure_debut && x.heure_fin)).forEach((x) => {
+          const type = x.statut === 'disponible' ? 'partiel' : x.statut;
+          const h = type === 'partiel' ? `${h5(x.heure_debut)}-${h5(x.heure_fin)}` : '';
+          const inc = /fin inconnue/i.test(x.commentaire || '');
+          const dernier = periodes[periodes.length - 1];
+          if (dernier && dernier.type === type && dernier.h === h && plus1(dernier.fin) === x.date) { dernier.fin = x.date; dernier.inconnue = dernier.inconnue || inc; }
+          else periodes.push({ type, h, debut: x.date, fin: x.date, inconnue: inc });
+        });
+      } catch (_) { periodes = []; }
+      afficherPeriodes(); majFormulaire();
+    }
+    // Période d'absence / d'arrêt qui contient la date donnée (pour « Annuler une absence »).
+    const periodeDu = (d) => periodes.find((p) => p.type !== 'partiel' && p.debut <= d && d <= p.fin);
+
     function majFormulaire() {
       const st = statutSelect.value;
       document.getElementById('d-horaires-wrap').classList.toggle('hidden', st !== 'partiel');
@@ -4323,7 +4368,15 @@
       else if (st === 'en arrêt') t = `<b>${esc(prenom)}</b> sera <b>en arrêt</b> ${periode}.`;
       else if (st === 'partiel') t = `<b>${esc(prenom)}</b> sera disponible <b>seulement de ${esc(heureD.value || '…')} à ${esc(heureF.value || '…')}</b> ${periode}.${effectif}`;
       else t = `<b>${esc(prenom)}</b> sera <b>de nouveau disponible</b> ${periode} : les absences ou arrêts enregistrés sur cette période seront supprimés.`;
-      document.getElementById('d-resume').innerHTML = t;
+      // L'absence se poursuit au-delà de la fin choisie : elle resterait enregistrée (et bloquerait les affectations ces jours-là).
+      let alerte = '';
+      if (st === 'disponible' && d && !dInconnue.checked && f) {
+        const reste = periodes.find((p) => p.type !== 'partiel' && p.debut <= f && p.fin > f);
+        if (reste) alerte = `<div style="margin-top:6px;color:#B42318;">⚠ L'absence enregistrée se poursuit jusqu'au <b>${fr(reste.fin)}</b> : elle resterait en place du ${fr(plus1(f))} au ${fr(reste.fin)}. <button type="button" class="btn" id="d-etendre" style="margin-left:6px;">Annuler toute l'absence</button></div>`;
+      }
+      document.getElementById('d-resume').innerHTML = t + alerte;
+      const bt = document.getElementById('d-etendre');
+      if (bt) bt.addEventListener('click', () => { const r = periodes.find((p) => p.type !== 'partiel' && p.debut <= dFin.value && p.fin > dFin.value); if (r) { dFin.value = r.fin; majFormulaire(); } });
     }
     [statutSelect, dDebut, dFin, dInconnue, heureD, heureF].forEach(i => { i.addEventListener('input', majFormulaire); i.addEventListener('change', majFormulaire); });
     dDebut.addEventListener('change', () => { if (!dFin.value || dFin.value < dDebut.value) { dFin.value = dDebut.value; majFormulaire(); } });
@@ -4343,8 +4396,15 @@
       majFormulaire();
     }
     dDebut.addEventListener('change', chargerJour);
+    // « Annuler une absence » : la fin proposée est celle de l'absence en cours (et non le seul jour de début).
+    statutSelect.addEventListener('change', () => {
+      if (statutSelect.value !== 'disponible') return;
+      const p = periodeDu(dDebut.value);
+      if (p) { dInconnue.checked = false; dFin.value = p.fin; majFormulaire(); }
+    });
     majFormulaire();
     chargerJour();
+    chargerPeriodes();
 
     document.getElementById('m-cancel').addEventListener('click', fermerModale);
 
@@ -6080,6 +6140,10 @@
       } else if (etat.lotsLibres) {
         $('pl-resultat').insertAdjacentHTML('afterbegin', `<div class="msg" style="margin:0 0 12px;display:block;"><label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;"><input type="checkbox" id="pl-lots-libres" checked style="margin-top:3px;"> <span>Programmer quand même, sans attendre le lot minimum (BDM / pressure en colle Pléiade)</span></label></div>`);
         $('pl-lots-libres').addEventListener('change', (ev) => { etat.lotsLibres = ev.target.checked; calculer(); });
+      }
+      if ((plan.etapes_deja_faites || []).length) {
+        // Étape pratiquement terminée (reste < 1 min 30) : rien n'est planifié pour elle (ni roulage, ni nettoyage superflu).
+        $('pl-resultat').insertAdjacentHTML('afterbegin', `<div class="msg" style="margin:0 0 12px;display:block;"><strong>✔ Déjà réalisée :</strong> ${plan.etapes_deja_faites.map((x) => `« ${esc(x.operation)} » (${Math.round(x.avancement_pct * 10) / 10} %)`).join(', ')} — il ne reste pratiquement plus de travail : aucun créneau n'est planifié pour ${plan.etapes_deja_faites.length > 1 ? 'ces étapes' : 'cette étape'}. À déclarer terminée${plan.etapes_deja_faites.length > 1 ? 's' : ''} dans l'avancement de production.</div>`);
       }
       if (rienAPlanifier) {
         // Message bien visible en haut du résultat (et non en bas de la fenêtre) + action directe.
