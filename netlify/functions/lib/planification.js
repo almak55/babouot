@@ -475,6 +475,19 @@ function planifierEtape(etape, curseur, ctx, charge, sync) {
       for (let k = 0; k < 400; k++) {
         essai = simulerJournee(etape, m, cur, ctx, charge, sync);
         if (!essai) break;
+        // Heure limite de démarrage (ex. BDM : pas de mise en route après 12h30) : si le premier travail du jour commence après cette
+        // heure alors que la machine n'a pas encore été démarrée ce jour-là, la journée est refusée et on repart le lendemain à l'ouverture.
+        // (Une machine déjà démarrée le matin par un autre travail continue normalement l'après-midi.)
+        const lim = etape.journee.limite_demarrage_min;
+        if (lim !== undefined && lim !== null) {
+          const sansNet = (ctx.occupation.machines[m] || []).filter((iv) => iv.tag !== 'net');
+          const premiers = new Map();
+          essai.phases.filter((p) => !p.mer && p.besoin_machine && p.type_phase !== 'nettoyage').forEach((p) => p.brutes.forEach((t) => {
+            const jr = debutDeJour(t.d); premiers.set(jr, Math.min(premiers.has(jr) ? premiers.get(jr) : Infinity, t.d));
+          }));
+          const tard = Array.from(premiers.entries()).filter(([jr, d]) => d - jr > lim && !jourTravaille(sansNet, jr)).map(([jr]) => jr).sort((a, b) => a - b)[0];
+          if (tard !== undefined) { cur = Math.max(cur + 1, tard + MIN_JOUR); continue; }
+        }
         const bloc = essai.phases.filter((p) => !p.mer && p.besoin_machine);
         if (!bloc.length) break;
         const d0 = Math.min(...bloc.map((p) => p.brutes[0].d)); const f0 = Math.max(...bloc.map((p) => p.brutes[p.brutes.length - 1].f));
