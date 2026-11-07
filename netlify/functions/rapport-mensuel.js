@@ -11,6 +11,7 @@
 
 const { getSupabase } = require('./lib/supabaseclient');
 const C = require('./lib/charge');
+const vueGlobale = require('./vue-globale');   // chemin fixe : indispensable pour que Netlify (esbuild) inclue le module
 
 const rep = (code, o) => ({ statusCode: code, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o) });
 const aujourdhuiParis = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' });
@@ -34,9 +35,9 @@ async function facultatif(promesse) { try { const r = await promesse; return r.e
 
 // Résultat d'une autre fonction appelée en interne (événement sans en-têtes : pas de nouveau contrôle d'accès).
 async function appelInterne(module, params) {
-  const r = await require(module).handler({ httpMethod: 'GET', queryStringParameters: params });
+  const r = await module.handler({ httpMethod: 'GET', queryStringParameters: params });
   const corps = JSON.parse(r.body || '{}');
-  if (r.statusCode >= 400) throw new Error(corps.error || `Erreur ${r.statusCode} (${module})`);
+  if (r.statusCode >= 400) throw new Error(corps.error || `Erreur ${r.statusCode} (vue-globale)`);
   return corps;
 }
 
@@ -55,8 +56,8 @@ const handlerProtege = async (event) => {
 
     // ---------- 1. Charge (même calcul que la vue globale) ----------
     const [cal, secOf] = await Promise.all([
-      appelInterne('./vue-globale', { section: 'calendrier', debut, fin }),
-      appelInterne('./vue-globale', { section: 'of' }).catch(() => null),
+      appelInterne(vueGlobale, { section: 'calendrier', debut, fin }),
+      appelInterne(vueGlobale, { section: 'of' }).catch(() => null),
     ]);
     const jours = Object.keys(cal.jours).sort().map((d) => {
       const j = cal.jours[d];
