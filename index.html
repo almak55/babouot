@@ -6724,7 +6724,7 @@
       const series = pl ? pl.series.map(x => `${fmtN(x.cahiers)} cahier${x.cahiers > 1 ? 's' : ''} de ${x.pages} p : 1 réglage de ${rg['reglage_' + x.classe + '_min'] ?? '?'} min${x.pages !== x.classe ? ' (pagination ' + x.classe + ' p)' : ''}${x.ajustements ? ' + ' + fmtN(x.ajustements) + ' ajustement' + (x.ajustements > 1 ? 's' : '') + ' de ' + (rg.ajustement_min ?? '?') + ' min' : ''}`).join(' · ') : '';
       return `<div class="produit-box refente-box">
         <div class="produit-titre">Calcul du pliage — d'après la composition du livre <span class="plan-note">— valeurs réglables ; vides = valeur du profil de la machine, sinon valeur de départ (affichée en grisé)</span></div>
-        ${pl ? `<div style="margin-bottom:8px;"><strong>${fmtN(pl.feuilles)}</strong> feuilles à marger (quantité + passe, ${fmtN(pl.cahiers)} cahiers différents) · <span class="plan-note">${esc(series)}</span></div>` : ''}
+        ${pl ? `<div style="margin-bottom:8px;"><strong>${fmtN(pl.feuilles)}</strong> cahiers à plier = ${fmtN(pl.cahiers)} cahiers × ${fmtN(e.refente && e.refente.quantite_par_cahier)} ex. (quantité + <strong>${e.refente && e.refente.reglages ? e.refente.reglages.passe_pct : '?'} % de passe</strong>, réglée dans l'opération de refente) · <span class="plan-note">${esc(series)}</span></div>` : ''}
         <div class="step-grid">
           ${champ('pliage_modules_min', 'Mise en place des modules (min)', '— empileurs, sorties de poches… ; une fois au début de l\'OF', 'modules_min')}
           ${champ('pliage_margeur_cadence_h', 'Chargement du margeur (feuilles / h)', '— 5 000 feuilles = 15 min à 20 000/h', 'margeur_cadence_h', 1)}

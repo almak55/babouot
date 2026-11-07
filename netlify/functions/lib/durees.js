@@ -192,7 +192,9 @@ async function calculerEtapes(supabase, ofId) {
           ...PL.CLASSES.filter((c) => reglagesPliage[`reglage_${c}_min`] > 0).map((c) => ph(`Réglage de la plieuse — cahiers de ${c} pages`, 2, { type_calcul: 'par_element', duree_h: reglagesPliage[`reglage_${c}_min`] / 60, element_param: `pliage_series_${c}`, element_label: 'série' })),
           ...(reglagesPliage.ajustement_min > 0 ? [ph('Ajustement du pli (cahiers suivants)', 2, { type_calcul: 'par_element', duree_h: reglagesPliage.ajustement_min / 60, element_param: 'pliage_ajustements', element_label: 'cahiers suivants' })] : []),
         ];
-        utilisees = [...utilisees.filter((p) => !remplacees.has(p.nom)), ...calcules].sort((a, b) => a.ordre - b.ordre);
+        // Roulage compté en cahiers (exemplaires × cahiers par exemplaire) : la plieuse plie aussi les cahiers de passe ajoutés à la refente.
+        const enCahiers = (p) => p.type_calcul !== 'fixe' && p.type_calcul !== 'par_element' && p.type_calcul !== 'formule' && String(p.quantite_formule || '').replace(/\s+/g, '').toLowerCase() === 'quantite*nb_cahiers';
+        utilisees = [...utilisees.filter((p) => !remplacees.has(p.nom)).map((p) => (enCahiers(p) ? { ...p, avec_passe: true } : p)), ...calcules].sort((a, b) => a.ordre - b.ordre);
       }
     }
     const phases = utilisees.map((p) => {
@@ -269,12 +271,16 @@ async function calculerEtapes(supabase, ofId) {
             detail = `à renseigner : ${r.manquantes.join(', ')}`;
           } else {
             if (uniteQte && uniteQte.valeur === null) uniteQte.valeur = r.valeur;
+            // Pliage : la quantité à plier est celle de la composition, passe ajoutée à la refente comprise (quantité + passe) × cahiers.
+            const avecPasse = p.avec_passe && derivees && Number.isFinite(derivees.pliage_feuilles);
+            const valeurTravail = avecPasse ? derivees.pliage_feuilles : r.valeur;
             const n = Math.max(1, Number(p.par_passage) || 1);
-            const passages = n > 1 ? Math.ceil(r.valeur / n - 1e-9) : r.valeur;
+            const passages = n > 1 ? Math.ceil(valeurTravail / n - 1e-9) : valeurTravail;
             d = passages / Number(p.cadence_par_h);
+            const infoPasse = avecPasse ? ` (${derivees.nb_cahiers} cahiers × ${RF.calculer(compositionBrute, quantite, reglagesRefente).quantite_par_cahier} ex., passe de ${reglagesRefente.passe_pct} % comprise)` : '';
             detail = n > 1
-              ? `${Math.round(r.valeur * 100) / 100} ${unite} ÷ ${n} par passage = ${passages} passages ÷ ${p.cadence_par_h} passages/h  [${p.quantite_formule}]`
-              : `${Math.round(r.valeur * 100) / 100} ${unite} ÷ ${p.cadence_par_h} ${unite}/h  [${p.quantite_formule}]`;
+              ? `${Math.round(valeurTravail * 100) / 100} ${unite}${infoPasse} ÷ ${n} par passage = ${passages} passages ÷ ${p.cadence_par_h} passages/h  [${p.quantite_formule}]`
+              : `${Math.round(valeurTravail * 100) / 100} ${unite}${infoPasse} ÷ ${p.cadence_par_h} ${unite}/h  [${p.quantite_formule}]`;
           }
         }
       } else {
