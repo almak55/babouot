@@ -1487,10 +1487,10 @@
     const ROW_ACCENT = { 'en cours': 'amber', 'validé': 'teal', 'planifié': 'teal', 'en attente de validation': 'muted', 'en pause': 'danger', 'terminé': 'green' };
     const ETAT_LABEL = { 'en cours': 'En cours', 'validé': 'Validé', 'planifié': 'Planifié', 'en attente de validation': 'En attente de validation', 'en pause': 'En pause', 'terminé': 'Terminé' };
 
-    state.ordres.forEach(o=>{
+    const ajouterLigneOf = (o, parent) => {
       const fillClass = o.avancement>=70?'':(o.avancement>=30?'warn':'danger');
       const accent = ROW_ACCENT[o.statut] || 'teal';
-      tbody.appendChild(el(`
+      (parent || tbody).appendChild(el(`
         <tr class="row-accent-${accent}${estOfPleiade(o) ? ' of-pleiade' : ''}">
           <td class="row-icon-cell"><span class="row-icon ${accent}">${svgIcon(PRIO_ICON[o.priorite] || PRIO_ICON.normale)}</span></td>
           <td><div class="row-title">${o.id}</div><div class="row-sub">${o.produit}</div></td>
@@ -1507,7 +1507,38 @@
           </td>
         </tr>
       `));
-    });
+    };
+    state.ordres.forEach((o) => ajouterLigneOf(o));
+
+    // OF terminés : ils quittent le planning mais restent consultables (rapport de production, traçabilité).
+    const termines = state.ordresTermines || [];
+    if (termines.length) {
+      const bloc = el(`<div id="of-term" style="margin-top:18px;border-top:1px solid var(--line);padding-top:12px;">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:0 16px;">
+          <button class="btn" id="of-term-btn" type="button"></button>
+          <input id="of-term-q" type="search" placeholder="Rechercher un OF terminé (numéro, titre, client)…" style="display:none;flex:1 1 260px;max-width:420px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;">
+          <span style="font-size:12px;color:var(--ink-500);">Menu ⋯ de la ligne → « 7. Rapport de production (traçabilité) »</span>
+        </div>
+        <table class="row-table" id="of-term-table" style="display:none;margin-top:10px;"><tbody id="of-term-tbody"></tbody></table>
+      </div>`);
+      wrap.appendChild(bloc);
+      const btnT = bloc.querySelector('#of-term-btn'), qT = bloc.querySelector('#of-term-q'), tabT = bloc.querySelector('#of-term-table'), tbT = bloc.querySelector('#of-term-tbody');
+      let ouvert = !!state.afficherOfTermines;
+      const dessiner = () => {
+        btnT.textContent = (ouvert ? 'Masquer' : 'Afficher') + ` les OF terminés (${termines.length})`;
+        tabT.style.display = ouvert ? '' : 'none'; qT.style.display = ouvert ? '' : 'none';
+        tbT.innerHTML = '';
+        if (!ouvert) return;
+        const q = qT.value.trim().toLowerCase();
+        const liste = termines.filter((o) => !q || [o.id, o.produit, o.client].join(' ').toLowerCase().includes(q));
+        liste.forEach((o) => ajouterLigneOf(o, tbT));
+        if (!liste.length) tbT.innerHTML = '<tr><td style="padding:14px;color:var(--ink-500);">Aucun OF terminé ne correspond.</td></tr>';
+        tbT.querySelectorAll('.row-menu-btn').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); ouvrirMenuOf(b, b.dataset.ofid, b.dataset.ofnum, b.dataset.ofstatut); }));
+      };
+      btnT.addEventListener('click', () => { ouvert = !ouvert; state.afficherOfTermines = ouvert; dessiner(); });
+      qT.addEventListener('input', dessiner);
+      dessiner();
+    }
 
     tbody.querySelectorAll('.row-menu-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -2383,6 +2414,8 @@
         <button data-action="supprimer" class="danger">Supprimer l'OF</button>
       </div>
     `);
+    // OF terminé : on ne garde que ce qui sert à la consultation et à la traçabilité (rapport, avancement, message).
+    if (ofStatut === 'terminé') menu.querySelectorAll('button').forEach((b) => { if (!['rapport', 'avancement', 'message'].includes(b.dataset.action)) b.style.display = 'none'; });
     document.body.appendChild(menu);
     const r = btn.getBoundingClientRect();
     menu.style.top = `${r.bottom + window.scrollY + 4}px`;
@@ -7718,6 +7751,13 @@
         client: o.titres ? o.titres.client : '',
         qte: o.quantite, delai: o.delai, priorite: o.priorite,
         statut: o.statut, avancement: o.avancement, type: o.type_production || '',
+      }));
+      state.ordresTermines = (data.ordres_termines || []).map(o => ({
+        id: o.numero, uuid: o.id,
+        produit: o.titres ? o.titres.nom : '(titre non renseigné)',
+        client: o.titres ? o.titres.client : '',
+        qte: o.quantite, delai: o.delai, priorite: o.priorite,
+        statut: 'terminé', avancement: 100, type: o.type_production || '',
       }));
 
       state.stocks = data.stocks.map(s => ({

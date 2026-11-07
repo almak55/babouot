@@ -80,6 +80,13 @@ const handlerProtege = async (event) => {
       });
     }
 
+    // OF terminés : gardés hors du planning (ordres) mais renvoyés à part pour rester consultables (rapport de production / traçabilité).
+    let ordresTermines = [];
+    try {
+      const t = await supabase.from('ordres_fabrication').select('*, titres(nom, client)').eq('statut', 'terminé').order('created_at', { ascending: false }).limit(500);
+      if (!t.error) ordresTermines = (t.data || []).map((o) => ({ ...o, avancement: 100 }));
+    } catch (e) { /* facultatif : ne bloque jamais le planning */ }
+
     const ordresAvecAvancement = ordresRes.data.map((o) => ({
       ...o,
       // Avancement réel (saisies de production, pondéré par les durées) ; à défaut, part d'étapes terminées.
@@ -132,6 +139,7 @@ const handlerProtege = async (event) => {
         machines: machinesRes.data,
         personnel: personnelAvecCompetences,
         ordres: ordresAvecAvancement,
+        ordres_termines: ordresTermines,
         stocks: stocksRes.data,
         planning: planningAvecPersonnel,
         disponibilites: dispoRes.data, // { personnel_id, date, statut, heure_debut, heure_fin }[]
