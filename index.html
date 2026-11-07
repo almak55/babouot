@@ -9708,7 +9708,7 @@
       <div class="field"><label>Ordre de fabrication</label><select id="m-of">${ofOptions}</select></div>
       <div class="field"><label>Étape de gamme</label><select id="m-etape"><option>Choisir un OF d'abord…</option></select></div>
       <div id="m-etape-note"></div>
-      <div class="field"><label>Machine <span class="plan-note">— laissez « Aucune machine » pour un travail manuel</span></label><select id="m-machine">${machineOptions}</select><div id="m-dispo" class="dispo-strip"></div></div>
+      <div class="field"><label>Machine <span class="plan-note">— laissez « Aucune machine » pour un travail manuel</span></label><select id="m-machine">${machineOptions}</select><div id="m-machine-note" class="plan-note" style="margin-top:4px;"></div><div id="m-dispo" class="dispo-strip"></div></div>
       <div class="field"><label>Jour de début <span class="plan-note">— proposé automatiquement selon les dépendances</span></label><input id="m-date" type="date" value="${dateIso}"><div id="m-date-note" class="plan-note" style="margin-top:4px;"></div></div>
       <div class="field"><label>Personnel <span class="plan-note">— cocher une ou plusieurs personnes</span></label>
         <div style="margin-bottom:6px;"><button class="btn" type="button" id="m-prop-btn">Proposer le personnel</button></div>
@@ -9722,6 +9722,8 @@
 
     const etapeSelect = document.getElementById('m-etape');
     const noteEtape = document.getElementById('m-etape-note');
+    const gammesParId = {};                 // étapes de l'OF choisi (machine du chiffrage, machines prévues…)
+    let premiereOuverture = true;
     const statutChoisi = () => { const o = etapeSelect.selectedOptions[0]; return o ? o.dataset.statut : null; };
 
     function majNoteEtape(gammes) {
@@ -9765,6 +9767,8 @@
           etapeSelect.innerHTML = `<option value="">Cet OF n'a aucune étape de gamme</option>`;
           return;
         }
+        Object.keys(gammesParId).forEach(k => delete gammesParId[k]);
+        gammes.forEach(g => { gammesParId[g.id] = g; });
         const SUFFIXE = { 'planifié': ' — déjà planifiée', 'en cours': ' — en cours', 'terminé': ' — terminée' };
         etapeSelect.innerHTML = gammes.map(g => `<option value="${g.id}" data-statut="${g.statut}" data-manuel="${g.sans_machine ? 1 : 0}" ${g.statut === 'en cours' || g.statut === 'terminé' ? 'disabled' : ''}>${esc(g.operation.nom)}${SUFFIXE[g.statut] || ''}</option>`).join('');
         const defaut = (gammeId && gammes.find(g => g.id === gammeId && g.statut !== 'en cours' && g.statut !== 'terminé')) || gammes.find(g => g.statut === 'à planifier') || gammes.find(g => g.statut === 'planifié');
@@ -9894,10 +9898,44 @@
     document.getElementById('m-machine').addEventListener('change', () => proposerPersonnel(true));
     document.getElementById('m-date').addEventListener('change', () => proposerPersonnel(true));
     // Opération manuelle : pas de machine à choisir.
-    function ajusterMachine() {
-      const opt = etapeSelect.selectedOptions && etapeSelect.selectedOptions[0];
-      if (opt && opt.dataset.manuel === '1') document.getElementById('m-machine').value = '';
+    // Machine : reprise automatiquement du chiffrage (sinon machine standard de l'opération si elle est unique).
+    // La liste met d'abord les machines prévues pour l'opération ; choisir une autre machine demande confirmation.
+    const nomMachine = (id) => { const m = state.machines.find(x => x.uuid === id); return m ? m.name : ''; };
+    let noteMachineBase = '';
+    function majNoteMachine() {
+      const zone = document.getElementById('m-machine-note'); if (!zone) return;
+      const g = gammesParId[etapeSelect.value]; const choisie = document.getElementById('m-machine').value;
+      const prevues = (g && g.machines_compatibles) || [];
+      let h = noteMachineBase;
+      if (choisie && prevues.length && !prevues.includes(choisie)) h += `${h ? '<br>' : ''}<span style="color:var(--danger);">⚠ ${esc(nomMachine(choisie))} n'est pas prévue pour cette opération (prévues : ${esc(prevues.map(nomMachine).filter(Boolean).join(', '))}).</span>`;
+      zone.innerHTML = h;
     }
+    function ajusterMachine() {
+      const sel = document.getElementById('m-machine');
+      const opt = etapeSelect.selectedOptions && etapeSelect.selectedOptions[0];
+      const g = opt ? gammesParId[opt.value] : null;
+      const prevues = new Set((g && g.machines_compatibles) || []);
+      const courant = sel.value;
+      const toutes = state.machines.filter(m => m.uuid);
+      const optM = (m) => `<option value="${m.uuid}">${esc(m.name)}</option>`;
+      const dans = toutes.filter(m => prevues.has(m.uuid)), hors = toutes.filter(m => !prevues.has(m.uuid));
+      sel.innerHTML = `<option value="">— Aucune machine (opération manuelle) —</option>` + (dans.length
+        ? `<optgroup label="Machines prévues pour cette opération">${dans.map(optM).join('')}</optgroup><optgroup label="Autres machines (non prévues pour cette opération)">${hors.map(optM).join('')}</optgroup>`
+        : toutes.map(optM).join(''));
+      let voulue = premiereOuverture || (g && g.statut === 'planifié') ? courant : ''; noteMachineBase = '';   // à un changement d'étape, on ne garde pas la machine de l'étape précédente
+      if (opt && opt.dataset.manuel === '1') voulue = '';
+      else if (g && g.statut !== 'planifié') {
+        const chiffrage = g.machine_id || null, standard = g.machine_standard || null;
+        if (premiereOuverture && machineUuid && machineUuid !== (chiffrage || standard) && (chiffrage || standard)) {
+          noteMachineBase = `Vous avez choisi ${esc(nomMachine(machineUuid))} ; le chiffrage prévoit <strong>${esc(nomMachine(chiffrage || standard))}</strong>.`;
+        } else if (chiffrage) { voulue = chiffrage; noteMachineBase = `Machine reprise du chiffrage : <strong>${esc(nomMachine(chiffrage))}</strong>.`; }
+        else if (standard) { voulue = standard; noteMachineBase = `Machine standard de l'opération : <strong>${esc(nomMachine(standard))}</strong> (aucune machine imposée dans le chiffrage).`; }
+      }
+      premiereOuverture = false;
+      sel.value = voulue; if (sel.value !== voulue) sel.value = '';
+      majNoteMachine();
+    }
+    document.getElementById('m-machine').addEventListener('change', majNoteMachine);
     etapeSelect.addEventListener('change', () => { dateManuelle = false; majNoteEtape(null); ajusterMachine(); majJourDebut(); });
     document.getElementById('m-of').addEventListener('change', chargerEtapes);
     if (ofOptions) chargerEtapes();
@@ -9919,6 +9957,9 @@
         return;
       }
       const optChoisie = etapeSelect.selectedOptions[0];
+      const gChoisie = gammesParId[gamme_operatoire_id];
+      if (machine_id && gChoisie && (gChoisie.machines_compatibles || []).length && !gChoisie.machines_compatibles.includes(machine_id)
+        && !confirm(`« ${nomMachine(machine_id)} » n'est pas prévue pour cette opération (machines prévues : ${gChoisie.machines_compatibles.map(nomMachine).filter(Boolean).join(', ')}).\n\nL'affecter quand même à cette machine ?`)) return;
       if (!machine_id && optChoisie && optChoisie.dataset.manuel === '0' && !confirm('Cette opération utilise normalement une machine. L\'affecter sans machine ?')) return;
       msg.innerHTML = `<div class="msg">Affectation en cours…</div>`;
       try {

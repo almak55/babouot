@@ -17,7 +17,7 @@ const handlerProtege = async (event) => {
     await require('./lib/ordre-gamme').normaliserGamme(supabase, ofId);
     const { data, error } = await supabase
       .from('gammes_operatoires')
-      .select('id, sequence, statut, predecesseurs, dependances, operations(id, code, nom, ordre_defaut)')
+      .select('id, sequence, statut, machine_id, predecesseurs, dependances, operations(id, code, nom, ordre_defaut)')
       .eq('of_id', ofId)
       .order('sequence');
     if (error) throw error;
@@ -59,7 +59,7 @@ const handlerProtege = async (event) => {
     // Opération sans machine ? Oui si toutes ses phases standard sont manuelles,
     // ou si elle n'a aucune phase et aucune machine compatible.
     const opIds = Array.from(new Set(data.map((g) => g.operations && g.operations.id).filter(Boolean)));
-    if (!opIds.length) return { statusCode: 200, body: JSON.stringify(data.map((g, i) => ({ id: g.id, sequence: g.sequence, rang: g.rang, statut: g.statut, operation: g.operations, sans_machine: false, en_ligne: enLigneDe(g, i) }))) };
+    if (!opIds.length) return { statusCode: 200, body: JSON.stringify(data.map((g, i) => ({ id: g.id, sequence: g.sequence, rang: g.rang, statut: g.statut, operation: g.operations, sans_machine: false, machine_id: g.machine_id || null, machines_compatibles: [], machine_standard: null, en_ligne: enLigneDe(g, i) }))) };
     const [phasesRes, machRes, liaisonRes] = await Promise.all([
       supabase.from('phases_standard').select('operation_id, occupe_machine').in('operation_id', opIds),
       supabase.from('machines').select('operation_id').in('operation_id', opIds).eq('actif', true),
@@ -82,6 +82,8 @@ const handlerProtege = async (event) => {
           infos.set(e.sequence, {
             quantite: e.quantite_etape, quantite_of: calcul.of.quantite, regle: e.quantite_regle || null,
             quantite_manuelle: !!(e.parametres && e.parametres.quantite),
+            machines_compatibles: (e.machines_compatibles || []).map((m) => m.id),   // machines prévues pour cette opération
+            machine_standard: (e.machines_standard_ids || []).length === 1 ? e.machines_standard_ids[0] : null,
             total_h: e.chiffre ? e.total_h : null, duree_manuelle_h: e.duree_manuelle_h,
             attentes: Object.entries(e.delais_min || {}).map(([s, m]) => ({ apres: nomDeSeq.get(Number(s)) || `étape ${s}`, heures: Math.round(Number(m) / 6) / 10 })),
           });
@@ -93,6 +95,9 @@ const handlerProtege = async (event) => {
       body: JSON.stringify(data.map((g, i) => ({
         id: g.id, sequence: g.sequence, rang: g.rang, statut: g.statut, operation: g.operations, en_ligne: enLigneDe(g, i),
         info: infos.get(g.sequence) || null,
+        machine_id: g.machine_id || null,   // machine choisie dans le chiffrage (ou déjà affectée)
+        machines_compatibles: (infos.get(g.sequence) || {}).machines_compatibles || [],
+        machine_standard: (infos.get(g.sequence) || {}).machine_standard || null,
         sans_machine: !!(g.operations && sansMachine(g.operations.id)),
       }))),
     };

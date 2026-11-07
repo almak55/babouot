@@ -247,6 +247,7 @@ async function calculerEtapes(supabase, ofId) {
       machine_id: g.machine_id, machines_compatibles: compatibles,
       machines_planifiees: Array.from(machinesPlanifiees.get(g.id) || []).sort((a, b) => a.localeCompare(b, 'fr')),
       machines_standard: machinesRes.data.filter((m) => m.operation_id === g.operation_id).map((m) => m.nom).sort((a, b) => a.localeCompare(b, 'fr')),
+      machines_standard_ids: machinesRes.data.filter((m) => m.operation_id === g.operation_id).map((m) => m.id),
       source, phases, type_manquant: typeManquant,
       types_possibles: typeManquant ? typesAutres : [],
       parametres, parametres_requis: requis, parametres_manquants: manquants,
