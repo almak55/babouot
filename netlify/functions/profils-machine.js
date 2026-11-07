@@ -8,7 +8,8 @@
 //        -> { types: [{code, libelle}], profils: [{ operation_id, operation, type_production,
 //             mise_en_route_min, reglage_min, cadence_par_h, nettoyage_min, nb_personnes }] }
 // POST   { machine_id, operation_id, type_production|null, mise_en_route_min?, reglage_min?,
-//          cadence_par_h?, nettoyage_min?, nb_personnes?, exemplaires_par_passage?, reglage_fer_min?, manutention_pile_s? }   -> crée ou remplace le profil
+//          cadence_par_h?, nettoyage_min?, nb_personnes?, exemplaires_par_passage?, reglage_fer_min?, manutention_pile_s?, margeur_cadence_h?,
+//          reglage_pli_4_min?, reglage_pli_8_min?, reglage_pli_16_min?, reglage_pli_32_min?, ajustement_pli_min? }   -> crée ou remplace le profil
 // POST   { action: 'ajouter_type', libelle }               -> ajoute un type de production
 // DELETE ?machine_id=&operation_id=&type_production=       -> supprime le profil
 //        (type_production vide ou « tous » = profil valable pour tous les types)
@@ -19,7 +20,8 @@
 const { getSupabase } = require('./lib/supabaseclient');
 const { analyser } = require('./lib/formules');
 
-const NOMS = { mise_en_route: 'Mise en route', reglage: 'Réglage', reglage_fer: 'Réglage par fer', manutention_pile: 'Manutention par pile', roulage: 'Roulage', nettoyage: 'Nettoyage' };
+const CLASSES_PLI = require('./lib/pliage').CLASSES;   // 4, 8, 16, 32 pages
+const NOMS = { mise_en_route: 'Mise en route', reglage: 'Réglage', reglage_fer: 'Réglage par fer', manutention_pile: 'Manutention par pile', chargement_margeur: 'Chargement du margeur', ...Object.fromEntries(CLASSES_PLI.map((c) => [`reglage_pli_${c}`, `Réglage de la plieuse — cahiers de ${c} pages`])), ajustement_pli: 'Ajustement du pli (cahiers suivants)', roulage: 'Roulage', nettoyage: 'Nettoyage' };
 const NOMS_LISTE = Object.values(NOMS);
 
 const nombre = (v) => {
@@ -46,12 +48,15 @@ const handlerProtege = async (event) => {
       const profils = new Map();
       phases.filter((p) => NOMS_LISTE.includes(p.nom)).forEach((p) => {
         const cle = `${p.operation_id}|${p.type_production || ''}`;
-        if (!profils.has(cle)) profils.set(cle, { operation_id: p.operation_id, operation: p.operations.nom, type_production: p.type_production, mise_en_route_min: null, reglage_min: null, cadence_par_h: null, nettoyage_min: null, reglage_fer_min: null, manutention_pile_s: null, nb_personnes: 1, quantite_formule: null, unite_cadence: null, par_passage: 1, mutualiser: !!(p.operations && p.operations.mutualiser_mer_net) });
+        if (!profils.has(cle)) profils.set(cle, { operation_id: p.operation_id, operation: p.operations.nom, type_production: p.type_production, mise_en_route_min: null, reglage_min: null, cadence_par_h: null, nettoyage_min: null, reglage_fer_min: null, manutention_pile_s: null, margeur_cadence_h: null, reglage_pli_4_min: null, reglage_pli_8_min: null, reglage_pli_16_min: null, reglage_pli_32_min: null, ajustement_pli_min: null, nb_personnes: 1, quantite_formule: null, unite_cadence: null, par_passage: 1, mutualiser: !!(p.operations && p.operations.mutualiser_mer_net) });
         const pr = profils.get(cle);
         if (p.nom === NOMS.mise_en_route) pr.mise_en_route_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
         if (p.nom === NOMS.reglage) pr.reglage_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
         if (p.nom === NOMS.reglage_fer) pr.reglage_fer_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
         if (p.nom === NOMS.manutention_pile) pr.manutention_pile_s = Math.round(Number(p.duree_h) * 3600 * 100) / 100;
+        CLASSES_PLI.forEach((c) => { if (p.nom === NOMS[`reglage_pli_${c}`]) pr[`reglage_pli_${c}_min`] = Math.round(Number(p.duree_h) * 60 * 100) / 100; });
+        if (p.nom === NOMS.ajustement_pli) pr.ajustement_pli_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
+        if (p.nom === NOMS.chargement_margeur) pr.margeur_cadence_h = p.cadence_par_h === null ? null : Number(p.cadence_par_h);
         if (p.nom === NOMS.nettoyage) pr.nettoyage_min = Math.round(Number(p.duree_h) * 60 * 100) / 100;
         if (p.nom === NOMS.roulage) { pr.cadence_par_h = p.cadence_par_h === null ? null : Number(p.cadence_par_h); pr.nb_personnes = p.nb_personnes; pr.quantite_formule = p.quantite_formule || null; pr.unite_cadence = p.unite_cadence || null; pr.par_passage = Number(p.par_passage) > 1 ? Number(p.par_passage) : 1; }
       });
@@ -75,12 +80,14 @@ const handlerProtege = async (event) => {
       const type = typeOuNull(b.type_production);
       const valeurs = {
         mise_en_route: nombre(b.mise_en_route_min), reglage: nombre(b.reglage_min),
-        nettoyage: nombre(b.nettoyage_min), cadence: nombre(b.cadence_par_h), reglage_fer: nombre(b.reglage_fer_min), manutention_pile: nombre(b.manutention_pile_s),
+        nettoyage: nombre(b.nettoyage_min), cadence: nombre(b.cadence_par_h), reglage_fer: nombre(b.reglage_fer_min), manutention_pile: nombre(b.manutention_pile_s), margeur: nombre(b.margeur_cadence_h),
+        ...Object.fromEntries(CLASSES_PLI.map((c) => [`reglage_pli_${c}`, nombre(b[`reglage_pli_${c}_min`])])), ajustement_pli: nombre(b.ajustement_pli_min),
       };
       for (const [cle, v] of Object.entries(valeurs)) {
         if (Number.isNaN(v) || (v !== null && v < 0)) return { statusCode: 400, body: JSON.stringify({ error: `Valeur invalide pour « ${cle} » (nombre positif attendu).` }) };
       }
       if (valeurs.cadence !== null && valeurs.cadence <= 0) return { statusCode: 400, body: JSON.stringify({ error: 'La cadence doit être supérieure à 0 (exemplaires par heure).' }) };
+      if (valeurs.margeur !== null && valeurs.margeur <= 0) return { statusCode: 400, body: JSON.stringify({ error: 'La cadence du margeur doit être supérieure à 0 (feuilles par heure).' }) };
       if (Object.values(valeurs).every((v) => v === null)) return { statusCode: 400, body: JSON.stringify({ error: 'Renseignez au moins une valeur.' }) };
       const nbPers = Math.max(1, parseInt(b.nb_personnes, 10) || 1);
       const parPassage = Math.max(1, parseInt(b.exemplaires_par_passage, 10) || 1);
@@ -111,6 +118,13 @@ const handlerProtege = async (event) => {
       if (valeurs.reglage_fer !== null) ajout(NOMS.reglage_fer, 2, { type_calcul: 'par_element', duree_h: valeurs.reglage_fer / 60, element_param: 'nb_fers', element_label: 'fer' });
       // Massicot droit : prise, taquage et évacuation de chaque pile (× nombre de piles calculé d'après la composition du livre).
       if (valeurs.manutention_pile !== null) ajout(NOMS.manutention_pile, 2, { type_calcul: 'par_element', duree_h: valeurs.manutention_pile / 3600, element_param: 'refente_piles', element_label: 'pile' });
+      // Chargement du margeur (plieuse, etc.) : feuilles à charger ÷ cadence de chargement (ex. 20 000 feuilles/h : 5 000 feuilles = 15 min).
+      // Même quantité que le roulage (formule du profil, sinon quantité de l'OF), sans la division par « exemplaires par passage » : on charge des feuilles.
+      if (valeurs.margeur !== null) ajout(NOMS.chargement_margeur, 2, { type_calcul: 'cadence', cadence_par_h: valeurs.margeur, ...(formule ? { quantite_formule: formule, unite_cadence: 'feuilles' } : {}) });
+      // Réglages de la plieuse d'après la composition du livre (lib/pliage.js) : un réglage au début de chaque série de cahiers de même
+      // pagination (4, 8, 16, 32 pages), puis un simple ajustement du pli pour chaque cahier suivant de cette pagination.
+      CLASSES_PLI.forEach((c) => { if (valeurs[`reglage_pli_${c}`] !== null) ajout(NOMS[`reglage_pli_${c}`], 2, { type_calcul: 'par_element', duree_h: valeurs[`reglage_pli_${c}`] / 60, element_param: `pliage_series_${c}`, element_label: 'série' }); });
+      if (valeurs.ajustement_pli !== null) ajout(NOMS.ajustement_pli, 2, { type_calcul: 'par_element', duree_h: valeurs.ajustement_pli / 60, element_param: 'pliage_ajustements', element_label: 'cahiers suivants' });
       if (valeurs.cadence !== null) ajout(NOMS.roulage, 3, { type_calcul: 'cadence', cadence_par_h: valeurs.cadence, nb_personnes: nbPers, ...(formule || unite ? { quantite_formule: formule, unite_cadence: unite } : {}), ...(parPassage > 1 ? { par_passage: parPassage } : {}) });
       if (valeurs.nettoyage !== null) ajout(NOMS.nettoyage, 4, { type_calcul: 'fixe', duree_h: valeurs.nettoyage / 60 });
       const { error } = await supabase.from('phases_standard').insert(lignes);

@@ -166,6 +166,9 @@ async function calculerEtapes(supabase, ofId) {
         ...(reglagesRefente.palettisation_s > 0 ? [ph('Palettisation des piles coupées', 4, { type_calcul: 'par_element', duree_h: reglagesRefente.palettisation_s / 3600, element_param: 'refente_piles_finies', element_label: 'pile coupée' })] : []),
       ];
     }
+    // Plieuse : le margeur charge une feuille par cahier plié (passe comprise) ; avec la composition du livre, la quantité est exacte
+    // (sinon on garde la quantité à traiter du profil : exemplaires × nombre de cahiers).
+    if (derivees) utilisees = utilisees.map((p) => (p.nom === 'Chargement du margeur' ? { ...p, quantite_formule: 'pliage_feuilles', unite_cadence: 'feuilles', par_passage: 1 } : p));
     const phases = utilisees.map((p) => {
       let d = 0; let detail = '';
       if (p.type_calcul === 'fixe') {
@@ -180,9 +183,12 @@ async function calculerEtapes(supabase, ofId) {
         } else {
           d = Number(p.duree_h) * valeur;
           const secondes = Number(p.duree_h) * 3600;
-          detail = secondes > 0 && secondes < 120
-            ? `${Math.round(secondes * 10) / 10} s × ${valeur} ${p.element_label || p.element_param}`   // manutention d'une pile : quelques secondes
-            : `${p.duree_h} h × ${valeur} ${p.element_label || p.element_param}`;
+          const unitaire = secondes > 0 && secondes < 120 ? `${Math.round(secondes * 10) / 10} s`        // manutention d'une pile : quelques secondes
+            : secondes >= 120 && secondes < 3600 ? `${Math.round(secondes / 60 * 100) / 100} min`           // réglage, taquage : quelques minutes
+            : `${Number(p.duree_h)} h`;
+          detail = `${unitaire} × ${valeur} ${p.element_label || p.element_param}`;
+          // Plieuse : une pagination absente du livre (0 série, 0 ajustement) ne fait pas apparaître de ligne vide.
+          if (valeur === 0 && /^pliage_/.test(p.element_param)) return null;
         }
       } else if (p.type_calcul === 'formule') {
         const a = analyser(p.formule);
@@ -220,7 +226,7 @@ async function calculerEtapes(supabase, ofId) {
         } else {
           // L'affichage « en cahiers » n'a de sens que si la quantité dépend des exemplaires (quantite * nb_cahiers) ;
           // une formule sans « quantite » (massicot : feuilles × coupes) ne se convertit pas en exemplaires.
-          if (!uniteQte && a.variables.includes('quantite')) uniteQte = { unite, formule: String(p.quantite_formule).trim(), valeur: null };
+          if (!uniteQte && a.variables.includes('quantite') && p.nom !== 'Chargement du margeur') uniteQte = { unite, formule: String(p.quantite_formule).trim(), valeur: null };
           const valeurs = {};
           a.variables.forEach((v) => {
             const info = v === 'quantite' ? { libelle: 'Quantité (exemplaires)', type: 'nombre', unite: null } : (parCle[v] || { libelle: v, type: 'nombre', unite: null });
@@ -257,7 +263,7 @@ async function calculerEtapes(supabase, ofId) {
         }
       }
       return { nom: p.nom, duree_h: arrondi(d), detail, occupe_machine: p.occupe_machine, nb_personnes: p.nb_personnes, type_calcul: p.type_calcul };
-    });
+    }).filter(Boolean);
 
     // Détail de la refente (par pagination de cahier) pour l'écran de chiffrage ; null si aucune phase n'en dépend.
     const refente = utiliseRefente || calculRefente || (RF.CODES_OPERATIONS.includes(g.operations.code) && compositionBrute) ? RF.calculer(compositionBrute, quantite, reglagesRefente) : null;

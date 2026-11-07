@@ -40,7 +40,8 @@ const PILE_MAX_LIMITE = 5000;
 const CODES_OPERATIONS = ['REFENTE', 'REFENTE_MAGASIN'];
 
 // Variables que le moteur de formules peut lire sans qu'on les saisisse : elles sont calculées d'après la composition.
-const CLES_DERIVEES = ['refente_coups', 'refente_piles', 'refente_feuilles', 'refente_morceaux', 'refente_piles_taquees', 'refente_piles_finies'];
+const PL = require('./pliage');
+const CLES_DERIVEES = ['refente_coups', 'refente_piles', 'refente_feuilles', 'refente_morceaux', 'refente_piles_taquees', 'refente_piles_finies', ...PL.CLES_DERIVEES];
 const CLE_COMPOSITION = 'composition_cahiers';
 const CLE_PILE_MAX = 'feuilles_par_pile';
 // Autres caractéristiques du produit lues par le calcul (toutes facultatives).
@@ -274,6 +275,7 @@ function calculer(brut, exemplaires, reglagesOuPile) {
   return {
     ok: true, erreurs, lignes, total, ...base,
     quantite_par_cahier: quantiteParCahier,
+    pliage: PL.analyser(lecture.lignes, quantiteParCahier),
     cahiers_par_exemplaire: lecture.lignes.reduce((s, l) => s + l.cahiers, 0),
     pages_par_exemplaire: lecture.lignes.reduce((s, l) => s + l.cahiers * l.pages, 0),
     temps: {
@@ -293,6 +295,7 @@ function variablesDerivees(brutComposition, exemplaires, reglages) {
     refente_lignes: r.total.lignes_coupees,
     refente_piles_taquees: r.total.piles_taquees, refente_piles_finies: r.total.piles_finies,
     nb_cahiers: r.cahiers_par_exemplaire,
+    ...PL.variables(r.pliage),
   };
 }
 

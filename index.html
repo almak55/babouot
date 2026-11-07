@@ -5231,13 +5231,13 @@
     const dessiner = () => {
       const lignes = donnees.profils.map((p, i) => `
         <div class="profil-ligne"><div><strong>${esc(p.operation)}</strong> · ${esc(nomType(p.type_production))}<br>
-          ${p.mutualiser ? '<span class="tag ok" title="Une seule mise en route et un seul nettoyage par journée">1 MER / 1 nettoyage par jour</span> ' : ''}<span class="plan-note">mise en route ${nbm(p.mise_en_route_min)} · réglage ${nbm(p.reglage_min)}${p.reglage_fer_min ? ' + ' + nbm(p.reglage_fer_min) + '/fer' : ''}${p.manutention_pile_s ? ' · manutention ' + p.manutention_pile_s + ' s/pile' : ''} · roulage ${p.cadence_par_h ? p.cadence_par_h + ' ' + (p.unite_cadence || 'ex.') + '/h' : '—'}${p.quantite_formule ? ' (sur ' + esc(p.quantite_formule) + ')' : ''} · nettoyage ${nbm(p.nettoyage_min)}</span></div>
+          ${p.mutualiser ? '<span class="tag ok" title="Une seule mise en route et un seul nettoyage par journée">1 MER / 1 nettoyage par jour</span> ' : ''}<span class="plan-note">mise en route ${nbm(p.mise_en_route_min)} · réglage ${nbm(p.reglage_min)}${p.reglage_fer_min ? ' + ' + nbm(p.reglage_fer_min) + '/fer' : ''}${p.manutention_pile_s ? ' · manutention ' + p.manutention_pile_s + ' s/pile' : ''}${p.margeur_cadence_h ? ' · margeur ' + p.margeur_cadence_h.toLocaleString('fr-FR') + ' f./h' : ''}${PLI.some(c => p['reglage_pli_' + c + '_min'] !== null && p['reglage_pli_' + c + '_min'] !== undefined) ? ' · réglage pli ' + PLI.filter(c => p['reglage_pli_' + c + '_min'] !== null && p['reglage_pli_' + c + '_min'] !== undefined).map(c => c + ' p ' + nbm(p['reglage_pli_' + c + '_min'])).join(', ') + (p.ajustement_pli_min ? ' + ' + nbm(p.ajustement_pli_min) + '/cahier suivant' : '') : ''} · roulage ${p.cadence_par_h ? p.cadence_par_h + ' ' + (p.unite_cadence || 'ex.') + '/h' : '—'}${p.quantite_formule ? ' (sur ' + esc(p.quantite_formule) + ')' : ''} · nettoyage ${nbm(p.nettoyage_min)}</span></div>
           <span><button class="btn" data-modif="${i}">Modifier</button> <button class="btn" data-suppr="${i}">Supprimer</button></span></div>`).join('');
       $('pf-liste').innerHTML = lignes || '<div class="empty">Aucun profil enregistré pour cette machine.</div>';
       $('pf-liste').querySelectorAll('[data-modif]').forEach(b => b.addEventListener('click', () => {
         const p = donnees.profils[Number(b.dataset.modif)];
         $('pf-op').value = p.operation_id; $('pf-type').value = p.type_production || '';
-        $('pf-mer').value = p.mise_en_route_min ?? ''; $('pf-reg').value = p.reglage_min ?? ''; $('pf-regfer').value = p.reglage_fer_min ?? ''; $('pf-pile').value = p.manutention_pile_s ?? '';
+        $('pf-mer').value = p.mise_en_route_min ?? ''; $('pf-reg').value = p.reglage_min ?? ''; $('pf-regfer').value = p.reglage_fer_min ?? ''; $('pf-pile').value = p.manutention_pile_s ?? ''; $('pf-marg').value = p.margeur_cadence_h ?? ''; PLI.forEach(c => { $('pf-rp' + c).value = p['reglage_pli_' + c + '_min'] ?? ''; }); $('pf-ajp').value = p.ajustement_pli_min ?? ''; $('pf-marg-box').open = !!(p.margeur_cadence_h || p.ajustement_pli_min || PLI.some(c => p['reglage_pli_' + c + '_min']));
         $('pf-cad').value = p.cadence_par_h ?? ''; $('pf-net').value = p.nettoyage_min ?? ''; $('pf-pers').value = p.nb_personnes || 1; $('pf-pp').value = p.par_passage || 1;
         $('pf-unite').value = p.unite_cadence || ''; $('pf-formule').value = p.quantite_formule || ''; $('pf-mut').checked = !!p.mutualiser; $('pf-mut').dataset.touche = ''; majUnite();
         calcul();
@@ -5253,6 +5253,7 @@
       }));
     };
     const $ = (id) => document.getElementById(id);
+    const PLI = [4, 8, 16, 32];   // paginations de la plieuse qui ont leur réglage
     afficherModale(`
       <h3>Temps de production — ${esc(machine.nom)}</h3>
       <div id="pf-liste"></div>
@@ -5266,6 +5267,17 @@
           <div class="field"><label>Réglage du passage (min)</label><input id="pf-reg" type="number" min="0" step="any"></div>
           <div class="field"><label>Réglage par fer (min) <span class="plan-note">— tracé, empreintes, collage, positionnement, pression/température ; × « Nombre de fers » de l'OF</span></label><input id="pf-regfer" type="number" min="0" step="any"></div>
           <div class="field hidden" id="pf-pile-box"><label>Manutention par pile (secondes) <span class="plan-note">— prise de la pile, taquage, évacuation ; × nombre de piles de 500 feuilles au plus. 0 ou vide si votre cadence en coups/h l'inclut déjà</span></label><input id="pf-pile" type="number" min="0" step="any"></div>
+          <details class="field" id="pf-marg-box" style="grid-column: 1 / -1;border:1px solid var(--line);border-radius:10px;padding:8px 12px;">
+            <summary><strong>Plieuse à margeur (ex. MBO) : chargement du papier et réglages par pagination</strong> <span class="plan-note">— facultatif ; la mise en route ci-dessus = mise en place des modules (empileurs, sorties de poches…), une fois au début de l'OF</span></summary>
+            <div class="step-grid" style="margin-top:8px;">
+              <div class="field" style="grid-column: 1 / -1;"><label>Chargement du margeur (feuilles / h) <span class="plan-note">— feuilles à plier ÷ cette cadence (calculées d'après la composition du livre, passe comprise). Ex. MBO : 20 000 → 5 000 feuilles = 15 min. Vide = pas de temps de chargement</span></label><input id="pf-marg" type="number" min="0" step="any" placeholder="ex. 20000"></div>
+              <div class="field"><label>Réglage cahiers de 4 pages (min)</label><input id="pf-rp4" type="number" min="0" step="any" placeholder="ex. 15"></div>
+              <div class="field"><label>Réglage cahiers de 8 pages (min)</label><input id="pf-rp8" type="number" min="0" step="any" placeholder="ex. 30"></div>
+              <div class="field"><label>Réglage cahiers de 16 pages (min)</label><input id="pf-rp16" type="number" min="0" step="any" placeholder="ex. 45"></div>
+              <div class="field"><label>Réglage cahiers de 32 pages (min)</label><input id="pf-rp32" type="number" min="0" step="any" placeholder="ex. 60"></div>
+              <div class="field" style="grid-column: 1 / -1;"><label>Ajustement du pli, par cahier suivant de la même pagination (min) <span class="plan-note">— le réglage ci-dessus n'est compté qu'une fois, pour le premier cahier de chaque pagination ; les suivants ne demandent que cet ajustement. Ex. 10 cahiers de 16 pages : 45 min + 9 × 5 min. Une pagination intermédiaire (12 p) prend le réglage de la supérieure (16 p).</span></label><input id="pf-ajp" type="number" min="0" step="any" placeholder="ex. 5"></div>
+            </div>
+          </details>
           <div class="field"><label>Cadence portant sur…</label>
             <select id="pf-preset">
               <option value="exemplaires">Des exemplaires (par défaut)</option>
@@ -5313,6 +5325,7 @@
       $('pf-pile-box').classList.toggle('hidden', !refente);
       $('pf-piles-box').classList.toggle('hidden', !refente);
       $('pf-refente-aide').classList.toggle('hidden', !refente);
+      $('pf-marg-box').classList.toggle('hidden', refente);
       $('pf-cad-label').textContent = n > 1 ? 'Roulage : cadence moyenne (passages / h)' : `Roulage : cadence moyenne (${u} / h)`;
       dessinerApercu(); calcul();
     }
@@ -5352,11 +5365,11 @@
       const n = Math.max(1, parseInt($('pf-pp').value, 10) || 1);
       const passages = Math.ceil(q / n - 1e-9);
       const nbFers = Number($('pf-fers').value) || 0;
-      const min = (nv('pf-mer') || 0) + (nv('pf-reg') || 0) + (nv('pf-regfer') || 0) * nbFers + (nv('pf-pile') && !$('pf-pile-box').classList.contains('hidden') ? nv('pf-pile') / 60 * (Number($('pf-piles').value) || 0) : 0) + (nv('pf-net') || 0) + (cad ? passages / cad * 60 : 0);
+      const min = (nv('pf-mer') || 0) + (nv('pf-reg') || 0) + (nv('pf-regfer') || 0) * nbFers + (nv('pf-pile') && !$('pf-pile-box').classList.contains('hidden') ? nv('pf-pile') / 60 * (Number($('pf-piles').value) || 0) : 0) + (nv('pf-net') || 0) + (nv('pf-marg') && !$('pf-marg-box').classList.contains('hidden') ? q / nv('pf-marg') * 60 : 0) + (cad ? passages / cad * 60 : 0);
       const u = $('pf-unite').value.trim() || 'exemplaires';
       $('pf-total').textContent = min ? `${fmtH(min / 60)} au total (${ap.detail}${Math.round(q * 100) / 100} ${u} à traiter${n > 1 ? ` = ${passages} passages de ${n}` : ''})` : '—';
     }
-    ['pf-mer', 'pf-reg', 'pf-regfer', 'pf-fers', 'pf-pile', 'pf-piles', 'pf-cad', 'pf-net'].forEach(id => $(id).addEventListener('input', calcul));
+    ['pf-mer', 'pf-reg', 'pf-regfer', 'pf-fers', 'pf-pile', 'pf-piles', 'pf-marg', 'pf-cad', 'pf-net'].forEach(id => $(id).addEventListener('input', calcul));
     $('pf-apercu').addEventListener('input', calcul);
     $('pf-formule').addEventListener('input', majUnite);
     $('pf-pp').addEventListener('input', majUnite);
@@ -5393,7 +5406,7 @@
       try {
         const corps = {
           machine_id: machine.id, operation_id: $('pf-op').value, type_production: $('pf-type').value || null,
-          mise_en_route_min: nv('pf-mer'), reglage_min: nv('pf-reg'), reglage_fer_min: nv('pf-regfer'), manutention_pile_s: $('pf-pile-box').classList.contains('hidden') ? null : nv('pf-pile'), cadence_par_h: nv('pf-cad'), nettoyage_min: nv('pf-net'), nb_personnes: nv('pf-pers') || 1, exemplaires_par_passage: nv('pf-pp') || 1, ...($('pf-mut').dataset.touche ? { mutualiser: $('pf-mut').checked } : {}),
+          mise_en_route_min: nv('pf-mer'), reglage_min: nv('pf-reg'), reglage_fer_min: nv('pf-regfer'), manutention_pile_s: $('pf-pile-box').classList.contains('hidden') ? null : nv('pf-pile'), margeur_cadence_h: $('pf-marg-box').classList.contains('hidden') ? null : nv('pf-marg'), ...Object.fromEntries(PLI.map(c => ['reglage_pli_' + c + '_min', $('pf-marg-box').classList.contains('hidden') ? null : nv('pf-rp' + c)])), ajustement_pli_min: $('pf-marg-box').classList.contains('hidden') ? null : nv('pf-ajp'), cadence_par_h: nv('pf-cad'), nettoyage_min: nv('pf-net'), nb_personnes: nv('pf-pers') || 1, exemplaires_par_passage: nv('pf-pp') || 1, ...($('pf-mut').dataset.touche ? { mutualiser: $('pf-mut').checked } : {}),
           unite_cadence: $('pf-unite').value.trim() || null, quantite_formule: $('pf-formule').value.trim() || null,
         };
         const envoyer = async (c) => {
@@ -6955,7 +6968,8 @@
                 [`Coupe (${fmtN(r.total.coups)} coups ÷ ${fmtN(r.reglages.cadence_h)}/h)`, t.coupe_h], [`Palettisation (${fmtN(r.total.piles_finies)} piles coupées)`, t.palettisation_h],
               ].filter(x => x[1] > 0);
               document.getElementById('m-compo-resultat').innerHTML = `Temps total de la session de coupe : <strong>${fmtH(t.total_h)}</strong>
-                <ul class="refente-detail">${lignesTemps.map(x => `<li><span>${esc(x[0])}</span><span class="mono">${fmtH(x[1])}</span></li>`).join('')}</ul>`;
+                <ul class="refente-detail">${lignesTemps.map(x => `<li><span>${esc(x[0])}</span><span class="mono">${fmtH(x[1])}</span></li>`).join('')}</ul>
+                <div class="plan-note" style="margin-top:8px;"><strong>Pliage</strong> (temps réglés dans le profil de la plieuse) : ${fmtN(r.pliage.feuilles)} feuilles à marger, passe comprise · ${r.pliage.series.map(x => `${fmtN(x.cahiers)} cahier${x.cahiers > 1 ? 's' : ''} de ${x.pages} p : 1 réglage${x.pages !== x.classe ? ' ' + x.classe + ' p' : ''}${x.ajustements ? ' + ' + fmtN(x.ajustements) + ' ajustement' + (x.ajustements > 1 ? 's' : '') : ''}`).join(' ; ')}</div>`;
             }
             msg.innerHTML = (r.erreurs || []).map(x => `<div class="msg error" style="margin:6px 0 0;">${esc(x)}</div>`).join('');
           } catch (e) { if (moi === version) msg.innerHTML = `<div class="msg error" style="margin:6px 0 0;">Aperçu impossible : ${esc(e.message)}</div>`; }
