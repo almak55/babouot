@@ -106,7 +106,8 @@ const handlerProtege = async (event) => {
   "delai": string | null,
   "type_production": string | null,
   "caracteristiques": { [cle: string]: number | string },
-  "composition": [ { "pages": number, "cahiers": number, "poses": number | null } ],
+  "composition": [ { "pages": number, "cahiers": number, "poses": number | null, "format_feuille": string | null } ],
+  "format_fini": { "largeur_mm": number, "hauteur_mm": number } | null,
   "operation_codes": string[],
   "confiance": "haute" | "moyenne" | "basse",
   "notes": string
@@ -121,7 +122,8 @@ Règles :
 - "caracteristiques" : les valeurs techniques lues sur la fiche, uniquement pour les clés de cette liste (clé = libellé [unité]) :
 ${catalogueCar.length ? catalogueCar.map(c => `  ${c.cle} = ${c.libelle}${c.unite ? ' [' + c.unite + ']' : ''}${c.type === 'texte' ? ' (texte)' : ' (nombre)'}`).join('\n') : '  (aucune)'}
   N'inclus que les valeurs clairement présentes (ex. grammage du papier, nombre de cahiers, nombre de coupes) ; objet vide {} sinon. Nombres sans unité ni texte autour.
-- "composition" : la composition EXACTE de l'intérieur du livre telle qu'écrite sur la fiche, une ligne par pagination différente : "pages" = nombre de pages du cahier (4, 8, 16, 32…), "cahiers" = combien de cahiers de cette pagination composent UN exemplaire, "poses" = nombre de cahiers identiques imprimés sur une même feuille (« 2 poses », « 16 poses ») si la fiche l'indique, sinon null. Tableau vide [] si la fiche ne détaille pas les cahiers. Ne compte pas les couvertures, gardes ni hors-texte.
+- "composition" : la composition EXACTE de l'intérieur du livre telle qu'écrite sur la fiche, une ligne par pagination différente : "pages" = nombre de pages du cahier (4, 8, 16, 32…), "cahiers" = combien de cahiers de cette pagination composent UN exemplaire, "poses" = nombre de cahiers identiques imprimés sur une même feuille (« 2 poses », « 16 poses ») si la fiche l'indique, sinon null. Tableau vide [] si la fiche ne détaille pas les cahiers. "format_feuille" = format de la feuille imprimée (ex. « 650x1000 » en mm) si la fiche l'indique, sinon null. Ne compte pas les couvertures, gardes ni hors-texte.
+- "format_fini" : le format fini / rogné de l'ouvrage (« format rogné », « format fini », « format du livre »), largeur puis hauteur, converti en millimètres (65 x 100 cm → 650 x 1000 ; 13 x 20 cm → 130 x 200) ; null si absent.
 - "operation_codes" : uniquement des codes choisis dans la liste ci-dessous, correspondant aux opérations clairement indiquées comme applicables (mention "oui", case cochée, quantité renseignée). N'invente aucun code hors de cette liste. Dans l'ordre le plus plausible d'une gamme de fabrication.
 - "confiance" : "haute" si l'essentiel est net et lisible, "moyenne" si certains champs sont incertains, "basse" si le document est difficile à exploiter.
 - "notes" : une phrase en français signalant les champs douteux, illisibles, ou les opérations non rattachées à la liste.
@@ -180,10 +182,10 @@ ${listeOperations}`;
     });
     // Composition du livre (cahiers, paginations, poses) -> calcul précis de la refente au massicot droit.
     if (catalogueCar.some((c) => c.cle === 'composition_cahiers')) {
-      const noteComposition = require('./lib/refente').integrerCompositionFiche(resultat.composition, propres);
+      const noteComposition = require('./lib/refente').integrerCompositionFiche(resultat.composition, propres, resultat.format_fini);
       if (noteComposition) resultat.notes = [resultat.notes, noteComposition].filter(Boolean).join(' ');
     }
-    delete resultat.composition;
+    delete resultat.composition; delete resultat.format_fini;
     resultat.caracteristiques = propres;
 
     return { statusCode: 200, body: JSON.stringify(resultat) };

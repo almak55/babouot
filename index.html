@@ -726,7 +726,14 @@
   .plan-outils select { min-width: 160px; max-width: 100%; flex: 1 1 160px; }
   .plan-outils #m-ajout-op { flex: 2 1 260px; }
   .plan-sep { flex: 1 1 auto; }
-  .compo-table input { width: 72px; padding: 4px 6px; }
+  .refente-val { font-weight: 600; padding: 8px 0; font-size: 15px; }
+  .refente-resultat { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--paper-raised); border: 1px solid var(--accent-teal); font-size: 15px; }
+  .refente-resultat:empty { display: none; }
+  .compo-table .cp-info { display: block; font-size: 11px; max-width: 120px; line-height: 1.25; margin-top: 2px; }
+  .compo-table input { width: 58px; padding: 4px 5px; }
+  .compo-table .cp-poses { width: 80px; }
+  .compo-table th, .compo-table td { padding: 6px 4px; }
+  .compo-table th { font-size: 10px; }
   .compo-table td.num, .compo-table th.num { text-align: right; white-space: nowrap; }
   .compo-table tfoot td { font-weight: 600; background: var(--paper-raised-2, #eef0f4); }
   .plan-table-wrap { max-height: 300px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper-raised); }
@@ -6574,6 +6581,7 @@
     const SOURCES = {
       machine: 'Temps spécifiques à la machine',
       operation: 'Temps standard de l\'opération',
+      refente: 'Temps calculé d\'après la composition du livre (coups de couteau, piles) — voir « Calcul de la coupe » ci-dessous',
       en_ligne: 'Opération en ligne : durée de production identique à celle de l\'opération en amont',
       aucune: 'Aucun temps standard défini pour cette opération — renseignez-le dans « Temps standards », ou saisissez une durée manuelle.',
     };
@@ -6609,16 +6617,74 @@
       return `<div class="field"><label>Quantité de cette opération${aide}</label><input class="s-qte" type="number" min="1" data-auto="${auto}" value="${ouvrages}"></div>`;
     };
     // Composition du livre : lue sur la fiche (JSON) ou saisie à la main « 10x16p/2 ; 2x8p/4 » (cahiers × pagination / poses).
-    const CLES_COMPO = ['composition_cahiers', 'feuilles_par_pile'];
+    const CLES_COMPO = ['composition_cahiers', 'feuilles_par_pile', 'passe_pct', 'rognage_cahier_mm', 'marge_feuille_mm', 'format_fini_l_mm', 'format_fini_h_mm'];
     const lireCompoStockee = (brut) => {
       if (brut === undefined || brut === null || String(brut).trim() === '') return [];
       const t = String(brut).trim();
       try {
         const j = JSON.parse(t);
-        if (Array.isArray(j)) return j.map(l => ({ pages: l.pages, cahiers: l.cahiers ?? l.nb_cahiers, poses: l.poses ?? 1, disposition: l.disposition || '', parage: l.parage || '' }));
+        if (Array.isArray(j)) return j.map(l => ({ pages: l.pages, cahiers: l.cahiers ?? l.nb_cahiers, feuille: l.feuille || '', poses: l.poses ?? '', disposition: l.disposition || '', parage: l.parage || '' }));
       } catch (e) { /* texte libre */ }
       return t.split(/[;\n]+/).map(x => /^\s*(\d+)\s*[x×*]\s*(\d+)\s*p?\s*(?:[\/@]\s*(\d+))?\s*$/i.exec(x)).filter(Boolean)
-        .map(m => ({ cahiers: Number(m[1]), pages: Number(m[2]), poses: m[3] ? Number(m[3]) : 1, disposition: '', parage: '' }));
+        .map(m => ({ cahiers: Number(m[1]), pages: Number(m[2]), feuille: '', poses: m[3] ? Number(m[3]) : '', disposition: '', parage: '' }));
+    };
+    // Calcul de la coupe au massicot droit : saisie de la composition du livre, directement dans l'opération de refente.
+    const FORMATS_FEUILLE = ['450x640', '500x700', '640x900', '650x920', '700x1000', '720x1020'];
+    const hoteGamme = (data.etapes.find(x => x.refente_calculable) || {}).gamme_id || null;
+    const compoRequise = (data.produit_requis || []).some(r => r.cle === 'composition_cahiers');
+    const compoEditeurHtml = (e) => {
+      const car = data.of.caracteristiques || {};
+      const val = (c) => esc(car[c] ?? '');
+      const lignes = lireCompoStockee(car.composition_cahiers);
+      const prm = e ? (e.parametres || {}) : {};
+      const champTemps = e && (e.refente_calcul_actif || e.source === 'aucune');
+      const manuelle = e && e.duree_manuelle_h !== null && e.duree_manuelle_h !== undefined;
+      const ligne = (l) => `<tr class="compo-ligne" data-dispo="${esc(l.disposition || '')}" data-parage="${esc(l.parage || '')}">
+        <td><input class="cp-pages" type="number" min="1" step="1" value="${esc(l.pages ?? '')}" aria-label="Pagination"></td>
+        <td><input class="cp-cahiers" type="number" min="1" step="1" value="${esc(l.cahiers ?? '')}" aria-label="Nombre de cahiers"></td>
+        <td><input class="cp-feuille" type="text" list="m-compo-formats" placeholder="ex. 650x1000" value="${esc(l.feuille ?? '')}" aria-label="Format de la feuille en mm" style="width:92px;"></td>
+        <td><input class="cp-poses" type="number" min="1" step="1" placeholder="auto" value="${esc(l.poses ?? '')}" aria-label="Poses sur la feuille"><small class="cp-info plan-note"></small></td>
+        <td class="num cp-feuilles">—</td><td class="num cp-piles">—</td><td class="num cp-coups">—</td><td class="num cp-temps">—</td>
+        <td><button class="btn cp-suppr" type="button" title="Retirer cette pagination" aria-label="Retirer cette pagination">✕</button></td></tr>`;
+      return `
+      <div class="produit-box refente-box" id="m-compo-box">
+        <div class="produit-titre">Calcul de la coupe — composition du livre <span class="plan-note">— d'après la fiche de fabrication : une ligne par pagination. Les poses, les coups de couteau, les piles de 500 feuilles et le temps se calculent tout seuls.</span></div>
+        ${manuelle ? `<div class="msg" style="margin:0 0 8px;">Une durée manuelle (${esc(String(e.duree_manuelle_h).replace('.', ','))} h) est appliquée à cette opération : elle remplace ce calcul. <button class="btn" type="button" id="m-compo-utiliser">Utiliser le calcul</button></div>` : ''}
+        <div class="step-grid">
+          <div class="field"><label>Quantité de la commande (exemplaires)</label><div class="refente-val" id="m-compo-qte">—</div></div>
+          <div class="field"><label>Passe ajoutée (%)</label><input class="s-car" data-ref="passe_pct" data-cle="passe_pct" type="number" min="0" step="any" placeholder="10" value="${val('passe_pct')}"></div>
+          <div class="field"><label>Quantité par cahier <span class="plan-note">— commande + passe</span></label><div class="refente-val" id="m-compo-qpc">—</div></div>
+          <div class="field"><label>Format fini (rogné) du livre <span class="plan-note">— repris de la fiche, mm</span></label>
+            <div style="display:flex;gap:6px;align-items:center;"><input class="s-car" data-ref="format_fini_l_mm" data-cle="format_fini_l_mm" type="number" min="1" step="any" placeholder="largeur" value="${val('format_fini_l_mm')}" style="width:96px;" aria-label="Largeur du format fini"> × <input class="s-car" data-ref="format_fini_h_mm" data-cle="format_fini_h_mm" type="number" min="1" step="any" placeholder="hauteur" value="${val('format_fini_h_mm')}" style="width:96px;" aria-label="Hauteur du format fini"> mm</div></div>
+        </div>
+        <div class="plan-table-wrap" style="max-height:none;"><table class="plan-table compo-table">
+          <thead><tr><th>Pagination<br><span class="plan-note">pages</span></th><th>Cahiers<br><span class="plan-note">dans le livre</span></th><th>Format de la feuille<br><span class="plan-note">mm, à saisir</span></th><th>Poses sur la feuille</th><th class="num">Feuilles</th><th class="num">Piles</th><th class="num">Coups</th><th class="num">Temps</th><th></th></tr></thead>
+          <tbody id="m-compo-body">${(lignes.length ? lignes : [{}]).map(ligne).join('')}</tbody>
+          <tfoot><tr><td colspan="4" id="m-compo-total-lib">Total</td><td class="num" id="m-compo-t-feuilles">—</td><td class="num" id="m-compo-t-piles">—</td><td class="num" id="m-compo-t-coups">—</td><td class="num" id="m-compo-t-temps">—</td><td></td></tr></tfoot>
+        </table></div>
+        <datalist id="m-compo-formats">${FORMATS_FEUILLE.map(f => `<option value="${f}">`).join('')}</datalist>
+        <div class="plan-outils" style="margin-top:8px;">
+          <span class="plan-note">Ajouter :</span>
+          ${[4, 8, 16, 32].map(n => `<button class="btn cp-ajout" type="button" data-pages="${n}">${n} pages</button>`).join('')}
+          <button class="btn cp-ajout" type="button" data-pages="">Autre…</button>
+        </div>
+        ${champTemps ? `<div class="step-grid" style="margin-top:10px;">
+          <div class="field"><label>Cadence de coupe (coups de couteau / h) <span class="plan-note">— 120 à 300 en production réelle, manutention comprise</span></label><input class="s-param" data-ref="refente_cadence_h" data-cle="refente_cadence_h" type="number" min="1" step="any" placeholder="200" value="${esc(prm.refente_cadence_h ?? '')}"></div>
+          <div class="field"><label>Manutention par pile (secondes) <span class="plan-note">— en plus de la cadence ; vide = 0</span></label><input class="s-param" data-ref="refente_manutention_s" data-cle="refente_manutention_s" type="number" min="0" step="any" placeholder="0" value="${esc(prm.refente_manutention_s ?? '')}"></div>
+          <div class="field"><label>Mise en route (minutes)</label><input class="s-param" data-ref="refente_mise_en_route_min" data-cle="refente_mise_en_route_min" type="number" min="0" step="any" placeholder="0" value="${esc(prm.refente_mise_en_route_min ?? '')}"></div>
+        </div>` : (e ? '<div class="plan-note" style="margin-top:8px;">Les temps standards enregistrés pour cette machine sont appliqués ; ce tableau fournit les coups de couteau et les piles qu\'ils utilisent.</div>' : '')}
+        <details style="margin-top:8px;"><summary class="plan-note" style="cursor:pointer;">Réglages du calcul des poses et des piles</summary>
+          <div class="step-grid" style="margin-top:8px;">
+            <div class="field"><label>Feuilles maximum par pile</label><input class="s-car" data-ref="feuilles_par_pile" data-cle="feuilles_par_pile" type="number" min="1" step="1" placeholder="500" value="${val('feuilles_par_pile')}"></div>
+            <div class="field"><label>Rognage par côté du cahier (mm)</label><input class="s-car" data-ref="rognage_cahier_mm" data-cle="rognage_cahier_mm" type="number" min="0" step="any" placeholder="5" value="${val('rognage_cahier_mm')}"></div>
+            <div class="field"><label>Marge perdue par bord de feuille (mm)</label><input class="s-car" data-ref="marge_feuille_mm" data-cle="marge_feuille_mm" type="number" min="0" step="any" placeholder="10" value="${val('marge_feuille_mm')}"></div>
+          </div>
+          <small class="plan-note">Poses calculées : on cherche combien de cahiers à plat (largeur et hauteur d'une page × plis, + rognage) tiennent sur la feuille, marges déduites. C'est une estimation : saisissez les poses si l'imposition réelle est différente.</small>
+        </details>
+        <input type="hidden" class="s-car" data-cle="composition_cahiers" id="m-compo-valeur" value="${esc(car.composition_cahiers ?? '')}">
+        <div id="m-compo-resultat" class="refente-resultat"></div>
+        <div id="m-compo-msg"></div>
+      </div>`;
     };
     const etapesHtml = data.etapes.map(e => {
       const verrou = e.statut !== 'à planifier' && e.statut !== 'planifié';   // en cours / terminée : machine figée
@@ -6629,7 +6695,7 @@
       const paramsHtml = e.parametres_requis.filter(p => p.cle !== 'quantite' && !CLES_COMPO.includes(p.cle)).map(p => `
         <div class="field"><label>${esc(p.libelle)}${p.unite ? ' (' + esc(p.unite) + ')' : ''} <span class="plan-note">— vide = valeur du produit</span></label>
           <input class="s-param" data-cle="${p.cle}" type="${p.type === 'texte' ? 'text' : 'number'}" ${p.type === 'texte' ? '' : 'min="0" step="any"'} placeholder="${esc(valeurProduit(p.cle))}" value="${esc(e.parametres[p.cle] ?? '')}"></div>`).join('');
-      const refenteHtml = e.refente && e.refente.ok ? `<div class="plan-note" style="margin-top:6px;">Refente d'après la composition du livre : ${e.refente.total.feuilles.toLocaleString('fr-FR')} feuilles en ${e.refente.total.piles.toLocaleString('fr-FR')} pile${e.refente.total.piles > 1 ? 's' : ''} (${e.refente.pile_max} maximum), <strong>${e.refente.total.coups.toLocaleString('fr-FR')} coups de couteau</strong>.</div>` : '';
+      const refenteHtml = e.gamme_id !== hoteGamme && e.refente && e.refente.ok ? `<div class="plan-note" style="margin-top:6px;">Refente d'après la composition du livre : ${e.refente.total.feuilles.toLocaleString('fr-FR')} feuilles en ${e.refente.total.piles.toLocaleString('fr-FR')} pile${e.refente.total.piles > 1 ? 's' : ''} (${e.refente.pile_max} maximum), <strong>${e.refente.total.coups.toLocaleString('fr-FR')} coups de couteau</strong>.</div>` : '';
       const phasesHtml = e.phases.length ? `<ul class="phase-list">${e.phases.map(p => `
         <li><span>${esc(p.nom)}${p.occupe_machine ? '' : ' <em>(sans machine)</em>'}</span><span class="mono">${fmtH(p.duree_h)}</span><small>${esc(p.detail)}</small></li>`).join('')}</ul>` : '';
       // TOUTES les autres opérations de l'OF peuvent être cochées : le numéro de saisie n'est pas un ordre d'exécution.
@@ -6676,6 +6742,7 @@
           <div class="step-corps">
             <div class="step-source">${SOURCES[e.source]}${e.duree_manuelle_h !== null ? ' — <strong>durée manuelle appliquée</strong>' : ''}</div>
             <div class="machine-ligne field"><label>Machine prévue ${verrou ? `(étape ${esc(e.statut)} — non modifiable)` : (planifie ? '<span class="plan-note">— étape planifiée : la changer la retire du planning</span>' : '')}</label><select class="s-machine" ${verrou ? 'disabled' : ''}>${machOptions}</select>${(e.machines_planifiees || []).length ? `<small class="plan-note">Affectée au planning : <strong>${esc(e.machines_planifiees.join(' + '))}</strong></small>` : ((e.machines_standard || []).length && !e.machine_id ? `<small class="plan-note">Machine standard de l'opération : <strong>${esc(e.machines_standard.join(' / '))}</strong></small>` : '')}</div>
+            ${e.gamme_id === hoteGamme ? compoEditeurHtml(e) : ''}
             ${predHtml}
             <div class="step-grid">
               ${champQuantite(e)}
@@ -6690,28 +6757,8 @@
 
     // Caractéristiques du produit : saisies UNE fois ici, reprises par toutes les étapes de l'OF.
     const requisProduit = (data.produit_requis || []).filter(r => r.cle !== 'quantite' && !CLES_COMPO.includes(r.cle));
-    // Composition du livre (refente au massicot droit) : tableau dédié, une ligne par pagination de cahier.
-    const compoRequise = (data.produit_requis || []).some(r => r.cle === 'composition_cahiers');
-    const compoValeur = (data.of.caracteristiques || {}).composition_cahiers;
-    const pileMaxValeur = (data.of.caracteristiques || {}).feuilles_par_pile;
-    const compoLignes = lireCompoStockee(compoValeur);
-    const compoHtml = compoRequise ? `
-      <div class="produit-box" id="m-compo-box">
-        <div class="produit-titre">Composition du livre — refente au massicot droit <span class="plan-note">— d'après la fiche de fabrication : une ligne par pagination de cahier. Le temps de coupe se calcule avec le nombre de coups de couteau et de piles (${(pileMaxValeur || 500)} feuilles au maximum par pile).</span></div>
-        <div class="plan-table-wrap" style="max-height:none;"><table class="plan-table compo-table">
-          <thead><tr><th>Pagination (pages)</th><th>Cahiers dans le livre</th><th>Poses par feuille</th><th>Disposition <span class="plan-note">colonnes×lignes</span></th><th>Parage <span class="plan-note">coups</span></th><th class="num">Feuilles</th><th class="num">Piles</th><th class="num">Coups</th><th></th></tr></thead>
-          <tbody id="m-compo-body"></tbody>
-          <tfoot><tr><td colspan="5" id="m-compo-total-lib">Total</td><td class="num" id="m-compo-t-feuilles">—</td><td class="num" id="m-compo-t-piles">—</td><td class="num" id="m-compo-t-coups">—</td><td></td></tr></tfoot>
-        </table></div>
-        <div class="plan-outils" style="margin-top:8px;">
-          <button class="btn" type="button" id="m-compo-add">+ Ajouter une pagination</button>
-          <label style="font-size:13px;display:flex;gap:6px;align-items:center;">Feuilles maximum par pile
-            <input class="s-car" data-cle="feuilles_par_pile" type="number" min="1" step="1" placeholder="500" value="${esc(pileMaxValeur ?? '')}" style="width:80px;"></label>
-        </div>
-        <input type="hidden" class="s-car" data-cle="composition_cahiers" id="m-compo-valeur" value="${esc(compoValeur ?? '')}">
-        <div id="m-compo-msg"></div>
-        <small class="plan-note">Exemple : 2 poses de 16 pages sur une feuille = 2 poses (disposition 2x1, 1 coup au milieu) ; 16 poses de 4 pages = 16 poses (disposition 4x4, 6 coups par pile). Disposition vide = grille la plus carrée. Parage = coups supplémentaires pour rogner les bords de la pile de feuilles.</small>
-      </div>` : '';
+    // Composition du livre : dans l'opération de refente ; sinon ici (une phase d'une autre opération l'utilise).
+    const compoHtml = compoRequise && !hoteGamme ? compoEditeurHtml(null) : '';
     const produitHtml = requisProduit.length ? `
       <div class="produit-box">
         <div class="produit-titre">Caractéristiques du produit <span class="plan-note">— saisies une fois, utilisées par toutes les étapes</span></div>
@@ -6812,85 +6859,109 @@
       });
     };
     document.querySelectorAll('.s-car, .s-param').forEach(i => i.addEventListener('input', majRatios));
-    // ---- Composition du livre : tableau éditable + aperçu en direct (feuilles, piles, coups de couteau) ----
-    if (compoRequise) {
+    // ---- Composition du livre : tableau éditable + aperçu en direct (poses, feuilles, piles, coups, temps) ----
+    if (document.getElementById('m-compo-box')) {
+      const boite = document.getElementById('m-compo-box');
       const corps = document.getElementById('m-compo-body');
       const valeurCachee = document.getElementById('m-compo-valeur');
-      const pileInput = document.querySelector('.s-car[data-cle="feuilles_par_pile"]');
       const msg = document.getElementById('m-compo-msg');
       const nombre = (x) => Number(String(x ?? '').replace(',', '.'));
-      const dispoDefaut = (poses) => { const p = Math.max(1, Math.round(nombre(poses)) || 1); let l = 1; for (let d = 1; d * d <= p; d++) if (p % d === 0) l = d; return `${p / l}x${l}`; };
-      const ligneCompo = (l) => `<tr class="compo-ligne">
-        <td><input class="cp-pages" type="number" min="1" step="1" value="${esc(l.pages ?? '')}" aria-label="Pagination"></td>
-        <td><input class="cp-cahiers" type="number" min="1" step="1" value="${esc(l.cahiers ?? '')}" aria-label="Nombre de cahiers"></td>
-        <td><input class="cp-poses" type="number" min="1" step="1" value="${esc(l.poses ?? 1)}" aria-label="Poses par feuille"></td>
-        <td><input class="cp-dispo" type="text" placeholder="${esc(dispoDefaut(l.poses ?? 1))}" value="${esc(l.disposition ?? '')}" aria-label="Disposition" style="width:62px;"></td>
-        <td><input class="cp-parage" type="number" min="0" max="4" step="1" placeholder="0" value="${esc(l.parage ?? '')}" aria-label="Parage" style="width:56px;"></td>
-        <td class="num cp-feuilles">—</td><td class="num cp-piles">—</td><td class="num cp-coups">—</td>
-        <td><button class="btn cp-suppr" type="button" title="Retirer cette pagination" aria-label="Retirer cette pagination">✕</button></td></tr>`;
-      corps.innerHTML = (compoLignes.length ? compoLignes : [{ poses: 1 }]).map(ligneCompo).join('');
+      const fmtN = (n) => Number(n).toLocaleString('fr-FR');
       const lignes = () => Array.from(corps.querySelectorAll('.compo-ligne'));
       const donneesLigne = (tr) => ({
-        pages: tr.querySelector('.cp-pages').value.trim(), cahiers: tr.querySelector('.cp-cahiers').value.trim(), poses: tr.querySelector('.cp-poses').value.trim(),
-        disposition: tr.querySelector('.cp-dispo').value.trim(), parage: tr.querySelector('.cp-parage').value.trim(),
+        pages: tr.querySelector('.cp-pages').value.trim(), cahiers: tr.querySelector('.cp-cahiers').value.trim(), feuille: tr.querySelector('.cp-feuille').value.trim(),
+        poses: tr.querySelector('.cp-poses').value.trim(), disposition: tr.dataset.dispo || '', parage: tr.dataset.parage || '',
       });
-      // Lignes complètes (pagination + nombre de cahiers), dans le format enregistré sur l'OF.
+      // Lignes complètes (pagination + nombre de cahiers), dans le format enregistré sur l'OF. Poses vides = calculées d'après les formats.
       const serialiser = () => {
         const sortie = []; const trs = [];
         lignes().forEach(tr => {
           const d = donneesLigne(tr);
           if (d.pages === '' || d.cahiers === '') return;
-          const o = { pages: nombre(d.pages), cahiers: nombre(d.cahiers), poses: d.poses === '' ? 1 : nombre(d.poses) };
+          const o = { pages: nombre(d.pages), cahiers: nombre(d.cahiers) };
+          if (d.feuille) o.feuille = d.feuille;
+          if (d.poses !== '') o.poses = nombre(d.poses);
           if (d.disposition) o.disposition = d.disposition;
           if (d.parage !== '' && nombre(d.parage) > 0) o.parage = nombre(d.parage);
           sortie.push(o); trs.push(tr);
         });
         return { sortie, trs };
       };
-      const remplir = (tr, f, p, c) => { tr.querySelector('.cp-feuilles').textContent = f; tr.querySelector('.cp-piles').textContent = p; tr.querySelector('.cp-coups').textContent = c; };
-      const fmtN = (n) => Number(n).toLocaleString('fr-FR');
+      const synchroniser = () => { const { sortie } = serialiser(); valeurCachee.value = sortie.length ? JSON.stringify(sortie) : ''; };
+      const valeursReglages = () => { const v = {}; boite.querySelectorAll('[data-ref]').forEach(i => { v[i.dataset.ref] = i.value.trim(); }); return v; };
+      const vider = (tr) => { ['feuilles', 'piles', 'coups', 'temps'].forEach(k => { tr.querySelector('.cp-' + k).textContent = '—'; }); tr.querySelector('.cp-info').textContent = ''; };
+      const majQuantites = () => {
+        const q = nombre(document.getElementById('m-of-qte').value) || 0;
+        const passeBrut = boite.querySelector('[data-ref="passe_pct"]').value.trim();
+        const passe = passeBrut === '' ? 10 : nombre(passeBrut);
+        document.getElementById('m-compo-qte').textContent = fmtN(q);
+        document.getElementById('m-compo-qpc').textContent = fmtN(Math.ceil(q * (1 + (Number.isFinite(passe) ? passe : 10) / 100) - 1e-9));
+      };
       let minuteur = null; let version = 0;
       const apercu = () => {
+        majQuantites();
         clearTimeout(minuteur);
         minuteur = setTimeout(async () => {
           const { sortie, trs } = serialiser(); const moi = ++version;
-          lignes().forEach(tr => remplir(tr, '—', '—', '—'));
-          ['feuilles', 'piles', 'coups'].forEach(k => { document.getElementById('m-compo-t-' + k).textContent = '—'; });
+          lignes().forEach(vider);
+          ['feuilles', 'piles', 'coups', 'temps'].forEach(k => { document.getElementById('m-compo-t-' + k).textContent = '—'; });
           document.getElementById('m-compo-total-lib').textContent = 'Total';
+          document.getElementById('m-compo-resultat').innerHTML = '';
           if (!sortie.length) { msg.innerHTML = ''; return; }
           try {
             const res = await fetch(`${API}/evaluer-refente`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ composition: sortie, quantite: nombre(document.getElementById('m-of-qte').value), feuilles_par_pile: pileInput && pileInput.value !== '' ? nombre(pileInput.value) : null }) });
+              body: JSON.stringify({ composition: sortie, quantite: nombre(document.getElementById('m-of-qte').value), valeurs: valeursReglages() }) });
             const r = await res.json();
             if (moi !== version) return;
             if (!res.ok) throw new Error(r.error || 'Erreur serveur');
-            (r.lignes || []).forEach(l => { const tr = trs[l.index]; if (tr) remplir(tr, fmtN(l.feuilles), fmtN(l.piles), fmtN(l.coups)); });
+            (r.lignes || []).forEach(l => {
+              const tr = trs[l.index]; if (!tr) return;
+              tr.querySelector('.cp-feuilles').textContent = fmtN(l.feuilles); tr.querySelector('.cp-piles').textContent = fmtN(l.piles);
+              tr.querySelector('.cp-coups').textContent = fmtN(l.coups); tr.querySelector('.cp-temps').textContent = fmtH(l.temps_h);
+              const champ = tr.querySelector('.cp-poses');
+              champ.placeholder = l.poses_auto ? `auto : ${l.poses_auto}` : 'à saisir';
+              tr.querySelector('.cp-info').textContent = l.poses_source === 'calculees' ? ` ${l.disposition}${l.plat ? ' · plat ' + l.plat.replace('x', '×') + ' mm' : ''}`
+                : (l.poses_source === 'saisies' ? ` saisi${l.poses_auto && l.poses_auto !== l.poses ? ' (calcul : ' + l.poses_auto + ')' : ''}` : ' ⚠ à renseigner');
+            });
             if (r.ok) {
               document.getElementById('m-compo-t-feuilles').textContent = fmtN(r.total.feuilles);
               document.getElementById('m-compo-t-piles').textContent = fmtN(r.total.piles);
               document.getElementById('m-compo-t-coups').textContent = fmtN(r.total.coups);
+              document.getElementById('m-compo-t-temps').textContent = fmtH(r.temps.total_h);
               document.getElementById('m-compo-total-lib').textContent = `Total — ${fmtN(r.cahiers_par_exemplaire)} cahier${r.cahiers_par_exemplaire > 1 ? 's' : ''}, ${fmtN(r.pages_par_exemplaire)} pages par exemplaire · piles de ${fmtN(r.pile_max)} feuilles au plus`;
+              const t = r.temps;
+              document.getElementById('m-compo-resultat').innerHTML = `Temps total de la session de coupe : <strong>${fmtH(t.total_h)}</strong> <span class="plan-note">— ${fmtN(r.total.coups)} coups de couteau ÷ ${fmtN(r.reglages.cadence_h)}/h = ${fmtH(t.coupe_h)}${t.manutention_h ? ` + manutention ${fmtH(t.manutention_h)}` : ''}${t.mise_en_route_h ? ` + mise en route ${fmtH(t.mise_en_route_h)}` : ''}</span>`;
             }
             msg.innerHTML = (r.erreurs || []).map(x => `<div class="msg error" style="margin:6px 0 0;">${esc(x)}</div>`).join('');
           } catch (e) { if (moi === version) msg.innerHTML = `<div class="msg error" style="margin:6px 0 0;">Aperçu impossible : ${esc(e.message)}</div>`; }
         }, 250);
       };
-      const synchroniser = () => { const { sortie } = serialiser(); valeurCachee.value = sortie.length ? JSON.stringify(sortie) : ''; };
-      corps.addEventListener('input', (ev) => {
-        const tr = ev.target.closest('.compo-ligne');
-        if (tr && ev.target.matches('.cp-poses')) tr.querySelector('.cp-dispo').placeholder = dispoDefaut(ev.target.value);
-        synchroniser(); apercu();
-      });
+      boite.addEventListener('input', (ev) => { if (ev.target.closest('#m-compo-body')) synchroniser(); if (ev.target.matches('input')) apercu(); });
       corps.addEventListener('click', (ev) => {
         const b = ev.target.closest('.cp-suppr'); if (!b) return;
         const tr = b.closest('.compo-ligne');
-        if (lignes().length > 1) tr.remove(); else tr.querySelectorAll('input').forEach(i => { i.value = i.classList.contains('cp-poses') ? '1' : ''; });
+        if (lignes().length > 1) tr.remove(); else tr.querySelectorAll('input').forEach(i => { i.value = ''; });
         synchroniser(); apercu();
         valeurCachee.dispatchEvent(new Event('input', { bubbles: true }));   // marque l'OF comme modifié
       });
-      document.getElementById('m-compo-add').addEventListener('click', () => { corps.insertAdjacentHTML('beforeend', ligneCompo({ poses: 1 })); const n = lignes(); n[n.length - 1].querySelector('.cp-pages').focus(); });
+      const ajouter = (pages) => {
+        const vides = lignes().filter(tr => tr.querySelector('.cp-pages').value === '' && tr.querySelector('.cp-cahiers').value === '');
+        let tr = vides[0];
+        if (!tr) { corps.insertAdjacentHTML('beforeend', `<tr class="compo-ligne" data-dispo="" data-parage="">${corps.querySelector('.compo-ligne').innerHTML}</tr>`); tr = lignes()[lignes().length - 1]; tr.querySelectorAll('input').forEach(i => { i.value = ''; }); vider(tr); }
+        if (pages) { tr.querySelector('.cp-pages').value = pages; tr.querySelector('.cp-cahiers').focus(); } else tr.querySelector('.cp-pages').focus();
+        // la feuille d'une ligne ajoutée reprend le format de la ligne précédente (souvent identique)
+        const prec = lignes().filter(x => x !== tr && x.querySelector('.cp-feuille').value).pop();
+        if (prec && !tr.querySelector('.cp-feuille').value) tr.querySelector('.cp-feuille').value = prec.querySelector('.cp-feuille').value;
+        synchroniser(); apercu();
+      };
+      boite.querySelectorAll('.cp-ajout').forEach(b => b.addEventListener('click', () => ajouter(b.dataset.pages)));
+      const utiliser = document.getElementById('m-compo-utiliser');
+      if (utiliser) utiliser.addEventListener('click', () => {
+        const carte = boite.closest('.step-card'); const m = carte && carte.querySelector('.s-manuel');
+        if (m) { m.value = ''; m.dispatchEvent(new Event('input', { bubbles: true })); }
+        utiliser.closest('.msg').remove();
+      });
       document.getElementById('m-of-qte').addEventListener('input', apercu);
-      if (pileInput) pileInput.addEventListener('input', apercu);
       apercu();
     }
     const majLignePred = (row) => {

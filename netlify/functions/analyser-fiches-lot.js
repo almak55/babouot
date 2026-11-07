@@ -52,7 +52,8 @@ Réponds UNIQUEMENT avec un JSON valide, sans texte autour ni balises markdown :
   "reception_date": string | null,      // AAAA-MM-JJ si une date est écrite
   "type_production": string | null,
   "caracteristiques": { [cle: string]: number | string },
-  "composition": [ { "pages": number, "cahiers": number, "poses": number | null } ],
+  "composition": [ { "pages": number, "cahiers": number, "poses": number | null, "format_feuille": string | null } ],
+  "format_fini": { "largeur_mm": number, "hauteur_mm": number } | null,
   "operation_codes": string[],
   "confiance": "haute" | "moyenne" | "basse",
   "notes": string
@@ -66,7 +67,8 @@ Règles :
 - "caracteristiques" : valeurs techniques lues, uniquement pour ces clés (clé = libellé [unité]) :
 ${catalogueCar.length ? catalogueCar.map((c) => `  ${c.cle} = ${c.libelle}${c.unite ? ' [' + c.unite + ']' : ''}${c.type === 'texte' ? ' (texte)' : ' (nombre)'}`).join('\n') : '  (aucune)'}
   Nombres sans unité ; objet vide {} si rien de clair.
-- "composition" : la composition EXACTE de l'intérieur du livre telle qu'écrite sur la fiche, une ligne par pagination différente : "pages" = nombre de pages du cahier (4, 8, 16, 32…), "cahiers" = combien de cahiers de cette pagination composent UN exemplaire, "poses" = nombre de cahiers identiques imprimés sur une même feuille (« 2 poses », « 16 poses ») si la fiche l'indique, sinon null. Tableau vide [] si la fiche ne détaille pas les cahiers. Ne compte pas les couvertures, gardes ni hors-texte.
+- "composition" : la composition EXACTE de l'intérieur du livre telle qu'écrite sur la fiche, une ligne par pagination différente : "pages" = nombre de pages du cahier (4, 8, 16, 32…), "cahiers" = combien de cahiers de cette pagination composent UN exemplaire, "poses" = nombre de cahiers identiques imprimés sur une même feuille (« 2 poses », « 16 poses ») si la fiche l'indique, sinon null. Tableau vide [] si la fiche ne détaille pas les cahiers. "format_feuille" = format de la feuille imprimée (ex. « 650x1000 » en mm) si la fiche l'indique, sinon null. Ne compte pas les couvertures, gardes ni hors-texte.
+- "format_fini" : le format fini / rogné de l'ouvrage (« format rogné », « format fini », « format du livre »), largeur puis hauteur, converti en millimètres (65 x 100 cm → 650 x 1000 ; 13 x 20 cm → 130 x 200) ; null si absent.
 - "operation_codes" : codes choisis UNIQUEMENT dans la liste ci-dessous, pour les opérations demandées par la fiche, dans l'ordre plausible d'une gamme. Chaque ligne de la fiche est une opération demandée si elle est à « oui » ou renseignée, et exclue si « non » : Cousu, Encollé, Dos carré / Dos rond, Signet, Tranchefile, Carton, Dorure, Perfo, Film, Passage coupe 3 faces / Coupe massicot, Pliage (« A plier »), Finition (mise sous film, étuis, mise en caisse, mise sur palette). N'invente aucun code.
 - "confiance" : "haute" si net, "moyenne" si des champs sont incertains, "basse" si difficile à lire.
 - "notes" : une phrase en français sur les champs douteux ou les mentions sans code correspondant (ex. « ATTENTION MODELE : LIVRE LECTURE INVERSEE »).
@@ -105,7 +107,7 @@ ${operations.map((o) => `${o.code} = ${o.nom}`).join('\n')}`;
       });
       // Composition du livre (cahiers, paginations, poses) -> calcul précis de la refente au massicot droit.
       let noteComposition = '';
-      if (catalogueCar.some((c) => c.cle === 'composition_cahiers')) noteComposition = require('./lib/refente').integrerCompositionFiche(f.composition, propres);
+      if (catalogueCar.some((c) => c.cle === 'composition_cahiers')) noteComposition = require('./lib/refente').integrerCompositionFiche(f.composition, propres, f.format_fini);
       const etat = ['ici', 'date', 'inconnue'].includes(f.reception_etat) ? f.reception_etat : 'inconnue';
       // Emboîtage par défaut (tranchefile/signet + finitions ; toujours pour un OF Pléiade) et assemblage avant la couture : voir lib/emboitage.js
       const typeProd = typesProd.some((t) => t.code === f.type_production) ? f.type_production : null;

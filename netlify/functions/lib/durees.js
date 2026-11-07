@@ -99,12 +99,12 @@ async function calculerEtapes(supabase, ofId) {
       ['operation', typeOf ? duType(deLOperation) : []], ['operation', tousTypes(deLOperation)],
     ];
     const retenu = candidats.find(([, l]) => l.length) || ['aucune', []];
-    const utilisees = retenu[1].slice().sort((a, b) => a.ordre - b.ordre);
-    const source = retenu[0];
+    let utilisees = retenu[1].slice().sort((a, b) => a.ordre - b.ordre);
+    let source = retenu[0];
     // Des temps existent mais pour un autre type de production : il faut choisir le type de l'OF.
     const typesAutres = Array.from(new Set(phasesOp.filter((p) => p.type_production && p.type_production !== typeOf
       && (!p.machine_id || p.machine_id === g.machine_id)).map((p) => p.type_production)));
-    const typeManquant = !utilisees.length && typesAutres.length > 0;
+    let typeManquant = !utilisees.length && typesAutres.length > 0;
 
     const quantiteEtape = nombreOuNull(parametres.quantite);
     // Quantité : saisie sur l'étape > ratio du modèle (réparations : % de la quantité de l'OF ; pliage de gardes : 2 × la quantité de l'OF) > quantité de l'OF.
@@ -120,8 +120,8 @@ async function calculerEtapes(supabase, ofId) {
     // Composition du livre (cahiers, poses) -> coups de couteau et piles du massicot droit (lib/refente.js),
     // pour la quantité de CETTE étape. Ces valeurs se calculent, elles ne se saisissent pas.
     const compositionBrute = valeurSaisie(RF.CLE_COMPOSITION);
-    const pileMaxSaisie = nombreOuNull(valeurSaisie(RF.CLE_PILE_MAX));
-    const derivees = RF.variablesDerivees(compositionBrute, quantite, pileMaxSaisie);
+    const reglagesRefente = RF.reglagesDepuis(valeurSaisie);
+    const derivees = RF.variablesDerivees(compositionBrute, quantite, reglagesRefente);
     const valeurDe = (cle) => {
       const saisie = valeurSaisie(cle);
       if (saisie !== null) return saisie;
@@ -149,6 +149,18 @@ async function calculerEtapes(supabase, ofId) {
     // Unité de travail de l'étape quand la cadence porte sur autre chose que les exemplaires (ex. cahiers) :
     // sert à afficher la quantité de l'étape dans cette unité (exemplaires × cahiers par exemplaire…).
     let uniteQte = null;
+    // Aucun temps standard, mais une opération de refente et la composition du livre : le temps se calcule d'après la composition
+    // (coups de couteau ÷ cadence + manutention des piles + mise en route). Cadence, manutention et mise en route se règlent sur l'étape.
+    let calculRefente = false;
+    if (!utilisees.length && derivees && RF.CODES_OPERATIONS.includes(g.operations.code)) {
+      calculRefente = true; source = 'refente'; typeManquant = false;
+      const nbPers = 1;
+      utilisees = [
+        ...(reglagesRefente.mise_en_route_min > 0 ? [{ nom: 'Mise en route', ordre: 1, type_calcul: 'fixe', duree_h: reglagesRefente.mise_en_route_min / 60, occupe_machine: true, nb_personnes: nbPers }] : []),
+        ...(reglagesRefente.manutention_s > 0 ? [{ nom: 'Manutention des piles', ordre: 2, type_calcul: 'par_element', duree_h: reglagesRefente.manutention_s / 3600, element_param: 'refente_piles', element_label: 'pile', occupe_machine: true, nb_personnes: nbPers }] : []),
+        { nom: 'Coupe au massicot droit', ordre: 3, type_calcul: 'cadence', cadence_par_h: reglagesRefente.cadence_h, quantite_formule: 'refente_coups', unite_cadence: 'coups de couteau', occupe_machine: true, nb_personnes: nbPers },
+      ];
+    }
     const phases = utilisees.map((p) => {
       let d = 0; let detail = '';
       if (p.type_calcul === 'fixe') {
@@ -243,7 +255,7 @@ async function calculerEtapes(supabase, ofId) {
     });
 
     // Détail de la refente (par pagination de cahier) pour l'écran de chiffrage ; null si aucune phase n'en dépend.
-    const refente = utiliseRefente ? RF.calculer(compositionBrute, quantite, pileMaxSaisie) : null;
+    const refente = utiliseRefente || calculRefente || (RF.CODES_OPERATIONS.includes(g.operations.code) && compositionBrute) ? RF.calculer(compositionBrute, quantite, reglagesRefente) : null;
 
     const totalPhases = phases.reduce((s, p) => s + p.duree_h, 0);
     let heuresMachine = phases.filter((p) => p.occupe_machine).reduce((s, p) => s + p.duree_h, 0);
@@ -281,7 +293,7 @@ async function calculerEtapes(supabase, ofId) {
       types_possibles: typeManquant ? typesAutres : [],
       parametres, parametres_requis: requis, parametres_manquants: manquants,
       quantite_etape: quantite,
-      refente,
+      refente, refente_calculable: RF.CODES_OPERATIONS.includes(g.operations.code), refente_calcul_actif: calculRefente,
       quantite_regle: parRatio ? parRatio.detail : null,
       quantite_ratio: parRatio ? parRatio.regle : (quantiteEtape !== null && quantiteEtape > 0 ? DL.ratioDe(modeleDelais, reglesEL, g.operations.code, g.operations.nom) : null),
       unite_quantite: uniteQte ? uniteQte.unite : null,
