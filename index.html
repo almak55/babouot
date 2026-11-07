@@ -816,6 +816,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M12 20V4M20 20v-7"/></svg>
       Reporting
     </button>
+    <button class="navbtn hidden" data-tab="utilisateurs" id="nav-utilisateurs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3z"/><path d="M9.5 12l2 2 3.5-4"/></svg>
+      Utilisateurs &amp; rôles
+    </button>
     <div class="side-foot">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.5M12 19v2.5M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2.5 12H5M19 12h2.5M4.2 19.8L6 18M18 6l1.8-1.8"/></svg>
       <span class="switch" id="theme-toggle" role="switch" aria-checked="false" aria-label="Cartes sombres"><span class="knob"></span></span>
@@ -896,11 +900,15 @@
         const r = await original('/.netlify/functions/connexion', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: document.getElementById('login-email').value, mot_de_passe: document.getElementById('login-mdp').value }) });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || 'Connexion impossible.');
-        ecrireSession(d); location.reload();
+        marquerActivite(true); ecrireSession(d); location.reload();
       } catch (err) { document.getElementById('login-msg').textContent = err.message; bt.disabled = false; }
     });
   }
   function deconnecter() { ecrireSession(null); location.reload(); }
+  // Droits du compte connecté (rôle attribué par un administrateur). Tant que l'écran ne les connaît pas encore, on ne masque rien :
+  // c'est de toute façon le serveur qui accepte ou refuse chaque action.
+  window.babouotDroit = (p) => { const d = (lireSession() || {}).droits; return Array.isArray(d) ? d.includes(p) : true; };
+  window.babouotRole = () => { const s = lireSession() || {}; return { role: s.role || '', libelle: s.role_libelle || '' }; };
   function boutonDeconnexion() {
     if (document.getElementById('logout-btn')) return;
     const av = document.getElementById('avatar');
@@ -942,7 +950,7 @@
         const r = await original('/.netlify/functions/connexion', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (sess ? sess.access_token : '') }, body: JSON.stringify({ action: 'changer_mot_de_passe', mot_de_passe_actuel: actuel, nouveau_mot_de_passe: nouveau }) });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || 'Changement impossible.');
-        if (d.access_token) ecrireSession({ access_token: d.access_token, refresh_token: d.refresh_token, expires_at: d.expires_at, email: d.email, profil: d.profil });
+        if (d.access_token) ecrireSession({ access_token: d.access_token, refresh_token: d.refresh_token, expires_at: d.expires_at, email: d.email, profil: d.profil, role: d.role || (sess && sess.role), role_libelle: d.role_libelle || (sess && sess.role_libelle), droits: d.droits || (sess && sess.droits) });
         else ecrireSession(null);
         msg.style.color = '#0f766e'; msg.textContent = 'Mot de passe modifié.';
         setTimeout(() => { if (d.access_token) fermer(); else location.reload(); }, 1200);
@@ -970,7 +978,7 @@
     const lab = 'font-size:13px;';
     o.innerHTML = `<form id="profil-form" style="background:var(--card,#fff);color:var(--text,#111);width:min(420px,100%);max-height:92vh;overflow:auto;padding:26px;border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:11px;">
       <h2 style="margin:0;font-size:19px;">${premiere ? 'Bienvenue — complétez votre profil' : 'Mon profil'}</h2>
-      <div style="font-size:13px;opacity:.7;">Compte : ${esc2(sess.email || '')}</div>
+      <div style="font-size:13px;opacity:.7;">Compte : ${esc2(sess.email || '')}${sess.role_libelle ? ' · Rôle : <b>' + esc2(sess.role_libelle) + '</b>' : ''}</div>
       <div style="display:flex;gap:10px;">
         <label style="${lab}flex:1;">Prénom *<input id="pf-prenom" value="${esc2(p.prenom)}" required maxlength="80" autocomplete="given-name" style="${champ}"></label>
         <label style="${lab}flex:1;">Nom<input id="pf-nom" value="${esc2(p.nom)}" maxlength="80" autocomplete="family-name" style="${champ}"></label></div>
@@ -1006,14 +1014,20 @@
     const s = lireSession(); if (!s) return;
     try {
       const r = await original('/.netlify/functions/connexion', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + s.access_token }, body: JSON.stringify({ action: 'lire_profil' }) });
+      if (r.status === 403) { const e = await r.json().catch(() => ({})); if (e.code === 'desactive') { ecrireSession(null); afficherConnexion(e.error); } return; }
       if (!r.ok) return;
       const d = await r.json(); const cur = lireSession(); if (!cur) return;
-      cur.profil = d.profil || {}; ecrireSession(cur); appliquerProfil();
+      cur.profil = d.profil || {}; if (d.role) { cur.role = d.role; cur.role_libelle = d.role_libelle; cur.droits = d.droits; }
+      ecrireSession(cur); appliquerProfil();
+      if (typeof window.__appliquerDroits === 'function') window.__appliquerDroits();
       if (!cur.profil.prenom) ouvrirProfil(true);
     } catch (e) { /* hors ligne : on garde le profil connu */ }
   }
   function demarrer() {
-    if (!lireSession()) { afficherConnexion(); return; }
+    if (!lireSession()) { afficherConnexion(raisonDeconnexion()); return; }
+    // Page rouverte après plus de 30 minutes sans utilisation (session restée enregistrée dans le navigateur) : reconnexion demandée.
+    if (inactiviteDepassee()) { ecrireSession(null); try { localStorage.removeItem(CLE_RAISON); } catch (e) { /* ignoré */ } afficherConnexion(MSG_INACTIVITE); return; }
+    marquerActivite(true);
     boutonDeconnexion(); appliquerProfil();
     const a = document.getElementById('avatar'); if (a) a.addEventListener('click', () => ouvrirProfil(false));
     chargerProfil();
@@ -1028,6 +1042,47 @@
   setInterval(entretenirSession, 5 * 60 * 1000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) entretenirSession(); });
   window.addEventListener('online', entretenirSession);
+  // ---- Déconnexion automatique après inactivité ----
+  // Aucune action (souris, clavier, toucher, défilement) pendant DELAI_INACTIVITE_MIN minutes : déconnexion et retour à l'écran de connexion.
+  // L'activité est partagée entre les onglets (un onglet utilisé garde les autres ouverts). Les appels réseau en arrière-plan ne comptent pas.
+  // Un avertissement s'affiche pendant la dernière minute ; il disparaît dès que l'on bouge la souris ou touche l'écran.
+  const DELAI_INACTIVITE_MIN = 30, AVERTISSEMENT_S = 60;
+  const CLE_ACTIVITE = 'babouot_activite', CLE_RAISON = 'babouot_deco_raison';
+  const MSG_INACTIVITE = 'Vous avez été déconnecté après ' + DELAI_INACTIVITE_MIN + ' minutes d\u2019inactivité. Reconnectez-vous.';
+  const lireActivite = () => { try { return Number(localStorage.getItem(CLE_ACTIVITE)) || 0; } catch (e) { return 0; } };
+  let derniereActivite = 0, derniereEcriture = 0;
+  function marquerActivite(force) {
+    const t = Date.now(); derniereActivite = t;
+    if (force || t - derniereEcriture > 5000) { derniereEcriture = t; try { localStorage.setItem(CLE_ACTIVITE, String(t)); } catch (e) { /* stockage indisponible */ } }
+    masquerAvertissement();
+  }
+  const activiteRecente = () => Math.max(derniereActivite, lireActivite());
+  const inactiviteDepassee = () => { const a = activiteRecente(); return a > 0 && Date.now() - a > DELAI_INACTIVITE_MIN * 60000; };
+  function raisonDeconnexion() {
+    try { const r = localStorage.getItem(CLE_RAISON); localStorage.removeItem(CLE_RAISON); return r === 'inactivite' ? MSG_INACTIVITE : undefined; } catch (e) { return undefined; }
+  }
+  function masquerAvertissement() { const a = document.getElementById('inactivite-avert'); if (a) a.remove(); }
+  function afficherAvertissement(secondes) {
+    let a = document.getElementById('inactivite-avert');
+    if (!a) {
+      a = document.createElement('div'); a.id = 'inactivite-avert'; a.setAttribute('role', 'alert');
+      a.style.cssText = 'position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:99997;max-width:min(440px,calc(100% - 24px));background:#7a2e0e;color:#fff;padding:12px 16px;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.4);font-size:13px;line-height:1.4;text-align:center;';
+      document.body.appendChild(a);
+    }
+    a.innerHTML = 'Sans activité, vous serez <b>déconnecté dans <span id="inactivite-s">' + secondes + '</span> s</b>.<br>Bougez la souris ou touchez l\u2019écran pour rester connecté.';
+  }
+  function verifierInactivite() {
+    if (!lireSession()) { masquerAvertissement(); return; }
+    const reste = DELAI_INACTIVITE_MIN * 60000 - (Date.now() - activiteRecente());
+    if (reste <= 0) {
+      try { localStorage.setItem(CLE_RAISON, 'inactivite'); } catch (e) { /* ignoré */ }
+      ecrireSession(null); location.reload(); return;
+    }
+    if (reste <= AVERTISSEMENT_S * 1000) afficherAvertissement(Math.ceil(reste / 1000)); else masquerAvertissement();
+  }
+  ['mousemove', 'mousedown', 'keydown', 'wheel', 'scroll', 'touchstart', 'click'].forEach((ev) => document.addEventListener(ev, () => marquerActivite(false), { passive: true, capture: true }));
+  setInterval(verifierInactivite, 5000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) verifierInactivite(); });   // retour après veille : contrôle immédiat
   let lance = false; const unefois = () => { if (!lance) { lance = true; demarrer(); } };
   document.addEventListener('DOMContentLoaded', unefois);
   if (document.readyState !== 'loading') unefois();
@@ -1041,6 +1096,9 @@
       options = { ...options, headers: { ...(options.headers instanceof Headers ? Object.fromEntries(options.headers.entries()) : (options.headers || {})), Authorization: `Bearer ${sess.access_token}` } };
     }
     const res = await original(url, options);
+    if (res.status === 403 && String(url).includes('/.netlify/functions/') && !String(url).includes('/functions/connexion')) {
+      try { const e = await res.clone().json(); if (e && e.code === 'desactive') { ecrireSession(null); afficherConnexion(e.error); } } catch (x) { /* corps non JSON */ }
+    }
     if (res.status === 401 && String(url).includes('/.netlify/functions/') && !String(url).includes('/functions/connexion')) {
       const sess = lireSession(); const neuf = sess && sess.refresh_token ? await renouveler(sess) : null;
       if (neuf) return window.fetch(url, options);
@@ -1191,6 +1249,7 @@
     stocks: ['Stocks & matières', 'Papier, colle, fil, couverture — suivi des seuils'],
     reporting: ['Reporting', 'Indicateurs calculés sur vos données réelles — OF, planning, machines, stocks'],
     messagerie: ['Messagerie', 'Échanges internes sur un OF, un titre, une machine…'],
+    utilisateurs: ['Utilisateurs & rôles', 'Comptes, droits d\u2019accès et activité — réservé aux administrateurs'],
   };
 
   definirSemaine(lundiInitial());
@@ -3955,6 +4014,241 @@
       doc.text(`Page ${i} / ${n}`, W - MR, H - 7, { align: 'right' });
     }
     doc.save(`rapport-production-${I.numero}.pdf`);
+  }
+
+  // ---------- Rapport mensuel d'activité (réunion de fin de mois) ----------
+  // PDF paysage A4, très visuel : feu tricolore, jauge de charge, calendrier de charge jour par jour, barres par semaine et par machine,
+  // état des livraisons. Très peu de texte : la situation se lit en quelques secondes. Données : fonction rapport-mensuel.
+  async function genererRapportMensuel(mois) {
+    const res = await fetch(`${API}/rapport-mensuel?mois=${encodeURIComponent(mois)}`);
+    const R = await lireJson(res);
+    if (!res.ok) throw new Error(R.error || R.errorMessage || ('Erreur serveur (HTTP ' + res.status + ')'));
+    await chargerLibsPdf();
+    const doc = new window.jspdf.jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), ML = 12, MR = 12, LARG = W - ML - MR;
+    const T = (v) => pdfTxt(String(v == null ? '' : v).replace(/→/g, '->').replace(/≤/g, '<=').replace(/≥/g, '>=').replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, '$3/$2/$1')).replace(/[—–]/g, '-').replace(/≈/g, '~').replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[  ]/g, ' ');
+    const C = { vert: [39, 154, 87], vertClair: [160, 218, 184], orange: [240, 150, 20], orangeFonce: [196, 110, 10], rouge: [214, 62, 62], teal: [15, 118, 110], noir: [31, 41, 55], gris: [107, 114, 128],
+      grisClair: [229, 231, 235], fond: [244, 246, 248], blanc: [255, 255, 255], bleu: [70, 110, 190] };
+    const fill = (c) => doc.setFillColor(c[0], c[1], c[2]), stroke = (c) => doc.setDrawColor(c[0], c[1], c[2]), ink = (c) => doc.setTextColor(c[0], c[1], c[2]);
+    const txt = (s, x, y, taille, couleur, gras, align) => { doc.setFont('helvetica', gras ? 'bold' : 'normal'); doc.setFontSize(taille); ink(couleur || C.noir); doc.text(T(s), x, y, align ? { align } : undefined); };
+    const rr = (x, y, w, h, c, r) => { fill(c); doc.roundedRect(x, y, w, h, r === undefined ? 2 : r, r === undefined ? 2 : r, 'F'); };
+    const pct = (x) => (x === null || x === undefined || !Number.isFinite(Number(x))) ? '-' : Math.round(Number(x) * 100) + ' %';
+    const nb = (v) => (v === null || v === undefined) ? '-' : Math.round(Number(v)).toLocaleString('fr-FR').replace(/[  ]/g, ' ');
+    const dc = (iso) => iso ? dateCourte(String(iso).slice(0, 10)) : '-';
+    const jm = (iso) => iso ? String(iso).slice(8, 10) + '/' + String(iso).slice(5, 7) : '-';
+    const coupe = (s, largeur, taille, gras) => { doc.setFont('helvetica', gras ? 'bold' : 'normal'); doc.setFontSize(taille); const l = doc.splitTextToSize(T(s), largeur); return l.length > 1 ? l[0].replace(/\s+\S*$/, '') + '...' : (l[0] || ''); };
+    // couleur selon la charge : confortable < 90 % ; serré 90-100 % ; surcharge > 100 %
+    const coulCharge = (x) => (x === null || x === undefined) ? C.grisClair : (x > 1 ? C.rouge : (x >= 0.9 ? C.orange : C.vert));
+    const coulFeu = { vert: C.vert, orange: C.orange, rouge: C.rouge };
+    const typeMois = R.type, enCours = typeMois === 'en_cours', prevision = typeMois === 'prevision', passe = typeMois === 'passe';
+    const S = R.synthese, ST = R.stats, TOT = R.totaux, LIB = R.libre;
+    const nomMois = R.libelle.charAt(0).toUpperCase() + R.libelle.slice(1);
+    const sousTitre = enCours ? `Situation au ${dc(R.aujourdhui)}` : (prevision ? 'Prévisions du mois' : 'Bilan du mois');
+    const etiquetteType = enCours ? 'MOIS EN COURS' : (prevision ? 'MOIS À VENIR' : 'MOIS TERMINÉ');
+
+    // ----- éléments graphiques -----
+    function jauge(cx, cy, r, valeur, couleur) {
+      const trace = (de, a, c, ep) => {
+        doc.setLineCap('round'); doc.setLineWidth(ep); stroke(c);
+        const pas = 2; let prev = null;
+        for (let g = de; g <= a + 0.001; g += pas) { const rad = (Math.PI * (180 - g)) / 180; const p = [cx + r * Math.cos(rad), cy - r * Math.sin(rad)]; if (prev) doc.line(prev[0], prev[1], p[0], p[1]); prev = p; }
+        doc.setLineCap('butt');
+      };
+      trace(0, 180, C.grisClair, 7.5);
+      const v = Math.max(0, Math.min(1, valeur || 0));
+      if (v > 0.005) trace(0, 180 * v, couleur, 7.5);
+    }
+    function barre(x, y, w, h, valeur, couleur, fond) {
+      fill(fond || C.grisClair); doc.roundedRect(x, y, w, h, h / 2, h / 2, 'F');
+      const v = Math.max(0, Math.min(1, valeur || 0));
+      if (v > 0) { fill(couleur); doc.roundedRect(x, y, Math.max(h, w * v), h, h / 2, h / 2, 'F'); }
+    }
+    function pastille(x, y, r, couleur) { fill(couleur); doc.circle(x, y, r, 'F'); }
+    function enTete(titre, page1) {
+      fill(C.teal); doc.rect(0, 0, W, page1 ? 28 : 17, 'F');
+      if (page1) {
+        txt(`ATELIERS BABOUOT  -  RAPPORT MENSUEL D'ACTIVITÉ`, ML, 9, 9.5, C.blanc, true);
+        txt(nomMois.toUpperCase(), ML, 22, 24, C.blanc, true);
+        txt(etiquetteType, W - MR, 12, 12, C.blanc, true, 'right'); txt(sousTitre, W - MR, 20, 11, C.blanc, false, 'right');
+      } else {
+        txt(titre, ML, 11.5, 16, C.blanc, true); txt(`${nomMois}  -  ${etiquetteType.toLowerCase()}`, W - MR, 11.5, 11, C.blanc, false, 'right');
+      }
+    }
+    function titreSection(s, x, y) { txt(s.toUpperCase(), x, y, 10.5, C.gris, true); }
+
+    // =============== PAGE 1 : la situation en un coup d'œil ===============
+    enTete('', true);
+    // feu tricolore + verdict
+    const feu = R.feu, cf = coulFeu[feu] || C.vert;
+    pastille(ML + 14, 49, 11.5, cf);
+    if (feu === 'vert') { doc.setLineWidth(2.4); doc.setLineCap('round'); stroke(C.blanc); doc.line(ML + 8.5, 49.5, ML + 12.5, 54); doc.line(ML + 12.5, 54, ML + 20, 44); doc.setLineCap('butt'); }
+    else txt('!', ML + 14, 56, 30, C.blanc, true, 'center');
+    txt(feu === 'vert' ? 'MOIS SOUS CONTRÔLE' : (feu === 'orange' ? 'À SURVEILLER' : 'ATTENTION'), ML + 30, 46, 19, cf, true);
+    txt(feu === 'vert' ? 'Charge maîtrisée, délais tenus' : (feu === 'orange' ? 'Quelques points demandent de la vigilance' : 'Des retards ou une surcharge à traiter'), ML + 30, 55, 10.5, C.gris, false);
+    // messages clés (courts)
+    const msgs = (R.messages || []).slice(0, 4);
+    msgs.forEach((m, i) => {
+      const y = 41 + i * 8.4;
+      pastille(128, y - 1.4, 2.3, m.niveau === 'rouge' ? C.rouge : (m.niveau === 'orange' ? C.orange : (m.niveau === 'vert' ? C.vert : C.bleu)));
+      txt(coupe(m.texte, W - MR - 134, 12, false), 134, y, 12, C.noir, false);
+    });
+
+    // 4 tuiles chiffres clés
+    const TY = 68, TH = 68, TW = (LARG - 3 * 5) / 4;
+    const tuile = (i, titre, couleur) => { const x = ML + i * (TW + 5); rr(x, TY, TW, TH, C.fond, 3); fill(couleur); doc.roundedRect(x, TY, 2.6, TH, 1.3, 1.3, 'F'); titreSection(titre, x + 6, TY + 8); return x; };
+    // 1. charge
+    { const x = tuile(0, 'Charge de l\'atelier', coulCharge(TOT.charge)); const cx = x + TW / 2 + 1, cy = TY + 44;
+      jauge(cx, cy, 20, TOT.charge, coulCharge(TOT.charge));
+      txt(pct(TOT.charge), cx, cy - 1, 24, coulCharge(TOT.charge), true, 'center');
+      txt(`${prevision ? 'prévue' : 'planifiée'} sur la capacité du mois`, cx, cy + 7, 8.5, C.gris, false, 'center');
+      txt(`Personnel ${pct(TOT.taux_personnel)}  -  Machines ${pct(TOT.taux_machines)}`, cx, cy + 14, 9.5, C.noir, true, 'center'); }
+    // 2. livraisons
+    { const x = tuile(1, prevision ? 'Livraisons attendues' : 'Livraisons du mois', S.retard ? C.rouge : (S.risque ? C.orange : C.vert));
+      const livres = S.livres + S.livres_retard;
+      if (prevision) txt(String(S.echeances), x + 6, TY + 27, 30, C.noir, true); else txt(`${livres} / ${S.echeances}`, x + 6, TY + 27, 30, C.noir, true);
+      txt(S.echeances ? (prevision ? 'OF à livrer ce mois-ci' : 'OF livrés sur ceux à livrer ce mois-ci') : 'Aucune livraison prévue ce mois-ci', x + 6, TY + 34, 8.5, C.gris, false);
+      const segs = [['livré', S.livres, C.vert], ['livré en retard', S.livres_retard, C.orangeFonce], ['en bonne voie', S.ok, C.vertClair], ['à risque', S.risque, C.orange], ['en retard', S.retard, C.rouge]].filter((s) => s[1] > 0);
+      const total = segs.reduce((t, s) => t + s[1], 0);
+      if (total) {
+        let bx = x + 6; const bw = TW - 12; fill(C.grisClair); doc.roundedRect(x + 6, TY + 38, bw, 7, 2, 2, 'F');
+        segs.forEach((s, k) => { const w = bw * s[1] / total; fill(s[2]); if (k === 0 && segs.length === 1) doc.roundedRect(bx, TY + 38, w, 7, 2, 2, 'F'); else doc.rect(bx, TY + 38, w, 7, 'F'); bx += w; });
+        segs.forEach((s, k) => { const lx = x + 6 + (k % 2) * (TW / 2 - 3), ly = TY + 54 + Math.floor(k / 2) * 5.6; fill(s[2]); doc.rect(lx, ly - 3, 3, 3, 'F'); txt(`${s[1]} ${s[0]}`, lx + 4.5, ly, 9, C.noir, false); });
+      } }
+    // 3. avancement (mois en cours / passé) ou capacité libre (mois à venir)
+    if (!prevision) {
+      const x = tuile(2, 'Avancement du mois', C.teal); const A = R.avancement;
+      const prod = A.production, tps = A.temps_ecoule;
+      const ecart = (prod === null || prod === undefined) ? null : prod - tps;
+      const cp = ecart === null ? C.gris : (ecart >= -0.05 ? C.vert : (ecart >= -0.15 ? C.orange : C.rouge));
+      txt('Temps écoulé', x + 6, TY + 19, 9.5, C.gris, false); txt(pct(tps), x + TW - 6, TY + 19, 13, C.noir, true, 'right'); barre(x + 6, TY + 22, TW - 12, 5.5, tps, C.bleu);
+      txt('Production réalisée', x + 6, TY + 38, 9.5, C.gris, false); txt(pct(prod), x + TW - 6, TY + 38, 13, cp, true, 'right'); barre(x + 6, TY + 41, TW - 12, 5.5, prod, cp);
+      txt(ecart === null ? 'Avancement non disponible' : (ecart >= -0.05 ? 'Dans les temps' : (ecart >= -0.15 ? 'Léger retard' : 'En retard sur le temps')), x + 6, TY + 59, 12, cp, true);
+    } else {
+      const x = tuile(2, 'Capacité encore libre', C.teal);
+      txt(`${nb(LIB.pers_h / 8)} j`, x + 6, TY + 27, 30, C.noir, true);
+      txt('journées de personnel disponibles', x + 6, TY + 34, 8.5, C.gris, false);
+      barre(x + 6, TY + 41, TW - 12, 6, LIB.cap_pers_h > 0 ? 1 - LIB.pers_h / LIB.cap_pers_h : 0, coulCharge(TOT.taux_personnel));
+      txt(`${pct(LIB.cap_pers_h > 0 ? 1 - LIB.pers_h / LIB.cap_pers_h : 0)} déjà planifié`, x + 6, TY + 55, 10, C.noir, true);
+      txt(`Machines : ${nb(LIB.machine_h / 8)} j libres`, x + 6, TY + 62, 9, C.gris, false);
+    }
+    // 4. points chauds
+    { const x = tuile(3, 'Points chauds', C.orange);
+      const arrets = new Set((R.interventions || []).filter((i) => i.bloquant).map((i) => i.machine)).size;
+      const lignes = [['Jours en surcharge', ST.jours_surcharge, C.rouge], ['Jours en heures sup. / samedis', ST.jours_heures_sup + ST.samedis_travailles, C.orange], ['Machines à l\'arrêt', arrets, C.orange], ['Jours d\'absence', R.absences.jours_personnes, C.bleu]];
+      lignes.forEach((l, k) => { const y = TY + 21 + k * 12.5; txt(l[0], x + 6, y, 9.5, C.noir, false); txt(String(l[1]), x + TW - 6, y + 1, 18, l[1] > 0 ? l[2] : C.vert, true, 'right'); if (k < 3) { stroke(C.grisClair); doc.setLineWidth(0.3); doc.line(x + 6, y + 4, x + TW - 6, y + 4); } }); }
+
+    // calendrier de charge jour par jour
+    titreSection('Charge jour par jour', ML, 143);
+    const jrs = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'], CW = 22, CH = 6.4, GX = ML, GY = 151;
+    jrs.forEach((j, k) => txt(j, GX + k * CW + CW / 2, 148.5, 8, C.gris, true, 'center'));
+    const premier = R.jours[0].date, decal = (new Date(premier + 'T12:00:00Z').getUTCDay() + 6) % 7;
+    R.jours.forEach((j, idx) => {
+      const pos = decal + idx, col = pos % 7, lig = Math.floor(pos / 7), cx = GX + col * CW, cy = GY + lig * (CH + 0.7);
+      const ferme = !j.ouvert, c = ferme ? [238, 240, 243] : (j.charge === null ? C.grisClair : (j.charge < 0.05 ? [208, 234, 218] : coulCharge(j.charge)));
+      rr(cx + 0.4, cy, CW - 0.8, CH, c, 1.2);
+      const clair = ferme || (j.charge !== null && j.charge < 0.05);
+      txt(String(Number(j.date.slice(8, 10))), cx + 1.8, cy + 2.6, 6, clair ? C.gris : C.blanc, false);
+      if (!ferme && j.charge !== null) txt(Math.round(j.charge * 100) + '%', cx + CW / 2 + 2, cy + 5, 9, clair ? C.noir : C.blanc, true, 'center');
+      if (j.date === R.aujourdhui) { stroke(C.noir); doc.setLineWidth(0.7); doc.roundedRect(cx + 0.4, cy, CW - 0.8, CH, 1.2, 1.2, 'S'); }
+    });
+    // légende + repères
+    { const lx = 176; titreSection('Comment lire', lx, 143);
+      [[C.vert, 'moins de 90 %  :  confortable'], [C.orange, '90 à 100 %  :  serré'], [C.rouge, 'plus de 100 %  :  surcharge'], [[238, 240, 243], 'gris  :  jour non travaillé']].forEach((l, k) => { rr(lx, 148 + k * 8, 9, 5.5, l[0], 1.2); txt(l[1], lx + 13, 152.3 + k * 8, 10, C.noir, false); });
+      txt(`Jours ouvrés : ${ST.jours_ouvres}${enCours ? `  (${ST.jours_ecoules} écoulés)` : ''}`, lx, 187, 10, C.noir, false);
+      if (R.realise && !prevision) txt(`Production saisie : ${nb(R.realise.heures)} h sur ${R.realise.jours_saisis} jour(s)`, lx, 194, 10, C.noir, false);
+      else txt(`Heures planifiées : ${nb(TOT.pers_h)} h personnel  -  ${nb(TOT.machine_h)} h machines`, lx, 194, 10, C.noir, false); }
+
+    // =============== PAGE 2 : la charge de travail ===============
+    doc.addPage(); enTete('Charge de travail', false);
+    titreSection('Charge par semaine', ML, 28);
+    { const sem = R.semaines, y0 = 114, hMax = 70, echelle = Math.max(1.2, ...sem.map((s) => s.charge || 0)), zone = 134, slot = zone / Math.max(1, sem.length), bw = Math.min(slot * 0.62, 22);
+      const yPour = (v) => y0 - hMax * (v / echelle);
+      sem.forEach((s, k) => {
+        const x = ML + k * slot + (slot - bw) / 2, c = coulCharge(s.charge), h = s.charge === null ? 0 : hMax * (s.charge / echelle);
+        fill(s.passee && enCours ? c : c); if (h > 0) doc.roundedRect(x, y0 - h, bw, h, 1.5, 1.5, 'F');
+        txt(s.charge === null ? '-' : pct(s.charge), x + bw / 2, (h > 0 ? y0 - h : y0) - 2.2, 13, s.charge === null ? C.gris : c, true, 'center');
+        const num = Math.round((Date.parse(s.lundi + 'T12:00:00Z') - Date.parse(s.lundi.slice(0, 4) + '-01-01T12:00:00Z')) / 604800000) + 1;
+        txt(`S${num}`, x + bw / 2, y0 + 6, 10.5, C.noir, true, 'center'); txt(`${s.debut.slice(8, 10)}-${jm(s.fin)}`, x + bw / 2, y0 + 11, 8, C.gris, false, 'center');
+      });
+      doc.setLineWidth(0.5); stroke(C.noir); doc.setLineDashPattern([2, 1.5], 0); doc.line(ML, yPour(1), ML + zone, yPour(1)); doc.setLineDashPattern([], 0);
+      txt('100 % = capacité maximale', ML + zone, yPour(1) - 1.5, 8, C.gris, false, 'right');
+      stroke(C.grisClair); doc.setLineWidth(0.4); doc.line(ML, y0, ML + zone, y0); }
+    titreSection('Charge par machine', 158, 28);
+    { const lst = R.machines.slice(0, 11), x0 = 158, bx = 204, bw = 58, rh = 8.6, echelle = Math.max(1.2, ...lst.map((m) => m.taux || 0));
+      if (!lst.length) txt('Aucune machine planifiée ce mois-ci', x0, 40, 11, C.gris, false);
+      lst.forEach((m, k) => { const y = 38 + k * rh, c = coulCharge(m.taux);
+        txt(coupe(m.nom, 44, 10.5, true), x0, y + 4.2, 10.5, C.noir, true); barre(bx, y, bw, 5.4, (m.taux || 0) / echelle, c); txt(pct(m.taux), W - MR, y + 4.5, 11, c, true, 'right'); });
+      if (R.machines_inactives > 0) txt(`+ ${R.machines_inactives} machine(s) sans activité ce mois-ci`, x0, 38 + lst.length * rh + 4, 9, C.gris, false); }
+    // répartition par type
+    titreSection('Répartition du travail (heures de personnel)', ML, 135);
+    { const pt = R.par_type, tot = pt.reduce((s, t) => s + t.pers_h, 0), pal = [C.teal, C.bleu, C.orange, [150, 150, 160]];
+      if (!tot) txt('Aucun travail planifié', ML, 146, 11, C.gris, false);
+      else { let x = ML; pt.slice(0, 4).forEach((t, k) => { const w = 134 * t.pers_h / tot; fill(pal[k]); doc.rect(x, 140, w, 11, 'F'); if (w > 18) txt(Math.round(100 * t.pers_h / tot) + ' %', x + w / 2, 147.6, 11, C.blanc, true, 'center'); x += w; });
+        pt.slice(0, 4).forEach((t, k) => { const y = 160 + k * 8; fill(pal[k]); doc.rect(ML, y - 3.6, 4.5, 4.5, 'F'); txt(`${t.type}`, ML + 8, y, 11, C.noir, true); txt(`${nb(t.pers_h)} h  -  ${t.nb_of} OF`, ML + 134, y, 10.5, C.gris, false, 'right'); }); } }
+    // machines à l'arrêt
+    titreSection('Machines à l\'arrêt', 158, 135);
+    { const iv = (R.interventions || []).slice().sort((a, b) => (b.bloquant ? 1 : 0) - (a.bloquant ? 1 : 0));
+      if (!iv.length) { rr(158, 140, 127, 14, [228, 244, 234], 2); pastille(166, 147, 3, C.vert); txt('Aucune intervention de maintenance ce mois-ci', 172, 148.6, 11, C.noir, true); }
+      iv.slice(0, 5).forEach((i, k) => { const y = 141 + k * 10; rr(158, y, 127, 8.5, i.bloquant ? [253, 232, 232] : [253, 243, 224], 2); pastille(164, y + 4.25, 2.6, i.bloquant ? C.rouge : C.orange);
+        txt(coupe(`${i.machine}`, 38, 10.5, true), 170, y + 6, 10.5, C.noir, true); txt(`${i.type || 'intervention'}  -  ${jm(i.date_debut)} au ${i.date_fin ? jm(i.date_fin) : '?'}${i.bloquant ? '' : '  (non bloquante)'}`, 282, y + 6, 9.5, C.gris, false, 'right'); });
+      if (iv.length > 5) txt(`+ ${iv.length - 5} autre(s)`, 158, 141 + 5 * 10 + 3, 9, C.gris, false); }
+
+    // =============== PAGE 3 : livraisons et délais ===============
+    doc.addPage(); enTete('Livraisons et délais', false);
+    { const SIT = { retard: ['EN RETARD', C.rouge], risque: ['À RISQUE', C.orange], ok: ['EN BONNE VOIE', C.vert], livre: ['LIVRÉ', C.vert], livre_retard: ['LIVRÉ EN RETARD', C.orangeFonce] };
+      const liste = R.ofs.filter((o) => o.delai_dans_mois || o.situation === 'retard' || o.situation === 'risque');
+      const MAXL = 14, aff = liste.slice(0, MAXL);
+      titreSection(`OF à livrer ce mois-ci et OF à surveiller (${liste.length})`, ML, 28);
+      const xs = { pill: ML, num: ML + 36, tit: ML + 63, del: ML + 118, av: ML + 136, ec: ML + 178 };
+      ['Situation', 'N° OF', 'Titre', 'Délai', 'Avancement', 'Écart'].forEach((t, k) => txt(t, [xs.pill, xs.num, xs.tit, xs.del, xs.av, xs.ec][k], 35, 8.5, C.gris, true));
+      stroke(C.grisClair); doc.setLineWidth(0.4); doc.line(ML, 37, ML + 192, 37);
+      if (!aff.length) { rr(ML, 44, 192, 16, [228, 244, 234], 2); txt('Aucun OF à livrer ou à surveiller ce mois-ci', ML + 6, 54, 12, C.noir, true); }
+      aff.forEach((o, k) => { const y = 40 + k * 10.3, s = SIT[o.situation] || ['-', C.gris];
+        if (k % 2 === 0) { fill([249, 250, 251]); doc.rect(ML, y - 1.2, 192, 10, 'F'); }
+        rr(xs.pill, y, 33, 7.2, s[1], 3.6); txt(s[0], xs.pill + 16.5, y + 5, 8, C.blanc, true, 'center');
+        txt(o.numero, xs.num, y + 5.3, 10, C.noir, true); txt(coupe(o.titre || '-', 52, 10, false), xs.tit, y + 5.3, 10, C.noir, false);
+        txt(jm(o.delai), xs.del, y + 5.3, 10, C.noir, false);
+        barre(xs.av, y + 1.5, 24, 4.2, o.avancement / 100, o.fait ? C.vert : s[1]); txt(o.avancement + ' %', xs.av + 27, y + 5.3, 9.5, C.noir, true);
+        const e = o.ecart_jours; const tex = e === null ? '-' : (e > 0 ? `+${e} j` : (e === 0 ? 'à temps' : `${e} j`)); txt(tex, xs.ec, y + 5.3, 10, e !== null && e > 0 ? C.rouge : C.vert, true); });
+      if (liste.length > MAXL) txt(`+ ${liste.length - MAXL} autre(s) OF : voir l'écran Ordres de fabrication`, ML, 40 + MAXL * 10.3 + 4, 9.5, C.gris, false);
+      // panneau de droite
+      const px = 214, pw = W - MR - px;
+      rr(px, 28, pw, 52, C.fond, 3);
+      titreSection('Délais tenus', px + 5, 37);
+      const taux = S.taux_delais; txt(taux === null ? '-' : pct(taux), px + 5, 58, 32, taux === null ? C.gris : (taux >= 0.95 ? C.vert : (taux >= 0.8 ? C.orange : C.rouge)), true);
+      txt(taux === null ? (prevision ? 'Mois à venir : rien de livré pour l\'instant' : 'Aucun OF livré à ce jour') : `des OF livrés (${S.livres + S.livres_retard})`, px + 5, 67, 9.5, C.gris, false);
+      if (S.retard_tous) txt(`${S.retard_tous} OF en retard actuellement`, px + 5, 75, 10, C.rouge, true);
+      if (R.pleiade) { const P = R.pleiade; rr(px, 86, pw, 62, C.fond, 3); titreSection('Livraisons Pléiade du mois', px + 5, 95);
+        txt(`${P.titres} titre${P.titres > 1 ? 's' : ''}`, px + 5, 111, 24, C.noir, true); txt(`${nb(P.exemplaires)} exemplaires`, px + 5, 118, 10, C.gris, false);
+        const tot = P.titres || 1; let bx = px + 5; const bw = pw - 10; fill(C.grisClair); doc.roundedRect(px + 5, 122, bw, 7, 2, 2, 'F');
+        [[P.faits, C.vert], [P.en_cours, C.orange], [P.a_lancer, [170, 175, 185]]].forEach((s) => { const w = bw * s[0] / tot; if (w > 0) { fill(s[1]); doc.rect(bx, 122, w, 7, 'F'); bx += w; } });
+        [[P.faits, 'faits', C.vert], [P.en_cours, 'en cours', C.orange], [P.a_lancer, 'à lancer', [150, 155, 165]]].forEach((s, k) => { fill(s[2]); doc.rect(px + 5, 134 + k * 4.6 - 3, 3, 3, 'F'); txt(`${s[0]} ${s[1]}`, px + 10, 134 + k * 4.6, 9, C.noir, false); }); }
+      else { rr(px, 86, pw, 20, C.fond, 3); txt('Planning annuel Pléiade non disponible', px + 5, 98, 9.5, C.gris, false); } }
+
+    // =============== PAGE 4 : capacité et décisions ===============
+    doc.addPage(); enTete('Capacité et décisions', false);
+    titreSection('Capacité du mois', ML, 28);
+    { const bloc = (titre, plan, cap, y, libreRestant) => {
+        const t = cap > 0 ? plan / cap : null, c = coulCharge(t);
+        txt(titre, ML, y, 13, C.noir, true); txt(pct(t), ML + 134, y, 20, c, true, 'right');
+        barre(ML, y + 4, 134, 11, t === null ? 0 : Math.min(1, t), c);
+        txt(`${nb(plan)} h ${prevision ? 'prévues' : 'planifiées'} sur ${nb(cap)} h disponibles`, ML, y + 24, 11, C.noir, false);
+        txt(`Reste libre : ${nb(Math.max(0, cap - plan))} h  (environ ${nb(Math.max(0, cap - plan) / 8)} journées)`, ML, y + 31, 11, C.noir, true);
+        if (enCours && libreRestant !== null) txt(`dont ${nb(libreRestant)} h encore libres sur les ${LIB.jours_ouvres} jours à venir`, ML, y + 38, 10, C.gris, false); };
+      bloc('Personnel', TOT.pers_h, TOT.cap_pers_h, 46, LIB.pers_h);
+      bloc('Machines', TOT.machine_h, TOT.cap_machine_h, 106, LIB.machine_h);
+      if (S.echeances || (R.a_planifier && R.a_planifier.heures > 0)) { rr(ML, 160, 134, 26, C.fond, 3);
+        if (R.a_planifier && R.a_planifier.heures > 0) { txt(`${nb(R.a_planifier.heures)} h`, ML + 5, 175, 20, C.orange, true); txt(`restent à planifier (${R.a_planifier.nb_of} OF, étapes sans date)`, ML + 38, 175, 10, C.noir, false); }
+        else txt('Tout le travail est planifié', ML + 5, 175, 12, C.vert, true); } }
+    titreSection('Décisions de la réunion', 158, 28);
+    { stroke(C.grisClair); doc.setLineWidth(0.4); for (let k = 0; k < 6; k++) doc.line(158, 42 + k * 11, W - MR, 42 + k * 11);
+      titreSection('Actions à mener', 158, 118); txt('Action', 158, 126, 8.5, C.gris, true); txt('Qui', 238, 126, 8.5, C.gris, true); txt('Pour le', 264, 126, 8.5, C.gris, true);
+      for (let k = 0; k < 5; k++) doc.line(158, 138 + k * 11, W - MR, 138 + k * 11); }
+
+    // pieds de page
+    const n = doc.getNumberOfPages();
+    for (let i = 1; i <= n; i++) { doc.setPage(i); txt(`Ateliers Babouot  -  rapport mensuel ${R.libelle}  -  édité le ${dc(R.genere_le)}`, ML, H - 5, 8.5, C.gris, false); txt(`Page ${i} / ${n}`, W - MR, H - 5, 8.5, C.gris, false, 'right'); }
+    doc.save(`rapport-mensuel-${R.mois}.pdf`);
   }
 
   function ouvrirModaleRapportOf(ofUuid, ofNumero, ofStatut) {
@@ -6769,7 +7063,17 @@
     const nbArret = machines.filter(alArret).length;
 
     const wrap = el(`<div></div>`);
-    const barreVg = el(`<div style="display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap; margin-bottom:14px;"><button class="btn" id="op-ouvrir">Optimiser la Production</button><button class="btn primary" id="vg-ouvrir">Vue globale de la charge</button></div>`);
+    const barreVg = el(`<div style="display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap; margin-bottom:14px;"><button class="btn" id="rm-courant" title="PDF de réunion : situation du mois en cours">Rapport mensuel — mois en cours</button><button class="btn" id="rm-suivant" title="PDF de réunion : prévisions du mois prochain">Rapport mensuel — mois suivant</button><button class="btn" id="op-ouvrir">Optimiser la Production</button><button class="btn primary" id="vg-ouvrir">Vue globale de la charge</button></div>`);
+    const moisRel = (decal) => { const d = new Date(); const t = new Date(Date.UTC(Number(d.toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' }).slice(0, 4)), Number(d.toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' }).slice(5, 7)) - 1 + decal, 1)); return t.toISOString().slice(0, 7); };
+    [['#rm-courant', 0, 'Rapport mensuel — mois en cours'], ['#rm-suivant', 1, 'Rapport mensuel — mois suivant']].forEach(([sel, decal, libelle]) => {
+      const bt = barreVg.querySelector(sel);
+      bt.addEventListener('click', async () => {
+        bt.disabled = true; bt.textContent = 'Génération du PDF…';
+        try { await genererRapportMensuel(moisRel(decal)); toast('Rapport mensuel téléchargé.'); }
+        catch (e) { toast(`Rapport impossible : ${e.message}`, 'error'); }
+        finally { bt.disabled = false; bt.textContent = libelle; }
+      });
+    });
     barreVg.querySelector('#vg-ouvrir').addEventListener('click', () => { state.repVue = 'globale'; render(); });
     barreVg.querySelector('#op-ouvrir').addEventListener('click', () => ouvrirModaleOptimisation());
     wrap.appendChild(barreVg);
@@ -7129,7 +7433,134 @@
     if (cloche) cloche.addEventListener('click', () => { state.tab = 'messagerie'; render(); });
   }
 
-  const renderers = { planning: renderPlanning, ordres: renderOrdres, personnel: renderPersonnel, machines: renderMachines, temps: renderTempsStandards, stocks: renderStocks, reporting: renderReporting, messagerie: renderMessagerie };
+  // ---------- Utilisateurs & rôles (administrateurs) ----------
+  const aDroit = (p) => (typeof window.babouotDroit === 'function' ? window.babouotDroit(p) : true);
+  function appliquerDroits() {
+    const nav = document.getElementById('nav-utilisateurs'); if (nav) nav.classList.toggle('hidden', !aDroit('admin'));
+    const regles = { 'new-of': 'ordres', 'import-lot': 'ordres', 'pleiade-btn': 'ordres', 'coffret-btn': 'ordres', 'annuel-btn': 'ordres', 'add-of-btn': 'planifier', 'reorg-btn': 'planifier',
+      'recalc-btn': 'planifier', 'recalc-depuis-btn': 'planifier', 'report-btn': 'planifier', 'op-ouvrir': 'planifier', 'couts-btn': 'devis', 'pers-ajout': 'referentiels' };
+    Object.keys(regles).forEach((id) => { const e = document.getElementById(id); if (e) e.style.display = aDroit(regles[id]) ? '' : 'none'; });
+  }
+  window.__appliquerDroits = appliquerDroits;
+  const dateHeure = (x) => { try { return x ? new Date(x).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '—'; } catch (e) { return '—'; } };
+
+  function renderUtilisateurs() {
+    const wrap = el(`
+      <div class="panel">
+        <div class="panel-head"><h2>Utilisateurs et rôles</h2>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn" id="usr-journal">Activité récente</button><button class="btn primary" id="usr-new">Ajouter un utilisateur</button></div></div>
+        <div id="usr-corps"><div class="empty">Chargement…</div></div>
+      </div>`);
+    if (!aDroit('admin')) { wrap.querySelector('#usr-corps').innerHTML = '<div class="msg error">Cette page est réservée aux administrateurs.</div>'; return wrap; }
+    let donnees = null;
+    async function charger() {
+      const corps = wrap.querySelector('#usr-corps');
+      try {
+        const res = await fetch(`${API}/gerer-utilisateurs`);
+        const d = await res.json(); if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+        donnees = d; dessiner();
+      } catch (e) { corps.innerHTML = `<div class="msg error">${esc(e.message)}${/utilisateurs|relation|schema/i.test(e.message) ? ' — la migration 59 a-t-elle été exécutée dans Supabase ?' : ''}</div>`; }
+    }
+    function dessiner() {
+      const { utilisateurs, roles, moi } = donnees;
+      const opt = (r) => roles.map((x) => `<option value="${x.id}" ${x.id === r ? 'selected' : ''}>${esc(x.libelle)}</option>`).join('');
+      wrap.querySelector('#usr-corps').innerHTML = `
+        <table><thead><tr><th>Utilisateur</th><th>Rôle</th><th>Dernière connexion</th><th>État</th><th></th></tr></thead><tbody>
+        ${utilisateurs.map((u) => `<tr>
+          <td><b>${esc([u.prenom, u.nom].filter(Boolean).join(' ') || u.email)}</b>${u.user_id === moi ? ' <span class="tag ok">vous</span>' : ''}<br><span style="color:var(--ink-500);font-size:12px;">${esc(u.email)}${u.fonction ? ' · ' + esc(u.fonction) : ''}</span></td>
+          <td><select class="usr-role" data-id="${u.user_id}" style="min-width:150px;">${opt(u.role)}</select></td>
+          <td>${esc(dateHeure(u.derniere_connexion))}</td>
+          <td>${u.actif ? '<span class="tag ok">Actif</span>' : '<span class="tag danger">Désactivé</span>'}</td>
+          <td style="white-space:nowrap;"><button class="btn usr-mdp" data-id="${u.user_id}" data-email="${esc(u.email)}">Mot de passe</button>
+            <button class="btn usr-actif" data-id="${u.user_id}" data-actif="${u.actif ? '1' : '0'}">${u.actif ? 'Désactiver' : 'Réactiver'}</button></td></tr>`).join('')}
+        </tbody></table>
+        <h3 style="margin:22px 0 8px;font-size:15px;">Rôles et droits</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;">
+          ${roles.map((r) => `<div style="border:1px solid var(--line,#8884);border-radius:10px;padding:10px 12px;"><b>${esc(r.libelle)}</b><div style="font-size:12.5px;color:var(--ink-500);margin-top:4px;">${esc(r.description)}</div></div>`).join('')}
+        </div>
+        <div style="font-size:12.5px;color:var(--ink-500);margin-top:12px;">Un compte créé directement dans Supabase reçoit le rôle « Lecture seule » jusqu'à ce que vous lui en attribuiez un ici. Un compte désactivé est refusé immédiatement, même si sa session est encore ouverte.</div>`;
+      wrap.querySelectorAll('.usr-role').forEach((s) => s.addEventListener('change', async () => {
+        try {
+          const res = await fetch(`${API}/gerer-utilisateurs`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: s.dataset.id, role: s.value }) });
+          const d = await res.json(); if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+          toast('Rôle modifié.');
+        } catch (e) { toast(e.message, 'error'); }
+        charger();
+      }));
+      wrap.querySelectorAll('.usr-actif').forEach((b) => b.addEventListener('click', async () => {
+        const actif = b.dataset.actif !== '1';
+        try {
+          const res = await fetch(`${API}/gerer-utilisateurs`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: b.dataset.id, actif }) });
+          const d = await res.json(); if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+          toast(actif ? 'Compte réactivé.' : 'Compte désactivé.');
+        } catch (e) { toast(e.message, 'error'); }
+        charger();
+      }));
+      wrap.querySelectorAll('.usr-mdp').forEach((b) => b.addEventListener('click', () => ouvrirMdpUtilisateur(b.dataset.id, b.dataset.email)));
+    }
+    function ouvrirMdpUtilisateur(id, email) {
+      afficherModale(`
+        <h3>Nouveau mot de passe</h3>
+        <div style="font-size:13px;color:var(--ink-500);margin-bottom:8px;">${esc(email)}</div>
+        <div class="field"><label>Mot de passe (8 caractères minimum)</label><input id="mdp-nv" type="text" autocomplete="off" minlength="8"></div>
+        <div id="m-msg"></div>
+        <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">Enregistrer</button></div>`);
+      document.getElementById('m-cancel').addEventListener('click', fermerModale);
+      document.getElementById('m-submit').addEventListener('click', async () => {
+        const msg = document.getElementById('m-msg'), mdp = document.getElementById('mdp-nv').value;
+        if (mdp.length < 8) { msg.innerHTML = '<div class="msg error">8 caractères minimum.</div>'; return; }
+        try {
+          const res = await fetch(`${API}/gerer-utilisateurs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mot_de_passe', user_id: id, mot_de_passe: mdp }) });
+          const d = await res.json(); if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+          fermerModale(); toast('Mot de passe modifié.');
+        } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+      });
+    }
+    wrap.querySelector('#usr-new').addEventListener('click', () => {
+      if (!donnees) return;
+      afficherModale(`
+        <h3>Ajouter un utilisateur</h3>
+        <div class="field"><label>Adresse e-mail *</label><input id="nu-email" type="email" autocomplete="off"></div>
+        <div style="display:flex;gap:10px;"><div class="field" style="flex:1;"><label>Prénom</label><input id="nu-prenom"></div><div class="field" style="flex:1;"><label>Nom</label><input id="nu-nom"></div></div>
+        <div class="field"><label>Fonction</label><input id="nu-fonction" placeholder="ex. Chef d'atelier"></div>
+        <div class="field"><label>Rôle *</label><select id="nu-role">${donnees.roles.map((r) => `<option value="${r.id}" ${r.id === 'lecture' ? 'selected' : ''}>${esc(r.libelle)}</option>`).join('')}</select>
+          <div id="nu-role-desc" style="font-size:12.5px;color:var(--ink-500);margin-top:4px;"></div></div>
+        <div class="field"><label>Mot de passe provisoire * (8 caractères minimum)</label><input id="nu-mdp" type="text" autocomplete="off"></div>
+        <div id="m-msg"></div>
+        <div class="actions"><button class="btn" id="m-cancel">Annuler</button><button class="btn primary" id="m-submit">Créer le compte</button></div>`);
+      const maj = () => { const r = donnees.roles.find((x) => x.id === document.getElementById('nu-role').value); document.getElementById('nu-role-desc').textContent = r ? r.description : ''; };
+      document.getElementById('nu-role').addEventListener('change', maj); maj();
+      document.getElementById('m-cancel').addEventListener('click', fermerModale);
+      document.getElementById('m-submit').addEventListener('click', async () => {
+        const msg = document.getElementById('m-msg'), v = (i) => document.getElementById(i).value.trim();
+        if (!v('nu-email')) { msg.innerHTML = '<div class="msg error">Indiquez l\u2019adresse e-mail.</div>'; return; }
+        if (document.getElementById('nu-mdp').value.length < 8) { msg.innerHTML = '<div class="msg error">Mot de passe : 8 caractères minimum.</div>'; return; }
+        document.getElementById('m-submit').disabled = true;
+        try {
+          const res = await fetch(`${API}/gerer-utilisateurs`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'creer', email: v('nu-email'), mot_de_passe: document.getElementById('nu-mdp').value, role: document.getElementById('nu-role').value, prenom: v('nu-prenom'), nom: v('nu-nom'), fonction: v('nu-fonction') }) });
+          const d = await res.json(); if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+          fermerModale(); toast('Compte créé : communiquez-lui son e-mail et son mot de passe provisoire.'); charger();
+        } catch (e) { msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; document.getElementById('m-submit').disabled = false; }
+      });
+    });
+    wrap.querySelector('#usr-journal').addEventListener('click', async () => {
+      afficherModale('<h3>Activité récente</h3><div id="jr-corps"><div class="empty">Chargement…</div></div><div class="actions"><button class="btn" id="m-cancel">Fermer</button></div>');
+      document.getElementById('m-cancel').addEventListener('click', fermerModale);
+      try {
+        const res = await fetch(`${API}/gerer-utilisateurs?journal=1&limite=150`);
+        const d = await res.json(); if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+        const cible = (c) => Object.keys(c || {}).slice(0, 4).map((k) => `${k} ${String(c[k]).slice(0, 36)}`).join(' · ');
+        document.getElementById('jr-corps').innerHTML = (d.journal || []).length
+          ? `<div style="max-height:60vh;overflow:auto;"><table><thead><tr><th>Quand</th><th>Qui</th><th>Action</th></tr></thead><tbody>${d.journal.map((j) => `<tr><td style="white-space:nowrap;">${esc(dateHeure(j.cree_le))}</td><td>${esc(j.email || '—')}<br><span style="font-size:11.5px;color:var(--ink-500);">${esc(j.role || '')}</span></td><td><span class="mono">${esc(j.fonction)}</span>${j.action ? ' · ' + esc(j.action) : ''} <span style="font-size:11.5px;color:var(--ink-500);">${esc(j.methode || '')}</span><br><span style="font-size:11.5px;color:var(--ink-500);">${esc(cible(j.cible))}</span></td></tr>`).join('')}</tbody></table></div>`
+          : '<div class="empty">Aucune action enregistrée pour le moment.</div>';
+      } catch (e) { document.getElementById('jr-corps').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
+    charger();
+    return wrap;
+  }
+
+  const renderers = { utilisateurs: renderUtilisateurs, planning: renderPlanning, ordres: renderOrdres, personnel: renderPersonnel, machines: renderMachines, temps: renderTempsStandards, stocks: renderStocks, reporting: renderReporting, messagerie: renderMessagerie };
 
   function render(){
     const content = document.getElementById('content');
@@ -7163,6 +7594,7 @@
     if (recalcDepuisBtn) recalcDepuisBtn.addEventListener('click', () => ouvrirModaleReorganisation('depuis'));
     const coutsBtn = document.getElementById('couts-btn');
     if (coutsBtn) coutsBtn.addEventListener('click', ouvrirModaleCouts);
+    appliquerDroits();
   }
 
   document.querySelectorAll('.navbtn').forEach(btn=>{

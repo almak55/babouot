@@ -14,6 +14,7 @@
 // Variables Netlify : SUPABASE_URL et SUPABASE_ANON_KEY (clé « anon / publishable », différente de la clé service).
 
 const { createClient } = require('@supabase/supabase-js');
+const { infosAcces } = require('./lib/auth');
 
 const CHAMPS_PROFIL = ['prenom', 'nom', 'fonction', 'service', 'telephone'];
 const profilDe = (user) => {
@@ -22,6 +23,9 @@ const profilDe = (user) => {
   CHAMPS_PROFIL.forEach((c) => { p[c] = typeof m[c] === 'string' ? m[c] : ''; });
   return p;
 };
+// Rôle et droits du compte (voir lib/droits.js). Si la vérification échoue pour une raison technique, on n'empêche pas la connexion :
+// le serveur contrôle de toute façon chaque appel.
+const accesDe = async (user) => { try { return await infosAcces(user); } catch (e) { return null; } };
 const rep = (code, o) => ({ statusCode: code, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o) });
 
 exports.handler = async (event) => {
@@ -38,7 +42,11 @@ exports.handler = async (event) => {
       const u = await sb.auth.getUser(jeton);
       const user = u.data && u.data.user;
       if (u.error || !user) return rep(401, { error: 'Session expirée : reconnectez-vous.' });
-      if (b.action === 'lire_profil') return rep(200, { email: user.email, profil: profilDe(user) });
+      if (b.action === 'lire_profil') {
+        const acces = await accesDe(user);
+        if (acces && acces.actif === false) return rep(403, { error: 'Votre compte est désactivé. Contactez un administrateur.', code: 'desactive' });
+        return rep(200, { email: user.email, profil: profilDe(user), ...(acces ? { role: acces.role, role_libelle: acces.role_libelle, droits: acces.droits } : {}) });
+      }
       const cleService = process.env.SUPABASE_SERVICE_ROLE_KEY;
       if (!cleService) return rep(500, { error: 'SUPABASE_SERVICE_ROLE_KEY manquante.' });
       const entree = b.profil || {};
@@ -70,7 +78,8 @@ exports.handler = async (event) => {
       const neuf = await sb.auth.signInWithPassword({ email: user.email, password: nouveau });
       const ns = neuf.data && neuf.data.session;
       if (neuf.error || !ns) return rep(200, { ok: true, reconnexion: true });
-      return rep(200, { ok: true, access_token: ns.access_token, refresh_token: ns.refresh_token, expires_at: ns.expires_at, email: user.email, profil: profilDe(user) });
+      const acces = await accesDe(user);
+      return rep(200, { ok: true, access_token: ns.access_token, refresh_token: ns.refresh_token, expires_at: ns.expires_at, email: user.email, profil: profilDe(user), ...(acces ? { role: acces.role, role_libelle: acces.role_libelle, droits: acces.droits } : {}) });
     }
     let res;
     if (b.refresh_token) res = await sb.auth.refreshSession({ refresh_token: b.refresh_token });
@@ -78,7 +87,9 @@ exports.handler = async (event) => {
     else return rep(400, { error: 'E-mail et mot de passe requis.' });
     const s = res.data && res.data.session;
     if (res.error || !s) return rep(401, { error: b.refresh_token ? 'Session expirée.' : 'E-mail ou mot de passe incorrect.' });
-    return rep(200, { access_token: s.access_token, refresh_token: s.refresh_token, expires_at: s.expires_at, email: s.user && s.user.email, profil: profilDe(s.user) });
+    const acces = await accesDe(s.user);
+    if (acces && acces.actif === false) return rep(403, { error: 'Votre compte est désactivé. Contactez un administrateur.', code: 'desactive' });
+    return rep(200, { access_token: s.access_token, refresh_token: s.refresh_token, expires_at: s.expires_at, email: s.user && s.user.email, profil: profilDe(s.user), ...(acces ? { role: acces.role, role_libelle: acces.role_libelle, droits: acces.droits } : {}) });
   } catch (err) {
     return rep(500, { error: err.message });
   }
