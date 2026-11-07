@@ -741,6 +741,8 @@
   .step-toggle:focus-visible { outline: 2px solid var(--accent-teal); outline-offset: 2px; border-radius: 4px; }
   .step-chev { flex: 0 0 auto; width: 16px; color: var(--ink-500); font-size: 14px; }
   .step-titre { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .rs-machine { font-weight: 600; color: var(--ink-700); }
+  .machine-ligne small { display: block; margin-top: 4px; }
   .step-resume { font-size: 11.5px; color: var(--ink-500); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .step-card:not(.replie) .step-resume { display: none; }
   .step-tags { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
@@ -6638,7 +6640,7 @@
             return `<div class="msg ${e.duree_manuelle_h !== null ? '' : 'error'}" style="margin:6px 0 0;">Type de production de l'OF : <strong>${actuel}</strong>. ${machine ? 'Pour ' + esc(machine) + ', d' : 'D'}es temps ne sont enregistrés que pour : <strong>${e.types_possibles.map(lib).join(', ')}</strong>. ${e.duree_manuelle_h !== null ? 'La durée manuelle ci-dessous est utilisée à la place.' : 'Deux solutions : changer le type de production de l\'OF (en haut), ou ajouter un profil « ' + actuel + ' » pour cette machine (Machines → modifier → Configurer les temps de production).'}</div>`;
           })() : '';
       return `
-        <div class="step-card replie" id="step-${e.gamme_id}" data-gamme="${e.gamme_id}" data-verrou="${verrou ? 1 : 0}" data-seq="${e.sequence}" data-nom="${esc(libelles.get(e.sequence))}" data-rang="${esc(e.rang || '')}" data-chiffre="${e.chiffre ? 1 : 0}" data-total="${e.total_h ?? ''}" data-completer="${aCompleter ? 1 : 0}">
+        <div class="step-card replie" id="step-${e.gamme_id}" data-gamme="${e.gamme_id}" data-verrou="${verrou ? 1 : 0}" data-seq="${e.sequence}" data-nom="${esc(libelles.get(e.sequence))}" data-rang="${esc(e.rang || '')}" data-chiffre="${e.chiffre ? 1 : 0}" data-total="${e.total_h ?? ''}" data-completer="${aCompleter ? 1 : 0}" data-planifiees="${esc((e.machines_planifiees || []).join(' + '))}" data-standard="${esc((e.machines_standard || []).join(' / '))}">
           <div class="step-head step-toggle" role="button" tabindex="0" aria-expanded="false" title="Cliquer pour déplier / replier">
             <span class="step-chev" aria-hidden="true">▸</span>
             <div class="step-titre"><strong>${e.rang ? e.rang + '. ' : ''}${e.operation}</strong><span class="step-resume"></span></div>
@@ -6646,9 +6648,9 @@
           </div>
           <div class="step-corps">
             <div class="step-source">${SOURCES[e.source]}${e.duree_manuelle_h !== null ? ' — <strong>durée manuelle appliquée</strong>' : ''}</div>
+            <div class="machine-ligne field"><label>Machine prévue ${verrou ? '(planifiée — non modifiable ici)' : ''}</label><select class="s-machine" ${verrou ? 'disabled' : ''}>${machOptions}</select>${(e.machines_planifiees || []).length ? `<small class="plan-note">Affectée au planning : <strong>${esc(e.machines_planifiees.join(' + '))}</strong></small>` : ((e.machines_standard || []).length && !e.machine_id ? `<small class="plan-note">Machine standard de l'opération : <strong>${esc(e.machines_standard.join(' / '))}</strong></small>` : '')}</div>
             ${predHtml}
             <div class="step-grid">
-              <div class="field"><label>Machine prévue ${verrou ? '(planifiée — non modifiable ici)' : ''}</label><select class="s-machine" ${verrou ? 'disabled' : ''}>${machOptions}</select></div>
               ${champQuantite(e)}
               ${paramsHtml}
               <div class="field"><label>Durée manuelle (h) — remplace le calcul</label><input class="s-manuel" type="number" min="0" step="any" value="${e.duree_manuelle_h ?? ''}"></div>
@@ -6779,7 +6781,14 @@
       const t = c.querySelector('.step-toggle'); if (t) t.setAttribute('aria-expanded', ouvert ? 'true' : 'false');
       const ch = c.querySelector('.step-chev'); if (ch) ch.textContent = ouvert ? '▾' : '▸';
     };
-    const texteMachine = (c) => { const sel = c.querySelector('.s-machine'); const o = sel && sel.options[sel.selectedIndex]; return o && o.value ? o.textContent.replace(' ✓', '').trim() : ''; };
+    // Machine affichée : celle choisie pour l'OF, sinon celle(s) affectée(s) au planning, sinon la machine standard de l'opération.
+    const machineDe = (c) => {
+      const sel = c.querySelector('.s-machine'); const o = sel && sel.options[sel.selectedIndex];
+      if (o && o.value) return { texte: o.textContent.replace(' ✓', '').trim(), type: 'choisie' };
+      if (c.dataset.planifiees) return { texte: c.dataset.planifiees, type: 'planifiee' };
+      if (c.dataset.standard) return { texte: c.dataset.standard, type: 'standard' };
+      return { texte: '', type: 'aucune' };
+    };
     const textePreds = (c) => Array.from(c.querySelectorAll('.pred-row')).filter(r => r.querySelector('.s-pred-check').checked).map(r => {
       const nom = r.querySelector('.pred-name').textContent.trim(); const m = r.querySelector('.s-pred-mode').value;
       return nom + (m === 'en_ligne' ? ' (en ligne)' : (m === 'progressif' ? ` (dès ${r.querySelector('.s-pred-pct').value || 10} %)` : ''));
@@ -6788,19 +6797,19 @@
       const corps = document.getElementById('m-plan-body'); if (!corps) return;
       corps.innerHTML = '';
       cartes().forEach(c => {
-        const preds = textePreds(c), machine = texteMachine(c);
+        const preds = textePreds(c), mach = machineDe(c), machine = mach.texte;
         const recalc = c.dataset.modifie === '1' || toutRecalculer;
         const duree = recalc ? '<span class="tag modif">à recalculer</span>' : (c.dataset.chiffre === '1' ? `<span class="tag ok">${esc(fmtH(Number(c.dataset.total)))}</span>` : '<span class="tag warn">Non chiffré</span>');
         const tr = el(`<tr class="plan-ligne${c.dataset.completer === '1' ? ' a-completer' : ''}" data-cible="${c.id}">
           <td class="mono">${esc(c.dataset.rang || c.dataset.seq)}</td>
           <td><strong>${esc(c.dataset.nom)}</strong>${c.dataset.completer === '1' ? ' <span class="tag warn">à compléter</span>' : ''}</td>
-          <td>${machine ? esc(machine) : '<span class="plan-note">standard</span>'}</td>
+          <td class="plan-machine">${machine ? `<strong>${esc(machine)}</strong>${mach.type === 'standard' ? ' <span class="plan-note">(standard)</span>' : ''}` : '<span class="plan-note">sans machine</span>'}</td>
           <td>${preds.length ? preds.map(esc).join(' + ') : '<span class="plan-note">dès le début</span>'}</td>
           <td>${duree}</td></tr>`);
         tr.addEventListener('click', () => { const cible = document.getElementById(tr.dataset.cible); if (!cible) return; ouvrirCarte(cible, true); cible.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
         corps.appendChild(tr);
         const rs = c.querySelector('.step-resume');
-        if (rs) rs.textContent = [machine || 'machine standard', preds.length ? 'après ' + preds.join(' + ') : 'dès le début'].join(' · ');
+        if (rs) rs.innerHTML = `<span class="rs-machine">${machine ? esc(machine) + (mach.type === 'standard' ? ' (standard)' : '') : 'sans machine'}</span> · ${preds.length ? 'après ' + esc(preds.join(' + ')) : 'dès le début'}`;
         const dc = c.querySelector('.step-duree');
         if (dc) { if (recalc) { dc.className = 'tag modif step-duree'; dc.textContent = 'à recalculer'; } else { dc.className = `tag ${c.dataset.chiffre === '1' ? 'ok' : 'warn'} step-duree`; dc.textContent = c.dataset.chiffre === '1' ? fmtH(Number(c.dataset.total)) : 'Non chiffré'; } }
         const bm = c.querySelector('.step-modif'); if (bm) bm.classList.toggle('hidden', c.dataset.modifie !== '1');

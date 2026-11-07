@@ -67,6 +67,15 @@ async function calculerEtapes(supabase, ofId) {
     supabase.from('caracteristiques_produit').select('cle, libelle, type, unite'),
   ]);
   for (const r of [phasesRes, machinesRes, machinesOpsRes, calRes, catalogueRes]) if (r.error) throw r.error;
+  // Machines réellement affectées par le planning à chaque étape (le champ machine_id de la gamme reste vide tant qu'on n'impose pas de machine).
+  const nomMachine = new Map(machinesRes.data.map((m) => [m.id, m.nom]));
+  const machinesPlanifiees = new Map();
+  try {
+    if (gammes.length) {
+      const pl = await supabase.from('planning_jour').select('gamme_operatoire_id, machine_id').in('gamme_operatoire_id', gammes.map((g) => g.id)).not('machine_id', 'is', null).neq('statut', 'annulé');
+      if (!pl.error) (pl.data || []).forEach((l) => { const n = nomMachine.get(l.machine_id); if (!n) return; const set = machinesPlanifiees.get(l.gamme_operatoire_id) || new Set(); set.add(n); machinesPlanifiees.set(l.gamme_operatoire_id, set); });
+    }
+  } catch (e) { /* information facultative */ }
 
   const catalogue = catalogueRes.data || [];
   const parCle = Object.fromEntries(catalogue.map((c) => [c.cle, c]));
@@ -236,6 +245,8 @@ async function calculerEtapes(supabase, ofId) {
       dependances: g.dependances || {},         // options par lien : { "1": { mode: "progressif", seuil_pct: 10 } }
       operation: g.operations.nom, operation_code: g.operations.code,
       machine_id: g.machine_id, machines_compatibles: compatibles,
+      machines_planifiees: Array.from(machinesPlanifiees.get(g.id) || []).sort((a, b) => a.localeCompare(b, 'fr')),
+      machines_standard: machinesRes.data.filter((m) => m.operation_id === g.operation_id).map((m) => m.nom).sort((a, b) => a.localeCompare(b, 'fr')),
       source, phases, type_manquant: typeManquant,
       types_possibles: typeManquant ? typesAutres : [],
       parametres, parametres_requis: requis, parametres_manquants: manquants,
