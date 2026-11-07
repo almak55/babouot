@@ -155,11 +155,15 @@ async function calculerEtapes(supabase, ofId) {
     if (!utilisees.length && derivees && RF.CODES_OPERATIONS.includes(g.operations.code)) {
       calculRefente = true; source = 'refente'; typeManquant = false;
       const nbPers = 1;
+      const ph = (nom, ordre, champs) => ({ nom, ordre, occupe_machine: true, nb_personnes: nbPers, ...champs });
       utilisees = [
-        ...(reglagesRefente.mise_en_route_min > 0 ? [{ nom: 'Mise en route', ordre: 1, type_calcul: 'fixe', duree_h: reglagesRefente.mise_en_route_min / 60, occupe_machine: true, nb_personnes: nbPers }] : []),
-        ...(reglagesRefente.reglage_ligne_min > 0 ? [{ nom: 'Réglage à chaque pagination', ordre: 2, type_calcul: 'fixe', duree_h: (reglagesRefente.reglage_ligne_min / 60) * derivees.refente_lignes, occupe_machine: true, nb_personnes: nbPers }] : []),
-        ...(reglagesRefente.manutention_s > 0 ? [{ nom: 'Manutention des piles', ordre: 2, type_calcul: 'par_element', duree_h: reglagesRefente.manutention_s / 3600, element_param: 'refente_piles', element_label: 'pile', occupe_machine: true, nb_personnes: nbPers }] : []),
-        { nom: 'Coupe au massicot droit', ordre: 3, type_calcul: 'cadence', cadence_par_h: reglagesRefente.cadence_h, quantite_formule: 'refente_coups', unite_cadence: 'coups de couteau', occupe_machine: true, nb_personnes: nbPers },
+        ...(reglagesRefente.mise_en_route_min > 0 ? [ph('Mise en route', 1, { type_calcul: 'fixe', duree_h: reglagesRefente.mise_en_route_min / 60 })] : []),
+        ...(reglagesRefente.transport_min > 0 ? [ph('Transport et manutention des palettes', 1, { type_calcul: 'fixe', duree_h: reglagesRefente.transport_min / 60 })] : []),
+        ...(reglagesRefente.reglage_ligne_min > 0 ? [ph('Réglage à chaque pagination', 2, { type_calcul: 'fixe', duree_h: (reglagesRefente.reglage_ligne_min / 60) * derivees.refente_lignes })] : []),
+        ...(reglagesRefente.taquage_min > 0 ? [ph('Taquage des piles', 2, { type_calcul: 'par_element', duree_h: reglagesRefente.taquage_min / 60, element_param: 'refente_piles_taquees', element_label: 'pile' })] : []),
+        ...(reglagesRefente.manutention_s > 0 ? [ph('Manutention des piles', 2, { type_calcul: 'par_element', duree_h: reglagesRefente.manutention_s / 3600, element_param: 'refente_piles', element_label: 'pile' })] : []),
+        ph('Coupe au massicot droit', 3, { type_calcul: 'cadence', cadence_par_h: reglagesRefente.cadence_h, quantite_formule: 'refente_coups', unite_cadence: 'coups de couteau' }),
+        ...(reglagesRefente.palettisation_s > 0 ? [ph('Palettisation des piles coupées', 4, { type_calcul: 'par_element', duree_h: reglagesRefente.palettisation_s / 3600, element_param: 'refente_piles_finies', element_label: 'pile coupée' })] : []),
       ];
     }
     const phases = utilisees.map((p) => {

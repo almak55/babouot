@@ -729,12 +729,15 @@
   .refente-val { font-weight: 600; padding: 8px 0; font-size: 15px; }
   .refente-resultat { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--paper-raised); border: 1px solid var(--accent-teal); font-size: 15px; }
   .refente-resultat:empty { display: none; }
+  .refente-detail { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; color: var(--ink-500); }
+  .refente-detail li { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; border-top: 1px dashed var(--line); }
   .compo-table .cp-info { display: block; font-size: 11px; max-width: 120px; line-height: 1.25; margin-top: 2px; }
-  .compo-table input { width: 52px; padding: 4px 4px; }
+  .compo-table input { width: 44px; padding: 4px 3px; }
   .compo-table .cp-suppr { padding: 2px 8px; }
-  .compo-table .cp-poses { width: 70px; }
-  .compo-table .cp-pile { width: 58px; }
-  .compo-table th, .compo-table td { padding: 6px 4px; }
+  .compo-table .cp-poses { width: 62px; }
+  .compo-table .cp-pile { width: 50px; }
+  .compo-table th, .compo-table td { padding: 6px 3px; }
+  .compo-table .cp-info { max-width: 100px; }
   .compo-table th { font-size: 10px; }
   .compo-table td.num, .compo-table th.num { text-align: right; white-space: nowrap; }
   .compo-table tfoot td { font-weight: 600; background: var(--paper-raised-2, #eef0f4); }
@@ -6644,7 +6647,7 @@
       const ligne = (l) => `<tr class="compo-ligne" data-dispo="${esc(l.disposition || '')}" data-parage="${esc(l.parage || '')}">
         <td><input class="cp-pages" type="number" min="1" step="1" value="${esc(l.pages ?? '')}" aria-label="Pagination"></td>
         <td><input class="cp-cahiers" type="number" min="1" step="1" value="${esc(l.cahiers ?? '')}" aria-label="Nombre de cahiers"></td>
-        <td><input class="cp-feuille" type="text" list="m-compo-formats" placeholder="ex. 650x1000" value="${esc(l.feuille ?? '')}" aria-label="Format de la feuille en mm" style="width:84px;"></td>
+        <td><input class="cp-feuille" type="text" list="m-compo-formats" placeholder="ex. 650x1000" value="${esc(l.feuille ?? '')}" aria-label="Format de la feuille en mm" style="width:90px;"></td>
         <td><input class="cp-poses" type="number" min="1" step="1" placeholder="auto" value="${esc(l.poses ?? '')}" aria-label="Poses sur la feuille"><small class="cp-info plan-note"></small></td>
         <td><input class="cp-pile" type="number" min="1" step="1" placeholder="500" value="${esc(l.pile ?? '')}" aria-label="Feuilles par pile pour cette pagination"></td>
         <td class="num cp-feuilles">—</td><td class="num cp-piles">—</td><td class="num cp-coups">—</td><td class="num cp-temps">—</td>
@@ -6672,13 +6675,19 @@
           ${[4, 8, 16, 32].map(n => `<button class="btn cp-ajout" type="button" data-pages="${n}">${n} pages</button>`).join('')}
           <button class="btn cp-ajout" type="button" data-pages="">Autre…</button>
         </div>
-        ${champTemps ? `<div class="step-grid" style="margin-top:10px;">
-          <div class="field"><label>Cadence de coupe (coups de couteau / h) <span class="plan-note">— une coupe = butée, serrage, coupe, évacuation ; 120 à 300 en production réelle</span></label><input class="s-param" data-ref="refente_cadence_h" data-cle="refente_cadence_h" type="number" min="1" step="any" placeholder="200" value="${esc(prm.refente_cadence_h ?? '')}"></div>
-          <div class="field"><label>Manutention par pile (secondes) <span class="plan-note">— prise sur palette, taquage, mise en place, évacuation</span></label><input class="s-param" data-ref="refente_manutention_s" data-cle="refente_manutention_s" type="number" min="0" step="any" placeholder="60" value="${esc(prm.refente_manutention_s ?? '')}"></div>
-          <div class="field"><label>Réglage à chaque pagination (minutes) <span class="plan-note">— butées, programme de coupe</span></label><input class="s-param" data-ref="refente_reglage_ligne_min" data-cle="refente_reglage_ligne_min" type="number" min="0" step="any" placeholder="5" value="${esc(prm.refente_reglage_ligne_min ?? '')}"></div>
-          <div class="field"><label>Mise en route (minutes) <span class="plan-note">— une fois par session</span></label><input class="s-param" data-ref="refente_mise_en_route_min" data-cle="refente_mise_en_route_min" type="number" min="0" step="any" placeholder="10" value="${esc(prm.refente_mise_en_route_min ?? '')}"></div>
-        </div>
-        <small class="plan-note">Temps de départ prudents (200 coups/h, 60 s par pile, 5 min par pagination, 10 min de mise en route) : chronométrez une vraie session de coupe et ajustez ces valeurs pour que le temps total corresponde à votre réalité.</small>` : (e ? '<div class="plan-note" style="margin-top:8px;">Les temps standards enregistrés pour cette machine sont appliqués ; ce tableau fournit les coups de couteau et les piles qu\'ils utilisent.</div>' : '')}
+        ${champTemps ? `<div class="refente-temps">
+          <div class="produit-titre" style="margin:10px 0 4px;">Temps de l'opération de coupe <span class="plan-note">— valeurs réglables ; vides = valeurs de départ affichées en grisé</span></div>
+          <div class="step-grid">
+            <div class="field"><label>Transport et manutention générale (min) <span class="plan-note">— palettes, une fois par opération de coupe</span></label><input class="s-param" data-ref="refente_transport_min" data-cle="refente_transport_min" type="number" min="0" step="any" placeholder="45" value="${esc(prm.refente_transport_min ?? '')}"></div>
+            <div class="field"><label>Mise en route (min) <span class="plan-note">— une fois par session</span></label><input class="s-param" data-ref="refente_mise_en_route_min" data-cle="refente_mise_en_route_min" type="number" min="0" step="any" placeholder="10" value="${esc(prm.refente_mise_en_route_min ?? '')}"></div>
+            <div class="field"><label>Réglage à chaque pagination (min) <span class="plan-note">— butées, programme de coupe</span></label><input class="s-param" data-ref="refente_reglage_ligne_min" data-cle="refente_reglage_ligne_min" type="number" min="0" step="any" placeholder="5" value="${esc(prm.refente_reglage_ligne_min ?? '')}"></div>
+            <div class="field"><label>Taquage par pile de feuilles (min) <span class="plan-note">— taqueuse, avant la coupe</span></label><input class="s-param" data-ref="refente_taquage_min" data-cle="refente_taquage_min" type="number" min="0" step="any" placeholder="2" value="${esc(prm.refente_taquage_min ?? '')}"></div>
+            <div class="field"><label>Manutention par pile passée au massicot (s) <span class="plan-note">— prise, mise en place, évacuation</span></label><input class="s-param" data-ref="refente_manutention_s" data-cle="refente_manutention_s" type="number" min="0" step="any" placeholder="30" value="${esc(prm.refente_manutention_s ?? '')}"></div>
+            <div class="field"><label>Cadence de coupe (coups de couteau / h) <span class="plan-note">— une coupe = butée, serrage, coupe ; 120 à 300 en production réelle</span></label><input class="s-param" data-ref="refente_cadence_h" data-cle="refente_cadence_h" type="number" min="1" step="any" placeholder="200" value="${esc(prm.refente_cadence_h ?? '')}"></div>
+            <div class="field"><label>Palettisation par pile coupée terminée (s)</label><input class="s-param" data-ref="refente_palettisation_s" data-cle="refente_palettisation_s" type="number" min="0" step="any" placeholder="15" value="${esc(prm.refente_palettisation_s ?? '')}"></div>
+          </div>
+          <small class="plan-note">Transport 45 min, taquage 2 min par pile et palettisation 15 s par pile viennent de votre atelier ; mise en route, réglage par pagination, manutention (30 s) et cadence sont des valeurs de départ à ajuster au chronomètre.</small>
+        </div>` : (e ? '<div class="plan-note" style="margin-top:8px;">Les temps standards enregistrés pour cette machine sont appliqués ; ce tableau fournit les coups de couteau et les piles qu\'ils utilisent.</div>' : '')}
         <details style="margin-top:8px;"><summary class="plan-note" style="cursor:pointer;">Réglages du calcul des poses et des piles</summary>
           <div class="step-grid" style="margin-top:8px;">
             <div class="field"><label>Rognage par côté du cahier (mm)</label><input class="s-car" data-ref="rognage_cahier_mm" data-cle="rognage_cahier_mm" type="number" min="0" step="any" placeholder="5" value="${val('rognage_cahier_mm')}"></div>
@@ -6925,12 +6934,12 @@
               tr.querySelector('.cp-feuilles').textContent = fmtN(l.feuilles); tr.querySelector('.cp-piles').textContent = fmtN(l.piles);
               tr.querySelector('.cp-coups').textContent = fmtN(l.coups); tr.querySelector('.cp-temps').textContent = fmtH(l.temps_h);
               const champ = tr.querySelector('.cp-poses');
-              champ.placeholder = l.poses_auto ? `auto : ${l.poses_auto}` : 'à saisir';
+              champ.placeholder = l.poses_auto ? `auto ${l.poses_auto}` : 'à saisir';
               tr.querySelector('.cp-info').textContent = l.poses_source === 'calculees' ? ` ${l.disposition}${l.plat ? ' · plat ' + l.plat.replace('x', '×') + ' mm' : ''}`
                 : (l.poses_source === 'saisies' ? ` saisi${l.poses_auto && l.poses_auto !== l.poses ? ' (calcul : ' + l.poses_auto + ')' : ''}` : ' ⚠ à renseigner');
             });
             // valeurs par défaut du serveur : affichées en grisé dans les champs vides
-            const D = r.defauts || {}; const dflt = { passe_pct: D.passe_pct, feuilles_par_pile: D.pile_max, rognage_cahier_mm: D.rognage_mm, marge_feuille_mm: D.marge_feuille_mm, refente_cadence_h: D.cadence_h, refente_manutention_s: D.manutention_s, refente_reglage_ligne_min: D.reglage_ligne_min, refente_mise_en_route_min: D.mise_en_route_min };
+            const D = r.defauts || {}; const dflt = { passe_pct: D.passe_pct, feuilles_par_pile: D.pile_max, rognage_cahier_mm: D.rognage_mm, marge_feuille_mm: D.marge_feuille_mm, refente_cadence_h: D.cadence_h, refente_manutention_s: D.manutention_s, refente_reglage_ligne_min: D.reglage_ligne_min, refente_mise_en_route_min: D.mise_en_route_min, refente_taquage_min: D.taquage_min, refente_palettisation_s: D.palettisation_s, refente_transport_min: D.transport_min };
             boite.querySelectorAll('[data-ref]').forEach(i => { if (dflt[i.dataset.ref] !== undefined) i.placeholder = String(dflt[i.dataset.ref]); });
             if (r.reglages) boite.querySelectorAll('.cp-pile').forEach(i => { i.placeholder = String(r.reglages.pile_max); });
             if (r.ok) {
@@ -6940,7 +6949,13 @@
               document.getElementById('m-compo-t-temps').textContent = fmtH(r.temps.total_h);
               document.getElementById('m-compo-total-lib').textContent = `Total — ${fmtN(r.cahiers_par_exemplaire)} cahier${r.cahiers_par_exemplaire > 1 ? 's' : ''}, ${fmtN(r.pages_par_exemplaire)} pages par exemplaire`;
               const t = r.temps;
-              document.getElementById('m-compo-resultat').innerHTML = `Temps total de la session de coupe : <strong>${fmtH(t.total_h)}</strong> <span class="plan-note">— ${fmtN(r.total.coups)} coups de couteau ÷ ${fmtN(r.reglages.cadence_h)}/h = coupe ${fmtH(t.coupe_h)}${t.manutention_h ? ` + manutention des piles ${fmtH(t.manutention_h)}` : ''}${t.reglage_h ? ` + réglages ${fmtH(t.reglage_h)}` : ''}${t.mise_en_route_h ? ` + mise en route ${fmtH(t.mise_en_route_h)}` : ''}</span>`;
+              const lignesTemps = [
+                ['Transport et manutention des palettes', t.transport_h], ['Mise en route', t.mise_en_route_h], ['Réglage à chaque pagination', t.reglage_h],
+                [`Taquage (${fmtN(r.total.piles_taquees)} piles)`, t.taquage_h], [`Manutention au massicot (${fmtN(r.total.piles)} piles)`, t.manutention_h],
+                [`Coupe (${fmtN(r.total.coups)} coups ÷ ${fmtN(r.reglages.cadence_h)}/h)`, t.coupe_h], [`Palettisation (${fmtN(r.total.piles_finies)} piles coupées)`, t.palettisation_h],
+              ].filter(x => x[1] > 0);
+              document.getElementById('m-compo-resultat').innerHTML = `Temps total de la session de coupe : <strong>${fmtH(t.total_h)}</strong>
+                <ul class="refente-detail">${lignesTemps.map(x => `<li><span>${esc(x[0])}</span><span class="mono">${fmtH(x[1])}</span></li>`).join('')}</ul>`;
             }
             msg.innerHTML = (r.erreurs || []).map(x => `<div class="msg error" style="margin:6px 0 0;">${esc(x)}</div>`).join('');
           } catch (e) { if (moi === version) msg.innerHTML = `<div class="msg error" style="margin:6px 0 0;">Aperçu impossible : ${esc(e.message)}</div>`; }

@@ -27,7 +27,10 @@ const DEFAUTS = {
   marge_feuille_mm: 10,   // marge perdue sur chaque bord de la feuille (pinces, repères)
   // Temps : valeurs de départ prudentes, à régler au chronomètre sur vos propres livres.
   cadence_h: 200,         // coups de couteau par heure : cycle d'une coupe (butée, serrage, coupe, évacuation) ; production réelle 120 à 300
-  manutention_s: 60,      // secondes par pile passée : prise sur palette, taquage, mise en place, évacuation des bandes
+  taquage_min: 2,         // minutes par pile de feuilles entières passée à la taqueuse avant la coupe
+  manutention_s: 30,      // secondes par pile passée au massicot : prise, mise en place, évacuation des bandes
+  palettisation_s: 15,    // secondes par pile coupée terminée posée sur palette
+  transport_min: 45,      // minutes par opération de coupe : transport des palettes, manutention générale
   reglage_ligne_min: 5,   // minutes à chaque nouvelle pagination / nouveau format de feuille : butées, programme de coupe
   mise_en_route_min: 10,  // minutes une fois par session de coupe : couteau, préparation de la machine
 };
@@ -37,7 +40,7 @@ const PILE_MAX_LIMITE = 5000;
 const CODES_OPERATIONS = ['REFENTE', 'REFENTE_MAGASIN'];
 
 // Variables que le moteur de formules peut lire sans qu'on les saisisse : elles sont calculées d'après la composition.
-const CLES_DERIVEES = ['refente_coups', 'refente_piles', 'refente_feuilles', 'refente_morceaux'];
+const CLES_DERIVEES = ['refente_coups', 'refente_piles', 'refente_feuilles', 'refente_morceaux', 'refente_piles_taquees', 'refente_piles_finies'];
 const CLE_COMPOSITION = 'composition_cahiers';
 const CLE_PILE_MAX = 'feuilles_par_pile';
 // Autres caractéristiques du produit lues par le calcul (toutes facultatives).
@@ -46,7 +49,7 @@ const CLES_REGLAGES = {
   fini_l: 'format_fini_l_mm', fini_h: 'format_fini_h_mm',
 };
 // Paramètres propres à l'étape (temps) : numériques.
-const CLES_TEMPS = { cadence_h: 'refente_cadence_h', manutention_s: 'refente_manutention_s', reglage_ligne_min: 'refente_reglage_ligne_min', mise_en_route_min: 'refente_mise_en_route_min' };
+const CLES_TEMPS = { cadence_h: 'refente_cadence_h', taquage_min: 'refente_taquage_min', manutention_s: 'refente_manutention_s', palettisation_s: 'refente_palettisation_s', transport_min: 'refente_transport_min', reglage_ligne_min: 'refente_reglage_ligne_min', mise_en_route_min: 'refente_mise_en_route_min' };
 
 const nombreOuNull = (v) => {
   if (v === null || v === undefined || String(v).trim() === '') return null;
@@ -130,7 +133,10 @@ function reglagesDepuis(car) {
     marge_feuille_mm: positifOuDefaut(g('marge_feuille_mm'), DEFAUTS.marge_feuille_mm),
     fini: l > 0 && h > 0 ? { l, h } : null,
     cadence_h: positifOuDefaut(t('cadence_h'), DEFAUTS.cadence_h, { zeroOk: false }),
+    taquage_min: positifOuDefaut(t('taquage_min'), DEFAUTS.taquage_min),
     manutention_s: positifOuDefaut(t('manutention_s'), DEFAUTS.manutention_s),
+    palettisation_s: positifOuDefaut(t('palettisation_s'), DEFAUTS.palettisation_s),
+    transport_min: positifOuDefaut(t('transport_min'), DEFAUTS.transport_min),
     reglage_ligne_min: positifOuDefaut(t('reglage_ligne_min'), DEFAUTS.reglage_ligne_min),
     mise_en_route_min: positifOuDefaut(t('mise_en_route_min'), DEFAUTS.mise_en_route_min),
   };
@@ -239,29 +245,41 @@ function calculer(brut, exemplaires, reglagesOuPile) {
     const feuilles = Math.ceil((quantiteParCahier * l.cahiers) / poses - 1e-9);
     const pileLigne = l.pile ? Math.min(l.pile, PILE_MAX_LIMITE) : reg.pile_max;
     const c = coupesLigne(dispo.colonnes, dispo.lignes, l.parage, feuilles, pileLigne);
-    const tempsH = c.coups / reg.cadence_h + (c.piles * reg.manutention_s) / 3600 + reg.reglage_ligne_min / 60;
+    // Une pagination sans coupe (1 pose, pas de parage) ne passe pas au massicot : ni taquage ni palettisation.
+    const coupee = c.coups > 0 || c.piles > 0;
+    const pilesTaquees = coupee ? c.piles_feuilles : 0;
+    const pilesFinies = coupee ? Math.ceil(feuilles * poses / pileLigne - 1e-9) : 0;   // piles de cahiers à plat posées sur palette
+    const tempsH = c.coups / reg.cadence_h + (c.piles * reg.manutention_s) / 3600 + pilesTaquees * reg.taquage_min / 60
+      + (pilesFinies * reg.palettisation_s) / 3600 + (coupee ? reg.reglage_ligne_min / 60 : 0);
     return {
       index: l.index, pages: l.pages, cahiers: l.cahiers, feuille: l.feuille ? `${l.feuille.l}x${l.feuille.h}` : null,
       poses, poses_source: source, poses_auto: auto ? auto.poses : null, pile_max: pileLigne, pile_saisie: !!l.pile,
       plat: auto ? `${auto.plat_l}x${auto.plat_h}` : null,
       disposition: `${dispo.colonnes}x${dispo.lignes}`, parage: l.parage,
-      feuilles, piles_feuilles: c.piles_feuilles, coups: c.coups, piles: c.piles, morceaux: feuilles * poses,
+      feuilles, piles_feuilles: c.piles_feuilles, coups: c.coups, piles: c.piles, piles_taquees: pilesTaquees, piles_finies: pilesFinies, morceaux: feuilles * poses,
       temps_h: tempsH,
     };
   });
   const total = lignes.reduce((t, l) => ({
     feuilles: t.feuilles + l.feuilles, piles: t.piles + l.piles, coups: t.coups + l.coups, morceaux: t.morceaux + l.morceaux,
-  }), { feuilles: 0, piles: 0, coups: 0, morceaux: 0 });
+    piles_taquees: t.piles_taquees + l.piles_taquees, piles_finies: t.piles_finies + l.piles_finies, lignes_coupees: t.lignes_coupees + (l.piles_taquees > 0 ? 1 : 0),
+  }), { feuilles: 0, piles: 0, coups: 0, morceaux: 0, piles_taquees: 0, piles_finies: 0, lignes_coupees: 0 });
   const coupeH = total.coups / reg.cadence_h;
   const manutentionH = (total.piles * reg.manutention_s) / 3600;
-  const reglageH = (lignes.length * reg.reglage_ligne_min) / 60;
+  const taquageH = (total.piles_taquees * reg.taquage_min) / 60;
+  const palettisationH = (total.piles_finies * reg.palettisation_s) / 3600;
+  const reglageH = (total.lignes_coupees * reg.reglage_ligne_min) / 60;
+  const transportH = total.lignes_coupees > 0 ? reg.transport_min / 60 : 0;
   const miseEnRouteH = reg.mise_en_route_min / 60;
   return {
     ok: true, erreurs, lignes, total, ...base,
     quantite_par_cahier: quantiteParCahier,
     cahiers_par_exemplaire: lecture.lignes.reduce((s, l) => s + l.cahiers, 0),
     pages_par_exemplaire: lecture.lignes.reduce((s, l) => s + l.cahiers * l.pages, 0),
-    temps: { coupe_h: coupeH, manutention_h: manutentionH, reglage_h: reglageH, mise_en_route_h: miseEnRouteH, total_h: coupeH + manutentionH + reglageH + miseEnRouteH },
+    temps: {
+      coupe_h: coupeH, taquage_h: taquageH, manutention_h: manutentionH, palettisation_h: palettisationH, reglage_h: reglageH, transport_h: transportH, mise_en_route_h: miseEnRouteH,
+      total_h: coupeH + taquageH + manutentionH + palettisationH + reglageH + transportH + miseEnRouteH,
+    },
   };
 }
 
@@ -272,7 +290,8 @@ function variablesDerivees(brutComposition, exemplaires, reglages) {
   return {
     refente_coups: r.total.coups, refente_piles: r.total.piles,
     refente_feuilles: r.total.feuilles, refente_morceaux: r.total.morceaux,
-    refente_lignes: r.lignes.length,
+    refente_lignes: r.total.lignes_coupees,
+    refente_piles_taquees: r.total.piles_taquees, refente_piles_finies: r.total.piles_finies,
     nb_cahiers: r.cahiers_par_exemplaire,
   };
 }
