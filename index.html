@@ -6596,7 +6596,8 @@
       return `<div class="field"><label>Quantité de cette opération${aide}</label><input class="s-qte" type="number" min="1" data-auto="${auto}" value="${ouvrages}"></div>`;
     };
     const etapesHtml = data.etapes.map(e => {
-      const verrou = e.statut !== 'à planifier';
+      const verrou = e.statut !== 'à planifier' && e.statut !== 'planifié';   // en cours / terminée : machine figée
+      const planifie = e.statut === 'planifié';
       const machOptions = `<option value="">— Standard de l'opération —</option>` + e.machines_compatibles
         .map(m => `<option value="${m.id}" ${m.id === e.machine_id ? 'selected' : ''}>${m.nom}${m.temps_specifiques ? ' ✓' : ''}</option>`).join('');
       const valeurProduit = (cle) => { const v = (data.of.caracteristiques || {})[cle]; return v === undefined || v === null ? '' : v; };
@@ -6640,7 +6641,7 @@
             return `<div class="msg ${e.duree_manuelle_h !== null ? '' : 'error'}" style="margin:6px 0 0;">Type de production de l'OF : <strong>${actuel}</strong>. ${machine ? 'Pour ' + esc(machine) + ', d' : 'D'}es temps ne sont enregistrés que pour : <strong>${e.types_possibles.map(lib).join(', ')}</strong>. ${e.duree_manuelle_h !== null ? 'La durée manuelle ci-dessous est utilisée à la place.' : 'Deux solutions : changer le type de production de l\'OF (en haut), ou ajouter un profil « ' + actuel + ' » pour cette machine (Machines → modifier → Configurer les temps de production).'}</div>`;
           })() : '';
       return `
-        <div class="step-card replie" id="step-${e.gamme_id}" data-gamme="${e.gamme_id}" data-verrou="${verrou ? 1 : 0}" data-seq="${e.sequence}" data-nom="${esc(libelles.get(e.sequence))}" data-rang="${esc(e.rang || '')}" data-chiffre="${e.chiffre ? 1 : 0}" data-total="${e.total_h ?? ''}" data-completer="${aCompleter ? 1 : 0}" data-planifiees="${esc((e.machines_planifiees || []).join(' + '))}" data-standard="${esc((e.machines_standard || []).join(' / '))}">
+        <div class="step-card replie" id="step-${e.gamme_id}" data-gamme="${e.gamme_id}" data-verrou="${verrou ? 1 : 0}" data-planifie="${planifie ? 1 : 0}" data-machine-initiale="${e.machine_id || ''}" data-seq="${e.sequence}" data-nom="${esc(libelles.get(e.sequence))}" data-rang="${esc(e.rang || '')}" data-chiffre="${e.chiffre ? 1 : 0}" data-total="${e.total_h ?? ''}" data-completer="${aCompleter ? 1 : 0}" data-planifiees="${esc((e.machines_planifiees || []).join(' + '))}" data-standard="${esc((e.machines_standard || []).join(' / '))}">
           <div class="step-head step-toggle" role="button" tabindex="0" aria-expanded="false" title="Cliquer pour déplier / replier">
             <span class="step-chev" aria-hidden="true">▸</span>
             <div class="step-titre"><strong>${e.rang ? e.rang + '. ' : ''}${e.operation}</strong><span class="step-resume"></span></div>
@@ -6648,7 +6649,7 @@
           </div>
           <div class="step-corps">
             <div class="step-source">${SOURCES[e.source]}${e.duree_manuelle_h !== null ? ' — <strong>durée manuelle appliquée</strong>' : ''}</div>
-            <div class="machine-ligne field"><label>Machine prévue ${verrou ? '(planifiée — non modifiable ici)' : ''}</label><select class="s-machine" ${verrou ? 'disabled' : ''}>${machOptions}</select>${(e.machines_planifiees || []).length ? `<small class="plan-note">Affectée au planning : <strong>${esc(e.machines_planifiees.join(' + '))}</strong></small>` : ((e.machines_standard || []).length && !e.machine_id ? `<small class="plan-note">Machine standard de l'opération : <strong>${esc(e.machines_standard.join(' / '))}</strong></small>` : '')}</div>
+            <div class="machine-ligne field"><label>Machine prévue ${verrou ? `(étape ${esc(e.statut)} — non modifiable)` : (planifie ? '<span class="plan-note">— étape planifiée : la changer la retire du planning</span>' : '')}</label><select class="s-machine" ${verrou ? 'disabled' : ''}>${machOptions}</select>${(e.machines_planifiees || []).length ? `<small class="plan-note">Affectée au planning : <strong>${esc(e.machines_planifiees.join(' + '))}</strong></small>` : ((e.machines_standard || []).length && !e.machine_id ? `<small class="plan-note">Machine standard de l'opération : <strong>${esc(e.machines_standard.join(' / '))}</strong></small>` : '')}</div>
             ${predHtml}
             <div class="step-grid">
               ${champQuantite(e)}
@@ -6834,13 +6835,25 @@
       const cible = ev.target;
       if (!cible || !cible.matches || !cible.matches('input, select, textarea')) return;
       if (cible.id === 'm-ajout-op' || cible.id === 'm-ajout-apres') return;
+      if (ev.type === 'input' && cible.matches('.s-machine')) return;   // une liste déroulante est prise en compte au « change » (après la confirmation éventuelle)
       modifie = true;
       const carte = cible.closest('.step-card');
       if (carte) carte.dataset.modifie = '1'; else toutRecalculer = true;
       maj();
     };
     modal.addEventListener('input', surSaisie);
-    modal.addEventListener('change', surSaisie);
+    modal.addEventListener('change', (ev) => {
+      const sel = ev.target;
+      if (sel && sel.matches && sel.matches('.s-machine')) {
+        const carte = sel.closest('.step-card');
+        if (carte && carte.dataset.planifie === '1' && sel.value !== (carte.dataset.machineInitiale || '')) {
+          const o = sel.options[sel.selectedIndex];
+          const planifiees = carte.dataset.planifiees || 'la machine actuelle';
+          if (!confirm(`« ${carte.dataset.nom} » est déjà planifiée (${planifiees}).\n\nPasser sur « ${o && o.value ? o.textContent.replace(' ✓', '').trim() : 'la machine standard'} » la retirera du planning (créneaux supprimés, personnes libérées) à l'enregistrement. Vous devrez ensuite replanifier l'OF.\n\nChanger la machine ?`)) { sel.value = carte.dataset.machineInitiale || ''; return; }
+        }
+      }
+      surSaisie(ev);
+    });
     maj();
     if (etat && etat.scroll) modal.scrollTop = etat.scroll;
 
@@ -6864,7 +6877,11 @@
           parametres,
           duree_manuelle_h: card.querySelector('.s-manuel').value,
         };
-        if (card.dataset.verrou !== '1') etape.machine_id = card.querySelector('.s-machine').value || null;
+        if (card.dataset.verrou !== '1') {
+          const choix = card.querySelector('.s-machine').value || null;
+          if (card.dataset.planifie !== '1') etape.machine_id = choix;
+          else if (choix !== (card.dataset.machineInitiale || null)) { etape.machine_id = choix; etape.retirer_planning = true; }   // étape planifiée : seulement si l'utilisateur l'a changée (confirmé)
+        }
         const choixPred = card.querySelectorAll('.pred-row');
         if (choixPred.length) {
           const preds = []; const dependances = {};

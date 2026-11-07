@@ -75,11 +75,12 @@ const handlerProtege = async (event) => {
       }
 
       const { data: existantes, error: exError } = await supabase
-        .from('gammes_operatoires').select('id, statut, sequence, predecesseurs, operations(nom)').eq('of_id', ofId);
+        .from('gammes_operatoires').select('id, statut, sequence, machine_id, predecesseurs, operations(nom)').eq('of_id', ofId);
       const sequences = new Set(existantes.map((g) => g.sequence));
       if (exError) throw exError;
 
       const aEcrire = [];
+      const aDeplanifier = [];   // étapes planifiées dont on change la machine : retirées du planning (à replanifier)
       for (const e of body.etapes || []) {
         const etape = existantes.find((g) => g.id === e.gamme_id);
         if (!etape) continue;
@@ -97,10 +98,17 @@ const handlerProtege = async (event) => {
           maj.duree_manuelle_h = n !== null && n >= 0 ? n : null;
         }
         if ('machine_id' in e) {
+          const cible = e.machine_id || null;
           if (etape.statut === 'à planifier') {
-            maj.machine_id = e.machine_id || null;
+            maj.machine_id = cible;
+          } else if (cible === (etape.machine_id || null)) {
+            // rien à changer
+          } else if (etape.statut === 'planifié' && e.retirer_planning === true) {
+            // Changement de machine d'une étape déjà planifiée : ses créneaux sont retirés du planning, elle repasse « à planifier ».
+            maj.machine_id = cible; maj.statut = 'à planifier';
+            aDeplanifier.push(etape);
           } else {
-            avertissements.push(`Étape ${etape.sequence} : machine inchangée (déjà planifiée — modifiez-la via le planning).`);
+            avertissements.push(`Étape ${etape.sequence} : machine inchangée (étape ${etape.statut === 'planifié' ? 'planifiée' : etape.statut}).`);
           }
         }
         if ('predecesseurs' in e) {
@@ -155,6 +163,14 @@ const handlerProtege = async (event) => {
       if (boucle) {
         const nomDe = (seq) => { const g = existantes.find((x) => x.sequence === seq); return g && g.operations ? g.operations.nom : `opération ${seq}`; };
         return { statusCode: 400, body: JSON.stringify({ error: `Enchaînement impossible : les opérations forment une boucle (${boucle.map(nomDe).join(' → ')}). Une opération ne peut pas dépendre, même indirectement, d'elle-même. Rien n'a été enregistré (ni dépendances, ni durées).`, boucle }) };
+      }
+      if (aDeplanifier.length) {
+        const { error: delErr } = await supabase.from('planning_jour').delete().in('gamme_operatoire_id', aDeplanifier.map((g) => g.id));
+        if (delErr) throw delErr;   // les affectations de personnel suivent (suppression en cascade)
+        try {
+          await require('./lib/journal').noter(supabase, ofId, 'deplanification', `Changement de machine : étape(s) ${aDeplanifier.map((g) => g.sequence).sort((a, b) => a - b).join(', ')} retirée(s) du planning.`, { sequences: aDeplanifier.map((g) => g.sequence) });
+        } catch (eJ) { /* le journal ne bloque jamais */ }
+        aDeplanifier.forEach((g) => avertissements.push(`Étape ${g.sequence} (${g.operations ? g.operations.nom : ''}) : machine changée, l'étape a été retirée du planning. Replanifiez l'OF (menu ⋯ → « 3. Planifier à l'heure »).`));
       }
       for (const { etape, maj } of aEcrire) {
         const { error } = await supabase.from('gammes_operatoires').update(maj).eq('id', etape.id);
