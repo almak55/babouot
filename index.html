@@ -730,8 +730,10 @@
   .refente-resultat { margin-top: 10px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--paper-raised); border: 1px solid var(--accent-teal); font-size: 15px; }
   .refente-resultat:empty { display: none; }
   .compo-table .cp-info { display: block; font-size: 11px; max-width: 120px; line-height: 1.25; margin-top: 2px; }
-  .compo-table input { width: 58px; padding: 4px 5px; }
-  .compo-table .cp-poses { width: 80px; }
+  .compo-table input { width: 52px; padding: 4px 4px; }
+  .compo-table .cp-suppr { padding: 2px 8px; }
+  .compo-table .cp-poses { width: 70px; }
+  .compo-table .cp-pile { width: 58px; }
   .compo-table th, .compo-table td { padding: 6px 4px; }
   .compo-table th { font-size: 10px; }
   .compo-table td.num, .compo-table th.num { text-align: right; white-space: nowrap; }
@@ -6623,10 +6625,10 @@
       const t = String(brut).trim();
       try {
         const j = JSON.parse(t);
-        if (Array.isArray(j)) return j.map(l => ({ pages: l.pages, cahiers: l.cahiers ?? l.nb_cahiers, feuille: l.feuille || '', poses: l.poses ?? '', disposition: l.disposition || '', parage: l.parage || '' }));
+        if (Array.isArray(j)) return j.map(l => ({ pages: l.pages, cahiers: l.cahiers ?? l.nb_cahiers, feuille: l.feuille || '', poses: l.poses ?? '', pile: l.pile || '', disposition: l.disposition || '', parage: l.parage || '' }));
       } catch (e) { /* texte libre */ }
       return t.split(/[;\n]+/).map(x => /^\s*(\d+)\s*[x×*]\s*(\d+)\s*p?\s*(?:[\/@]\s*(\d+))?\s*$/i.exec(x)).filter(Boolean)
-        .map(m => ({ cahiers: Number(m[1]), pages: Number(m[2]), feuille: '', poses: m[3] ? Number(m[3]) : '', disposition: '', parage: '' }));
+        .map(m => ({ cahiers: Number(m[1]), pages: Number(m[2]), feuille: '', poses: m[3] ? Number(m[3]) : '', pile: '', disposition: '', parage: '' }));
     };
     // Calcul de la coupe au massicot droit : saisie de la composition du livre, directement dans l'opération de refente.
     const FORMATS_FEUILLE = ['450x640', '500x700', '640x900', '650x920', '700x1000', '720x1020'];
@@ -6642,8 +6644,9 @@
       const ligne = (l) => `<tr class="compo-ligne" data-dispo="${esc(l.disposition || '')}" data-parage="${esc(l.parage || '')}">
         <td><input class="cp-pages" type="number" min="1" step="1" value="${esc(l.pages ?? '')}" aria-label="Pagination"></td>
         <td><input class="cp-cahiers" type="number" min="1" step="1" value="${esc(l.cahiers ?? '')}" aria-label="Nombre de cahiers"></td>
-        <td><input class="cp-feuille" type="text" list="m-compo-formats" placeholder="ex. 650x1000" value="${esc(l.feuille ?? '')}" aria-label="Format de la feuille en mm" style="width:92px;"></td>
+        <td><input class="cp-feuille" type="text" list="m-compo-formats" placeholder="ex. 650x1000" value="${esc(l.feuille ?? '')}" aria-label="Format de la feuille en mm" style="width:84px;"></td>
         <td><input class="cp-poses" type="number" min="1" step="1" placeholder="auto" value="${esc(l.poses ?? '')}" aria-label="Poses sur la feuille"><small class="cp-info plan-note"></small></td>
+        <td><input class="cp-pile" type="number" min="1" step="1" placeholder="500" value="${esc(l.pile ?? '')}" aria-label="Feuilles par pile pour cette pagination"></td>
         <td class="num cp-feuilles">—</td><td class="num cp-piles">—</td><td class="num cp-coups">—</td><td class="num cp-temps">—</td>
         <td><button class="btn cp-suppr" type="button" title="Retirer cette pagination" aria-label="Retirer cette pagination">✕</button></td></tr>`;
       return `
@@ -6654,13 +6657,14 @@
           <div class="field"><label>Quantité de la commande (exemplaires)</label><div class="refente-val" id="m-compo-qte">—</div></div>
           <div class="field"><label>Passe ajoutée (%)</label><input class="s-car" data-ref="passe_pct" data-cle="passe_pct" type="number" min="0" step="any" placeholder="10" value="${val('passe_pct')}"></div>
           <div class="field"><label>Quantité par cahier <span class="plan-note">— commande + passe</span></label><div class="refente-val" id="m-compo-qpc">—</div></div>
+          <div class="field"><label>Feuilles par pile (maximum) <span class="plan-note">— pour toutes les paginations ; modifiable ligne par ligne</span></label><input class="s-car" data-ref="feuilles_par_pile" data-cle="feuilles_par_pile" type="number" min="1" step="1" placeholder="500" value="${val('feuilles_par_pile')}"></div>
           <div class="field"><label>Format fini (rogné) du livre <span class="plan-note">— repris de la fiche, mm</span></label>
             <div style="display:flex;gap:6px;align-items:center;"><input class="s-car" data-ref="format_fini_l_mm" data-cle="format_fini_l_mm" type="number" min="1" step="any" placeholder="largeur" value="${val('format_fini_l_mm')}" style="width:96px;" aria-label="Largeur du format fini"> × <input class="s-car" data-ref="format_fini_h_mm" data-cle="format_fini_h_mm" type="number" min="1" step="any" placeholder="hauteur" value="${val('format_fini_h_mm')}" style="width:96px;" aria-label="Hauteur du format fini"> mm</div></div>
         </div>
         <div class="plan-table-wrap" style="max-height:none;"><table class="plan-table compo-table">
-          <thead><tr><th>Pagination<br><span class="plan-note">pages</span></th><th>Cahiers<br><span class="plan-note">dans le livre</span></th><th>Format de la feuille<br><span class="plan-note">mm, à saisir</span></th><th>Poses sur la feuille</th><th class="num">Feuilles</th><th class="num">Piles</th><th class="num">Coups</th><th class="num">Temps</th><th></th></tr></thead>
+          <thead><tr><th>Pagination<br><span class="plan-note">pages</span></th><th>Cahiers<br><span class="plan-note">dans le livre</span></th><th>Format feuille<br><span class="plan-note">mm, à saisir</span></th><th>Poses<br><span class="plan-note">par feuille</span></th><th>Feuilles / pile<br><span class="plan-note">max.</span></th><th class="num">Feuilles</th><th class="num">Piles</th><th class="num">Coups</th><th class="num">Temps</th><th></th></tr></thead>
           <tbody id="m-compo-body">${(lignes.length ? lignes : [{}]).map(ligne).join('')}</tbody>
-          <tfoot><tr><td colspan="4" id="m-compo-total-lib">Total</td><td class="num" id="m-compo-t-feuilles">—</td><td class="num" id="m-compo-t-piles">—</td><td class="num" id="m-compo-t-coups">—</td><td class="num" id="m-compo-t-temps">—</td><td></td></tr></tfoot>
+          <tfoot><tr><td colspan="5" id="m-compo-total-lib">Total</td><td class="num" id="m-compo-t-feuilles">—</td><td class="num" id="m-compo-t-piles">—</td><td class="num" id="m-compo-t-coups">—</td><td class="num" id="m-compo-t-temps">—</td><td></td></tr></tfoot>
         </table></div>
         <datalist id="m-compo-formats">${FORMATS_FEUILLE.map(f => `<option value="${f}">`).join('')}</datalist>
         <div class="plan-outils" style="margin-top:8px;">
@@ -6669,13 +6673,14 @@
           <button class="btn cp-ajout" type="button" data-pages="">Autre…</button>
         </div>
         ${champTemps ? `<div class="step-grid" style="margin-top:10px;">
-          <div class="field"><label>Cadence de coupe (coups de couteau / h) <span class="plan-note">— 120 à 300 en production réelle, manutention comprise</span></label><input class="s-param" data-ref="refente_cadence_h" data-cle="refente_cadence_h" type="number" min="1" step="any" placeholder="200" value="${esc(prm.refente_cadence_h ?? '')}"></div>
-          <div class="field"><label>Manutention par pile (secondes) <span class="plan-note">— en plus de la cadence ; vide = 0</span></label><input class="s-param" data-ref="refente_manutention_s" data-cle="refente_manutention_s" type="number" min="0" step="any" placeholder="0" value="${esc(prm.refente_manutention_s ?? '')}"></div>
-          <div class="field"><label>Mise en route (minutes)</label><input class="s-param" data-ref="refente_mise_en_route_min" data-cle="refente_mise_en_route_min" type="number" min="0" step="any" placeholder="0" value="${esc(prm.refente_mise_en_route_min ?? '')}"></div>
-        </div>` : (e ? '<div class="plan-note" style="margin-top:8px;">Les temps standards enregistrés pour cette machine sont appliqués ; ce tableau fournit les coups de couteau et les piles qu\'ils utilisent.</div>' : '')}
+          <div class="field"><label>Cadence de coupe (coups de couteau / h) <span class="plan-note">— une coupe = butée, serrage, coupe, évacuation ; 120 à 300 en production réelle</span></label><input class="s-param" data-ref="refente_cadence_h" data-cle="refente_cadence_h" type="number" min="1" step="any" placeholder="200" value="${esc(prm.refente_cadence_h ?? '')}"></div>
+          <div class="field"><label>Manutention par pile (secondes) <span class="plan-note">— prise sur palette, taquage, mise en place, évacuation</span></label><input class="s-param" data-ref="refente_manutention_s" data-cle="refente_manutention_s" type="number" min="0" step="any" placeholder="60" value="${esc(prm.refente_manutention_s ?? '')}"></div>
+          <div class="field"><label>Réglage à chaque pagination (minutes) <span class="plan-note">— butées, programme de coupe</span></label><input class="s-param" data-ref="refente_reglage_ligne_min" data-cle="refente_reglage_ligne_min" type="number" min="0" step="any" placeholder="5" value="${esc(prm.refente_reglage_ligne_min ?? '')}"></div>
+          <div class="field"><label>Mise en route (minutes) <span class="plan-note">— une fois par session</span></label><input class="s-param" data-ref="refente_mise_en_route_min" data-cle="refente_mise_en_route_min" type="number" min="0" step="any" placeholder="10" value="${esc(prm.refente_mise_en_route_min ?? '')}"></div>
+        </div>
+        <small class="plan-note">Temps de départ prudents (200 coups/h, 60 s par pile, 5 min par pagination, 10 min de mise en route) : chronométrez une vraie session de coupe et ajustez ces valeurs pour que le temps total corresponde à votre réalité.</small>` : (e ? '<div class="plan-note" style="margin-top:8px;">Les temps standards enregistrés pour cette machine sont appliqués ; ce tableau fournit les coups de couteau et les piles qu\'ils utilisent.</div>' : '')}
         <details style="margin-top:8px;"><summary class="plan-note" style="cursor:pointer;">Réglages du calcul des poses et des piles</summary>
           <div class="step-grid" style="margin-top:8px;">
-            <div class="field"><label>Feuilles maximum par pile</label><input class="s-car" data-ref="feuilles_par_pile" data-cle="feuilles_par_pile" type="number" min="1" step="1" placeholder="500" value="${val('feuilles_par_pile')}"></div>
             <div class="field"><label>Rognage par côté du cahier (mm)</label><input class="s-car" data-ref="rognage_cahier_mm" data-cle="rognage_cahier_mm" type="number" min="0" step="any" placeholder="5" value="${val('rognage_cahier_mm')}"></div>
             <div class="field"><label>Marge perdue par bord de feuille (mm)</label><input class="s-car" data-ref="marge_feuille_mm" data-cle="marge_feuille_mm" type="number" min="0" step="any" placeholder="10" value="${val('marge_feuille_mm')}"></div>
           </div>
@@ -6870,7 +6875,7 @@
       const lignes = () => Array.from(corps.querySelectorAll('.compo-ligne'));
       const donneesLigne = (tr) => ({
         pages: tr.querySelector('.cp-pages').value.trim(), cahiers: tr.querySelector('.cp-cahiers').value.trim(), feuille: tr.querySelector('.cp-feuille').value.trim(),
-        poses: tr.querySelector('.cp-poses').value.trim(), disposition: tr.dataset.dispo || '', parage: tr.dataset.parage || '',
+        poses: tr.querySelector('.cp-poses').value.trim(), pile: tr.querySelector('.cp-pile').value.trim(), disposition: tr.dataset.dispo || '', parage: tr.dataset.parage || '',
       });
       // Lignes complètes (pagination + nombre de cahiers), dans le format enregistré sur l'OF. Poses vides = calculées d'après les formats.
       const serialiser = () => {
@@ -6881,6 +6886,7 @@
           const o = { pages: nombre(d.pages), cahiers: nombre(d.cahiers) };
           if (d.feuille) o.feuille = d.feuille;
           if (d.poses !== '') o.poses = nombre(d.poses);
+          if (d.pile !== '') o.pile = nombre(d.pile);
           if (d.disposition) o.disposition = d.disposition;
           if (d.parage !== '' && nombre(d.parage) > 0) o.parage = nombre(d.parage);
           sortie.push(o); trs.push(tr);
@@ -6923,14 +6929,18 @@
               tr.querySelector('.cp-info').textContent = l.poses_source === 'calculees' ? ` ${l.disposition}${l.plat ? ' · plat ' + l.plat.replace('x', '×') + ' mm' : ''}`
                 : (l.poses_source === 'saisies' ? ` saisi${l.poses_auto && l.poses_auto !== l.poses ? ' (calcul : ' + l.poses_auto + ')' : ''}` : ' ⚠ à renseigner');
             });
+            // valeurs par défaut du serveur : affichées en grisé dans les champs vides
+            const D = r.defauts || {}; const dflt = { passe_pct: D.passe_pct, feuilles_par_pile: D.pile_max, rognage_cahier_mm: D.rognage_mm, marge_feuille_mm: D.marge_feuille_mm, refente_cadence_h: D.cadence_h, refente_manutention_s: D.manutention_s, refente_reglage_ligne_min: D.reglage_ligne_min, refente_mise_en_route_min: D.mise_en_route_min };
+            boite.querySelectorAll('[data-ref]').forEach(i => { if (dflt[i.dataset.ref] !== undefined) i.placeholder = String(dflt[i.dataset.ref]); });
+            if (r.reglages) boite.querySelectorAll('.cp-pile').forEach(i => { i.placeholder = String(r.reglages.pile_max); });
             if (r.ok) {
               document.getElementById('m-compo-t-feuilles').textContent = fmtN(r.total.feuilles);
               document.getElementById('m-compo-t-piles').textContent = fmtN(r.total.piles);
               document.getElementById('m-compo-t-coups').textContent = fmtN(r.total.coups);
               document.getElementById('m-compo-t-temps').textContent = fmtH(r.temps.total_h);
-              document.getElementById('m-compo-total-lib').textContent = `Total — ${fmtN(r.cahiers_par_exemplaire)} cahier${r.cahiers_par_exemplaire > 1 ? 's' : ''}, ${fmtN(r.pages_par_exemplaire)} pages par exemplaire · piles de ${fmtN(r.pile_max)} feuilles au plus`;
+              document.getElementById('m-compo-total-lib').textContent = `Total — ${fmtN(r.cahiers_par_exemplaire)} cahier${r.cahiers_par_exemplaire > 1 ? 's' : ''}, ${fmtN(r.pages_par_exemplaire)} pages par exemplaire`;
               const t = r.temps;
-              document.getElementById('m-compo-resultat').innerHTML = `Temps total de la session de coupe : <strong>${fmtH(t.total_h)}</strong> <span class="plan-note">— ${fmtN(r.total.coups)} coups de couteau ÷ ${fmtN(r.reglages.cadence_h)}/h = ${fmtH(t.coupe_h)}${t.manutention_h ? ` + manutention ${fmtH(t.manutention_h)}` : ''}${t.mise_en_route_h ? ` + mise en route ${fmtH(t.mise_en_route_h)}` : ''}</span>`;
+              document.getElementById('m-compo-resultat').innerHTML = `Temps total de la session de coupe : <strong>${fmtH(t.total_h)}</strong> <span class="plan-note">— ${fmtN(r.total.coups)} coups de couteau ÷ ${fmtN(r.reglages.cadence_h)}/h = coupe ${fmtH(t.coupe_h)}${t.manutention_h ? ` + manutention des piles ${fmtH(t.manutention_h)}` : ''}${t.reglage_h ? ` + réglages ${fmtH(t.reglage_h)}` : ''}${t.mise_en_route_h ? ` + mise en route ${fmtH(t.mise_en_route_h)}` : ''}</span>`;
             }
             msg.innerHTML = (r.erreurs || []).map(x => `<div class="msg error" style="margin:6px 0 0;">${esc(x)}</div>`).join('');
           } catch (e) { if (moi === version) msg.innerHTML = `<div class="msg error" style="margin:6px 0 0;">Aperçu impossible : ${esc(e.message)}</div>`; }

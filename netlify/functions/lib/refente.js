@@ -25,9 +25,11 @@ const DEFAUTS = {
   pile_max: 500,          // feuilles par pile au massicot
   rognage_mm: 5,          // surplus de papier par côté du cahier à plat (avant rognage du livre)
   marge_feuille_mm: 10,   // marge perdue sur chaque bord de la feuille (pinces, repères)
-  cadence_h: 200,         // coups de couteau par heure (production réelle : 120 à 300, manutention comprise)
-  manutention_s: 0,       // secondes par pile en plus de la cadence
-  mise_en_route_min: 0,
+  // Temps : valeurs de départ prudentes, à régler au chronomètre sur vos propres livres.
+  cadence_h: 200,         // coups de couteau par heure : cycle d'une coupe (butée, serrage, coupe, évacuation) ; production réelle 120 à 300
+  manutention_s: 60,      // secondes par pile passée : prise sur palette, taquage, mise en place, évacuation des bandes
+  reglage_ligne_min: 5,   // minutes à chaque nouvelle pagination / nouveau format de feuille : butées, programme de coupe
+  mise_en_route_min: 10,  // minutes une fois par session de coupe : couteau, préparation de la machine
 };
 const PILE_MAX_LIMITE = 5000;
 
@@ -44,7 +46,7 @@ const CLES_REGLAGES = {
   fini_l: 'format_fini_l_mm', fini_h: 'format_fini_h_mm',
 };
 // Paramètres propres à l'étape (temps) : numériques.
-const CLES_TEMPS = { cadence_h: 'refente_cadence_h', manutention_s: 'refente_manutention_s', mise_en_route_min: 'refente_mise_en_route_min' };
+const CLES_TEMPS = { cadence_h: 'refente_cadence_h', manutention_s: 'refente_manutention_s', reglage_ligne_min: 'refente_reglage_ligne_min', mise_en_route_min: 'refente_mise_en_route_min' };
 
 const nombreOuNull = (v) => {
   if (v === null || v === undefined || String(v).trim() === '') return null;
@@ -129,6 +131,7 @@ function reglagesDepuis(car) {
     fini: l > 0 && h > 0 ? { l, h } : null,
     cadence_h: positifOuDefaut(t('cadence_h'), DEFAUTS.cadence_h, { zeroOk: false }),
     manutention_s: positifOuDefaut(t('manutention_s'), DEFAUTS.manutention_s),
+    reglage_ligne_min: positifOuDefaut(t('reglage_ligne_min'), DEFAUTS.reglage_ligne_min),
     mise_en_route_min: positifOuDefaut(t('mise_en_route_min'), DEFAUTS.mise_en_route_min),
   };
 }
@@ -167,10 +170,15 @@ function lireComposition(brut) {
       feuille = lireFormat(l.feuille);
       if (!feuille) erreurs.push(`Composition, ${num} : format de feuille « ${l.feuille} » illisible (exemple : 650x1000 en mm).`);
     }
+    let pile = null;
+    if (l.pile !== undefined && l.pile !== null && String(l.pile).trim() !== '') {
+      pile = entierPositif(l.pile);
+      if (!pile) erreurs.push(`Composition, ${num} : feuilles par pile invalides (nombre entier positif attendu) ; valeur générale retenue.`);
+    }
     const parageBrut = l.parage === undefined || l.parage === null || String(l.parage).trim() === '' ? 0 : Number(String(l.parage).replace(',', '.'));
     const parage = Number.isFinite(parageBrut) && parageBrut >= 0 && parageBrut <= 4 && Math.abs(parageBrut - Math.round(parageBrut)) < 1e-9 ? Math.round(parageBrut) : 0;
     if (parage !== parageBrut) erreurs.push(`Composition, ${num} : parage (0 à 4 coups) invalide, 0 retenu.`);
-    lignes.push({ index: i, pages, cahiers, feuille, poses, disposition: l.disposition ?? null, parage });
+    lignes.push({ index: i, pages, cahiers, feuille, poses, pile, disposition: l.disposition ?? null, parage });
   });
   return { lignes, erreurs };
 }
@@ -204,7 +212,7 @@ function calculer(brut, exemplaires, reglagesOuPile) {
   const lecture = lireComposition(brut);
   const q = Number(exemplaires);
   const quantiteOk = Number.isFinite(q) && q > 0;
-  const base = { reglages: reg, pile_max: reg.pile_max, quantite_commande: quantiteOk ? q : null };
+  const base = { reglages: reg, defauts: DEFAUTS, pile_max: reg.pile_max, quantite_commande: quantiteOk ? q : null };
   if (!lecture.lignes.length || !quantiteOk) {
     return { ok: false, erreurs: lecture.erreurs, lignes: [], total: null, cahiers_par_exemplaire: null, quantite_par_cahier: null, ...base };
   }
@@ -229,11 +237,12 @@ function calculer(brut, exemplaires, reglagesOuPile) {
     } else if (source === 'calculees' && auto) dispo = { colonnes: auto.colonnes, lignes: auto.lignes };
 
     const feuilles = Math.ceil((quantiteParCahier * l.cahiers) / poses - 1e-9);
-    const c = coupesLigne(dispo.colonnes, dispo.lignes, l.parage, feuilles, reg.pile_max);
-    const tempsH = c.coups / reg.cadence_h + (c.piles * reg.manutention_s) / 3600;
+    const pileLigne = l.pile ? Math.min(l.pile, PILE_MAX_LIMITE) : reg.pile_max;
+    const c = coupesLigne(dispo.colonnes, dispo.lignes, l.parage, feuilles, pileLigne);
+    const tempsH = c.coups / reg.cadence_h + (c.piles * reg.manutention_s) / 3600 + reg.reglage_ligne_min / 60;
     return {
       index: l.index, pages: l.pages, cahiers: l.cahiers, feuille: l.feuille ? `${l.feuille.l}x${l.feuille.h}` : null,
-      poses, poses_source: source, poses_auto: auto ? auto.poses : null,
+      poses, poses_source: source, poses_auto: auto ? auto.poses : null, pile_max: pileLigne, pile_saisie: !!l.pile,
       plat: auto ? `${auto.plat_l}x${auto.plat_h}` : null,
       disposition: `${dispo.colonnes}x${dispo.lignes}`, parage: l.parage,
       feuilles, piles_feuilles: c.piles_feuilles, coups: c.coups, piles: c.piles, morceaux: feuilles * poses,
@@ -245,13 +254,14 @@ function calculer(brut, exemplaires, reglagesOuPile) {
   }), { feuilles: 0, piles: 0, coups: 0, morceaux: 0 });
   const coupeH = total.coups / reg.cadence_h;
   const manutentionH = (total.piles * reg.manutention_s) / 3600;
+  const reglageH = (lignes.length * reg.reglage_ligne_min) / 60;
   const miseEnRouteH = reg.mise_en_route_min / 60;
   return {
     ok: true, erreurs, lignes, total, ...base,
     quantite_par_cahier: quantiteParCahier,
     cahiers_par_exemplaire: lecture.lignes.reduce((s, l) => s + l.cahiers, 0),
     pages_par_exemplaire: lecture.lignes.reduce((s, l) => s + l.cahiers * l.pages, 0),
-    temps: { coupe_h: coupeH, manutention_h: manutentionH, mise_en_route_h: miseEnRouteH, total_h: coupeH + manutentionH + miseEnRouteH },
+    temps: { coupe_h: coupeH, manutention_h: manutentionH, reglage_h: reglageH, mise_en_route_h: miseEnRouteH, total_h: coupeH + manutentionH + reglageH + miseEnRouteH },
   };
 }
 
@@ -262,6 +272,7 @@ function variablesDerivees(brutComposition, exemplaires, reglages) {
   return {
     refente_coups: r.total.coups, refente_piles: r.total.piles,
     refente_feuilles: r.total.feuilles, refente_morceaux: r.total.morceaux,
+    refente_lignes: r.lignes.length,
     nb_cahiers: r.cahiers_par_exemplaire,
   };
 }
