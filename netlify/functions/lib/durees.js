@@ -25,6 +25,7 @@ const { analyser, evaluer } = require('./formules');
 const EL = require('./en-ligne');
 const DL = require('./delais');
 const RF = require('./refente');
+const PL = require('./pliage');
 
 const arrondi = (x) => Math.round(x * 100) / 100;
 const heures = (t) => { const [h, m] = String(t).split(':'); return Number(h) + Number(m) / 60; };
@@ -166,9 +167,34 @@ async function calculerEtapes(supabase, ofId) {
         ...(reglagesRefente.palettisation_s > 0 ? [ph('Palettisation des piles coupées', 4, { type_calcul: 'par_element', duree_h: reglagesRefente.palettisation_s / 3600, element_param: 'refente_piles_finies', element_label: 'pile coupée' })] : []),
       ];
     }
-    // Plieuse : le margeur charge une feuille par cahier plié (passe comprise) ; avec la composition du livre, la quantité est exacte
-    // (sinon on garde la quantité à traiter du profil : exemplaires × nombre de cahiers).
-    if (derivees) utilisees = utilisees.map((p) => (p.nom === 'Chargement du margeur' ? { ...p, quantite_formule: 'pliage_feuilles', unite_cadence: 'feuilles', par_passage: 1 } : p));
+    // Pliage de cahiers (plieuse à margeur) : avec la composition du livre, les temps de préparation se calculent d'après les cahiers
+    // (lib/pliage.js) : mise en place des modules, chargement du margeur, réglage au début de chaque série de pagination, ajustement
+    // du pli pour les cahiers suivants. Le roulage, le nettoyage et les autres phases des temps standards sont conservés.
+    let calculPliage = false; let reglagesPliage = null;
+    const estPliageEtape = PL.estPliage(g.operations.code, g.operations.nom);
+    if (estPliageEtape && utilisees.length) {
+      // La composition du livre (cahiers, paginations) sert à ces temps : on la demande dans le chiffrage, sans bloquer l'étape si elle manque.
+      ajouterRequis(RF.CLE_COMPOSITION, (parCle[RF.CLE_COMPOSITION] || {}).libelle || 'Composition du livre (cahiers)', 'texte', null);
+      // Valeurs du profil de la machine (si saisies) : elles passent après la saisie de l'étape et avant les valeurs de départ.
+      const duProfil = {};
+      const phaseNom = (n) => utilisees.find((p) => p.nom === n);
+      const mg = phaseNom(PL.NOM_MARGEUR); if (mg && Number(mg.cadence_par_h) > 0) duProfil.margeur_cadence_h = Number(mg.cadence_par_h);
+      const aj = phaseNom(PL.NOM_AJUSTEMENT); if (aj) duProfil.ajustement_min = Number(aj.duree_h) * 60;
+      PL.CLASSES.forEach((c) => { const ph = phaseNom(PL.nomReglage(c)); if (ph) duProfil[`reglage_${c}_min`] = Number(ph.duree_h) * 60; });
+      reglagesPliage = PL.reglagesDepuis(valeurSaisie, duProfil);
+      if (derivees) {
+        calculPliage = true;
+        const ph = (nom, ordre, champs) => ({ nom, ordre, occupe_machine: true, nb_personnes: 1, ...champs });
+        const remplacees = new Set(['Mise en route', 'Réglage', PL.NOM_MARGEUR, PL.NOM_AJUSTEMENT, ...PL.CLASSES.map(PL.nomReglage)]);
+        const calcules = [
+          ...(reglagesPliage.modules_min > 0 ? [ph('Mise en place des modules de la machine', 1, { type_calcul: 'fixe', duree_h: reglagesPliage.modules_min / 60 })] : []),
+          ph(PL.NOM_MARGEUR, 2, { type_calcul: 'cadence', cadence_par_h: reglagesPliage.margeur_cadence_h, quantite_formule: 'pliage_feuilles', unite_cadence: 'feuilles' }),
+          ...PL.CLASSES.filter((c) => reglagesPliage[`reglage_${c}_min`] > 0).map((c) => ph(`Réglage de la plieuse — cahiers de ${c} pages`, 2, { type_calcul: 'par_element', duree_h: reglagesPliage[`reglage_${c}_min`] / 60, element_param: `pliage_series_${c}`, element_label: 'série' })),
+          ...(reglagesPliage.ajustement_min > 0 ? [ph('Ajustement du pli (cahiers suivants)', 2, { type_calcul: 'par_element', duree_h: reglagesPliage.ajustement_min / 60, element_param: 'pliage_ajustements', element_label: 'cahiers suivants' })] : []),
+        ];
+        utilisees = [...utilisees.filter((p) => !remplacees.has(p.nom)), ...calcules].sort((a, b) => a.ordre - b.ordre);
+      }
+    }
     const phases = utilisees.map((p) => {
       let d = 0; let detail = '';
       if (p.type_calcul === 'fixe') {
@@ -266,7 +292,7 @@ async function calculerEtapes(supabase, ofId) {
     }).filter(Boolean);
 
     // Détail de la refente (par pagination de cahier) pour l'écran de chiffrage ; null si aucune phase n'en dépend.
-    const refente = utiliseRefente || calculRefente || (RF.CODES_OPERATIONS.includes(g.operations.code) && compositionBrute) ? RF.calculer(compositionBrute, quantite, reglagesRefente) : null;
+    const refente = utiliseRefente || calculRefente || calculPliage || (RF.CODES_OPERATIONS.includes(g.operations.code) && compositionBrute) ? RF.calculer(compositionBrute, quantite, reglagesRefente) : null;
 
     const totalPhases = phases.reduce((s, p) => s + p.duree_h, 0);
     let heuresMachine = phases.filter((p) => p.occupe_machine).reduce((s, p) => s + p.duree_h, 0);
@@ -305,6 +331,8 @@ async function calculerEtapes(supabase, ofId) {
       parametres, parametres_requis: requis, parametres_manquants: manquants,
       quantite_etape: quantite,
       refente, refente_calculable: RF.CODES_OPERATIONS.includes(g.operations.code), refente_calcul_actif: calculRefente,
+      pliage_calculable: estPliageEtape && utilisees.length > 0, pliage_calcul_actif: calculPliage, pliage_reglages: reglagesPliage,
+      pliage: calculPliage && refente && refente.ok ? refente.pliage : null,
       quantite_regle: parRatio ? parRatio.detail : null,
       quantite_ratio: parRatio ? parRatio.regle : (quantiteEtape !== null && quantiteEtape > 0 ? DL.ratioDe(modeleDelais, reglesEL, g.operations.code, g.operations.nom) : null),
       unite_quantite: uniteQte ? uniteQte.unite : null,

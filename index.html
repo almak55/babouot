@@ -6713,6 +6713,30 @@
         <div id="m-compo-msg"></div>
       </div>`;
     };
+    // Pliage (plieuse à margeur) : temps de préparation calculés d'après la composition du livre (reprise de l'opération de refente).
+    const pliageHtml = (e) => {
+      if (!e.pliage_calculable) return '';
+      if (!e.pliage_calcul_actif) return `<div class="produit-box refente-box"><div class="produit-titre">Calcul du pliage — composition du livre à renseigner</div>
+        <div class="plan-note">Les temps de mise en place des modules, de chargement du margeur et de réglage par pagination se calculent d'après la composition du livre (cahiers et paginations) : renseignez-la dans ${hoteGamme ? 'l\'opération de refente ci-dessus' : 'le bloc « Composition du livre »'}. En attendant, les temps standards de l'opération sont appliqués.</div></div>`;
+      const fmtN = (n) => Number(n).toLocaleString('fr-FR');
+      const prm = e.parametres || {}; const rg = e.pliage_reglages || {}; const pl = e.pliage;
+      const champ = (cle, lib, aide, k, min) => `<div class="field"><label>${lib} <span class="plan-note">${aide}</span></label><input class="s-param" data-cle="${cle}" type="number" min="${min || 0}" step="any" placeholder="${esc(String(rg[k] ?? ''))}" value="${esc(prm[cle] ?? '')}"></div>`;
+      const series = pl ? pl.series.map(x => `${fmtN(x.cahiers)} cahier${x.cahiers > 1 ? 's' : ''} de ${x.pages} p : 1 réglage de ${rg['reglage_' + x.classe + '_min'] ?? '?'} min${x.pages !== x.classe ? ' (pagination ' + x.classe + ' p)' : ''}${x.ajustements ? ' + ' + fmtN(x.ajustements) + ' ajustement' + (x.ajustements > 1 ? 's' : '') + ' de ' + (rg.ajustement_min ?? '?') + ' min' : ''}`).join(' · ') : '';
+      return `<div class="produit-box refente-box">
+        <div class="produit-titre">Calcul du pliage — d'après la composition du livre <span class="plan-note">— valeurs réglables ; vides = valeur du profil de la machine, sinon valeur de départ (affichée en grisé)</span></div>
+        ${pl ? `<div style="margin-bottom:8px;"><strong>${fmtN(pl.feuilles)}</strong> feuilles à marger (quantité + passe, ${fmtN(pl.cahiers)} cahiers différents) · <span class="plan-note">${esc(series)}</span></div>` : ''}
+        <div class="step-grid">
+          ${champ('pliage_modules_min', 'Mise en place des modules (min)', '— empileurs, sorties de poches… ; une fois au début de l\'OF', 'modules_min')}
+          ${champ('pliage_margeur_cadence_h', 'Chargement du margeur (feuilles / h)', '— 5 000 feuilles = 15 min à 20 000/h', 'margeur_cadence_h', 1)}
+          ${champ('pliage_reglage_4_min', 'Réglage cahiers de 4 pages (min)', '— début de série', 'reglage_4_min')}
+          ${champ('pliage_reglage_8_min', 'Réglage cahiers de 8 pages (min)', '— début de série', 'reglage_8_min')}
+          ${champ('pliage_reglage_16_min', 'Réglage cahiers de 16 pages (min)', '— début de série', 'reglage_16_min')}
+          ${champ('pliage_reglage_32_min', 'Réglage cahiers de 32 pages (min)', '— début de série', 'reglage_32_min')}
+          ${champ('pliage_ajustement_min', 'Ajustement du pli, par cahier suivant (min)', '— cahiers suivants de la même pagination', 'ajustement_min')}
+        </div>
+        <small class="plan-note">Le roulage (cadence de la plieuse) et le nettoyage restent ceux des temps standards ; la « mise en route » et le « réglage » génériques sont remplacés par ce calcul. Détail des temps ci-dessous.</small>
+      </div>`;
+    };
     const etapesHtml = data.etapes.map(e => {
       const verrou = e.statut !== 'à planifier' && e.statut !== 'planifié';   // en cours / terminée : machine figée
       const planifie = e.statut === 'planifié';
@@ -6770,6 +6794,7 @@
             <div class="step-source">${SOURCES[e.source]}${e.duree_manuelle_h !== null ? ' — <strong>durée manuelle appliquée</strong>' : ''}</div>
             <div class="machine-ligne field"><label>Machine prévue ${verrou ? `(étape ${esc(e.statut)} — non modifiable)` : (planifie ? '<span class="plan-note">— étape planifiée : la changer la retire du planning</span>' : '')}</label><select class="s-machine" ${verrou ? 'disabled' : ''}>${machOptions}</select>${(e.machines_planifiees || []).length ? `<small class="plan-note">Affectée au planning : <strong>${esc(e.machines_planifiees.join(' + '))}</strong></small>` : ((e.machines_standard || []).length && !e.machine_id ? `<small class="plan-note">Machine standard de l'opération : <strong>${esc(e.machines_standard.join(' / '))}</strong></small>` : '')}</div>
             ${e.gamme_id === hoteGamme ? compoEditeurHtml(e) : ''}
+            ${pliageHtml(e)}
             ${predHtml}
             <div class="step-grid">
               ${champQuantite(e)}

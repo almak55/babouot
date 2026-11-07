@@ -20,8 +20,9 @@
 const { getSupabase } = require('./lib/supabaseclient');
 const { analyser } = require('./lib/formules');
 
-const CLASSES_PLI = require('./lib/pliage').CLASSES;   // 4, 8, 16, 32 pages
-const NOMS = { mise_en_route: 'Mise en route', reglage: 'Réglage', reglage_fer: 'Réglage par fer', manutention_pile: 'Manutention par pile', chargement_margeur: 'Chargement du margeur', ...Object.fromEntries(CLASSES_PLI.map((c) => [`reglage_pli_${c}`, `Réglage de la plieuse — cahiers de ${c} pages`])), ajustement_pli: 'Ajustement du pli (cahiers suivants)', roulage: 'Roulage', nettoyage: 'Nettoyage' };
+const PL = require('./lib/pliage');
+const CLASSES_PLI = PL.CLASSES;   // 4, 8, 16, 32 pages
+const NOMS = { mise_en_route: 'Mise en route', reglage: 'Réglage', reglage_fer: 'Réglage par fer', manutention_pile: 'Manutention par pile', chargement_margeur: PL.NOM_MARGEUR, ...Object.fromEntries(CLASSES_PLI.map((c) => [`reglage_pli_${c}`, PL.nomReglage(c)])), ajustement_pli: PL.NOM_AJUSTEMENT, roulage: 'Roulage', nettoyage: 'Nettoyage' };
 const NOMS_LISTE = Object.values(NOMS);
 
 const nombre = (v) => {

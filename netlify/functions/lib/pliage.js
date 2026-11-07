@@ -46,4 +46,45 @@ function variables(p) {
   };
 }
 
-module.exports = { CLASSES, CLES_DERIVEES, classeDe, analyser, variables };
+// ---- Temps de la plieuse -------------------------------------------------------------------------------------
+// Valeurs de départ = celles de l'atelier (MBO). Une valeur saisie sur l'étape prime ; sinon celle du profil de la machine
+// (phases « Réglage de la plieuse… », « Ajustement du pli… », « Chargement du margeur ») ; sinon la valeur de départ.
+const DEFAUTS = {
+  modules_min: 30,                                  // mise en place des modules (empileurs, sorties de poches…) : une fois au début de l'OF
+  margeur_cadence_h: 20000,                         // feuilles chargées par heure dans le margeur
+  reglage_min: { 4: 15, 8: 30, 16: 45, 32: 60 },    // réglage au début de chaque série de cahiers de même pagination
+  ajustement_min: 5,                                // ajustement du pli pour chaque cahier suivant de la même pagination
+};
+const CLES_TEMPS = {
+  modules_min: 'pliage_modules_min', margeur_cadence_h: 'pliage_margeur_cadence_h', ajustement_min: 'pliage_ajustement_min',
+  ...Object.fromEntries(CLASSES.map((c) => [`reglage_${c}_min`, `pliage_reglage_${c}_min`])),
+};
+// Noms des phases du profil machine (profils-machine.js) et du calcul : à garder identiques.
+const NOM_MARGEUR = 'Chargement du margeur';
+const NOM_AJUSTEMENT = 'Ajustement du pli (cahiers suivants)';
+const nomReglage = (c) => `Réglage de la plieuse — cahiers de ${c} pages`;
+
+const norm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+// Pliage de cahiers (et non pliage de gardes, qui a sa propre règle).
+const estPliage = (code, nom) => (/plia|pliu/.test(norm(nom)) || /^pli/.test(norm(code))) && !/garde/.test(norm(nom)) && !/garde/.test(norm(code));
+
+const positif = (v) => { if (v === null || v === undefined || String(v).trim() === '') return null; const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) && n >= 0 ? n : null; };
+// lire(cle) : valeur saisie sur l'étape (ou l'OF) ; profil : valeurs lues dans les phases du profil machine { modules_min?, ... }.
+function reglagesDepuis(lire, profil) {
+  const p = profil || {};
+  const r = { sources: {} };
+  Object.keys(CLES_TEMPS).forEach((k) => {
+    const saisie = lire ? positif(lire(CLES_TEMPS[k])) : null;
+    const dUnProfil = positif(p[k]);
+    const defaut = k.startsWith('reglage_') ? DEFAUTS.reglage_min[Number(k.split('_')[1])] : DEFAUTS[k];
+    if (saisie !== null && !(k === 'margeur_cadence_h' && saisie === 0)) { r[k] = saisie; r.sources[k] = 'étape'; }
+    else if (dUnProfil !== null && !(k === 'margeur_cadence_h' && dUnProfil === 0)) { r[k] = dUnProfil; r.sources[k] = 'profil'; }
+    else { r[k] = defaut; r.sources[k] = 'départ'; }
+  });
+  return r;
+}
+
+module.exports = {
+  CLASSES, CLES_DERIVEES, classeDe, analyser, variables,
+  DEFAUTS, CLES_TEMPS, NOM_MARGEUR, NOM_AJUSTEMENT, nomReglage, estPliage, reglagesDepuis,
+};
