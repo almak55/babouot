@@ -720,6 +720,36 @@
 
   .step-card { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 13px 15px; margin-bottom: 12px; background: var(--paper-raised); }
   .step-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  /* Chiffrage : plan de la gamme, cartes repliables, barre d'actions toujours visible */
+  .plan-box { border: 1px solid var(--line); background: var(--paper-raised-2, var(--field-bg)); border-radius: var(--radius-md); padding: 11px 14px; margin-bottom: 12px; }
+  .plan-outils { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .plan-outils select { min-width: 160px; max-width: 100%; flex: 1 1 160px; }
+  .plan-outils #m-ajout-op { flex: 2 1 260px; }
+  .plan-sep { flex: 1 1 auto; }
+  .plan-table-wrap { max-height: 300px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--paper-raised); }
+  .plan-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .plan-table th { position: sticky; top: 0; background: var(--paper-raised-2, #eef0f4); text-align: left; padding: 6px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-500); z-index: 1; }
+  .plan-table td { padding: 6px 8px; border-top: 1px solid var(--line); vertical-align: middle; }
+  .plan-ligne { cursor: pointer; }
+  .plan-ligne:hover { background: var(--accent-teal-soft); }
+  .plan-ligne.a-completer td:first-child { box-shadow: inset 3px 0 0 var(--danger-text, #c0392b); }
+  .tag.modif { background: rgba(230, 160, 20, .18); color: #8a5a00; }
+  .step-card.replie .step-corps { display: none; }
+  .step-card { scroll-margin-top: 8px; }
+  .step-toggle { cursor: pointer; gap: 8px; margin-bottom: 0; user-select: none; }
+  .step-card:not(.replie) .step-toggle { margin-bottom: 6px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .step-toggle:focus-visible { outline: 2px solid var(--accent-teal); outline-offset: 2px; border-radius: 4px; }
+  .step-chev { flex: 0 0 auto; width: 16px; color: var(--ink-500); font-size: 14px; }
+  .step-titre { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .step-resume { font-size: 11.5px; color: var(--ink-500); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .step-card:not(.replie) .step-resume { display: none; }
+  .step-tags { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
+  .step-card.replie { padding: 10px 14px; margin-bottom: 8px; }
+  .pred-aide summary { cursor: pointer; font-size: 11.5px; color: var(--accent-teal); margin-top: 6px; }
+  .modal .actions.actions-collant { position: sticky; bottom: -22px; margin: 14px -22px -22px; padding: 12px 22px; background: var(--paper-raised); border-top: 1px solid var(--line); align-items: center; z-index: 5; }
+  .m-statut { margin-right: auto; font-size: 12.5px; font-weight: 600; }
+  .m-statut.ok { color: var(--accent-teal); }
+  .m-statut.avert { color: #b45309; }
   .step-source { font-size: 11.5px; color: var(--ink-500); margin-bottom: 10px; }
   .step-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
   .step-grid .field { margin-bottom: 0; }
@@ -6510,7 +6540,7 @@
     return `<div style="margin:-4px 0 12px;font-size:15px;"><strong>${esc(o.produit || '')}</strong>${o.client ? ` <span class="plan-note">— ${esc(o.client)}</span>` : ''}${o.delai ? ` <span class="plan-note">· délai ${dateCourte(String(o.delai).slice(0, 10))}</span>` : ''}</div>`;
   }
 
-  async function ouvrirModaleChiffrage(ofUuid, ofNumero, donnees) {
+  async function ouvrirModaleChiffrage(ofUuid, ofNumero, donnees, etat) {
     let data = donnees;
     if (!data) {
       afficherModale(`<h3>Chiffrage — ${ofNumero}</h3><div class="empty">Calcul en cours…</div>`, 'large');
@@ -6585,8 +6615,8 @@
           <label class="pred-name"><input type="checkbox" class="s-pred-check" data-seq="${x.sequence}" ${coche ? 'checked' : ''}> ${esc(libelles.get(x.sequence))}</label>
           <select class="s-pred-mode ${coche ? '' : 'hidden'}" data-seq="${x.sequence}" data-regle="${regle ? 1 : 0}">
             <option value="fin" ${mode === 'fin' ? 'selected' : ''}>Attendre la fin (hors ligne)</option>
-            <option value="en_ligne" ${mode === 'en_ligne' ? 'selected' : ''}>En ligne : démarre en même temps, production simultanée</option>
-            <option value="progressif" ${mode === 'progressif' ? 'selected' : ''}>Démarrage progressif</option>
+            <option value="en_ligne" ${mode === 'en_ligne' ? 'selected' : ''}>En ligne : en même temps</option>
+            <option value="progressif" ${mode === 'progressif' ? 'selected' : ''}>Progressif : dès un % avancé</option>
           </select>
           <span class="pred-pct ${coche && mode === 'progressif' ? '' : 'hidden'}">dès <input class="s-pred-pct" type="number" min="0" max="100" step="1" value="${pct}"> % avancé</span>
         </div>`;
@@ -6594,30 +6624,36 @@
       const predHtml = autres.length ? `
         <div class="field pred-field"><label>Démarre après… <span class="plan-note">(cochez une ou plusieurs opérations ; aucune case cochée = peut démarrer dès le début)</span></label>
           <div class="pred-list">${lignesPred}</div>
-          <small>Les opérations sont les mêmes que dans la gamme opératoire, dans le même ordre logique de fabrication ; c'est vous qui définissez ce qui vient après quoi. <strong>Attendre la fin</strong> : l'opération démarre quand la coche est terminée. <strong>En ligne</strong> : elle démarre en même temps que l'opération cochée (réglage en parallèle) et sa production se déroule dans les mêmes temps (ex. contrôle couvertures pendant le montage). <strong>Démarrage progressif</strong> : elle démarre dès qu'une part de l'opération cochée est faite (ex. la pliure dès que des feuilles refendues sont prêtes), mais ne peut pas finir avant elle.</small></div>` : '';
+          <details class="pred-aide"><summary>Comment choisir le mode ?</summary><small><strong>Attendre la fin</strong> : l'opération démarre quand l'opération cochée est terminée. <strong>En ligne</strong> : elle démarre en même temps que l'opération cochée (réglage en parallèle) et sa production se déroule dans les mêmes temps (ex. contrôle couvertures pendant le montage). <strong>Progressif</strong> : elle démarre dès qu'une part de l'opération cochée est faite (ex. la pliure dès que des feuilles refendues sont prêtes), mais ne peut pas finir avant elle.</small></details></div>` : '';
       const manquants = e.parametres_manquants.length
         ? `<div class="msg error" style="margin:6px 0 0;">À renseigner : ${e.parametres_requis.filter(p => e.parametres_manquants.includes(p.cle)).map(p => esc(p.libelle)).join(', ')}.</div>` : '';
       const erreursF = (e.erreurs_formule || []).map(x => `<div class="msg error" style="margin:6px 0 0;">Formule « ${esc(x.phase)} » : ${esc(x.message)}</div>`).join('');
-      return `
-        <div class="step-card" data-gamme="${e.gamme_id}" data-verrou="${verrou ? 1 : 0}">
-          <div class="step-head">
-            <strong>${e.rang ? e.rang + '. ' : ''}${e.operation}</strong>
-            <span><span class="tag ${e.chiffre ? 'ok' : 'warn'}">${e.chiffre ? fmtH(e.total_h) : 'Non chiffré'}</span>${e.statut === 'à planifier' || e.statut === 'planifié' ? ` <button class="btn s-retirer" type="button" data-gamme="${e.gamme_id}" data-planifie="${e.statut === 'planifié' ? 1 : 0}" title="Retirer cette opération de l'OF">Retirer</button>` : ''}</span>
-          </div>
-          <div class="step-source">${SOURCES[e.source]}${e.duree_manuelle_h !== null ? ' — <strong>durée manuelle appliquée</strong>' : ''}</div>
-          <div class="step-grid">
-            <div class="field"><label>Machine prévue ${verrou ? '(planifiée — non modifiable ici)' : ''}</label><select class="s-machine" ${verrou ? 'disabled' : ''}>${machOptions}</select></div>
-            ${champQuantite(e)}
-            ${paramsHtml}
-            <div class="field"><label>Durée manuelle (h) — remplace le calcul</label><input class="s-manuel" type="number" min="0" step="any" value="${e.duree_manuelle_h ?? ''}"></div>
-          </div>
-          ${e.type_manquant ? (() => {
+      const aCompleter = (e.parametres_manquants || []).length > 0 || !!e.type_manquant || (e.erreurs_formule || []).length > 0;
+      const corpsTypeManquant = e.type_manquant ? (() => {
             const lib = (c) => esc(((data.types_production || []).find(t => t.code === c) || { libelle: c }).libelle);
             const actuel = data.of.type_production ? lib(data.of.type_production) : 'non précisé';
             const machine = (e.machines_compatibles.find(m => m.id === e.machine_id) || {}).nom;
             return `<div class="msg ${e.duree_manuelle_h !== null ? '' : 'error'}" style="margin:6px 0 0;">Type de production de l'OF : <strong>${actuel}</strong>. ${machine ? 'Pour ' + esc(machine) + ', d' : 'D'}es temps ne sont enregistrés que pour : <strong>${e.types_possibles.map(lib).join(', ')}</strong>. ${e.duree_manuelle_h !== null ? 'La durée manuelle ci-dessous est utilisée à la place.' : 'Deux solutions : changer le type de production de l\'OF (en haut), ou ajouter un profil « ' + actuel + ' » pour cette machine (Machines → modifier → Configurer les temps de production).'}</div>`;
-          })() : ''}
-          ${predHtml}${manquants}${erreursF}${phasesHtml}
+          })() : '';
+      return `
+        <div class="step-card replie" id="step-${e.gamme_id}" data-gamme="${e.gamme_id}" data-verrou="${verrou ? 1 : 0}" data-seq="${e.sequence}" data-nom="${esc(libelles.get(e.sequence))}" data-rang="${esc(e.rang || '')}" data-chiffre="${e.chiffre ? 1 : 0}" data-total="${e.total_h ?? ''}" data-completer="${aCompleter ? 1 : 0}">
+          <div class="step-head step-toggle" role="button" tabindex="0" aria-expanded="false" title="Cliquer pour déplier / replier">
+            <span class="step-chev" aria-hidden="true">▸</span>
+            <div class="step-titre"><strong>${e.rang ? e.rang + '. ' : ''}${e.operation}</strong><span class="step-resume"></span></div>
+            <span class="step-tags"><span class="tag modif step-modif hidden">modifié</span>${aCompleter ? '<span class="tag warn">À compléter</span>' : ''}<span class="tag ${e.chiffre ? 'ok' : 'warn'} step-duree">${e.chiffre ? fmtH(e.total_h) : 'Non chiffré'}</span>${e.statut === 'à planifier' || e.statut === 'planifié' ? ` <button class="btn s-retirer" type="button" data-gamme="${e.gamme_id}" data-planifie="${e.statut === 'planifié' ? 1 : 0}" title="Retirer cette opération de l'OF">Retirer</button>` : ''}</span>
+          </div>
+          <div class="step-corps">
+            <div class="step-source">${SOURCES[e.source]}${e.duree_manuelle_h !== null ? ' — <strong>durée manuelle appliquée</strong>' : ''}</div>
+            ${predHtml}
+            <div class="step-grid">
+              <div class="field"><label>Machine prévue ${verrou ? '(planifiée — non modifiable ici)' : ''}</label><select class="s-machine" ${verrou ? 'disabled' : ''}>${machOptions}</select></div>
+              ${champQuantite(e)}
+              ${paramsHtml}
+              <div class="field"><label>Durée manuelle (h) — remplace le calcul</label><input class="s-manuel" type="number" min="0" step="any" value="${e.duree_manuelle_h ?? ''}"></div>
+            </div>
+            ${corpsTypeManquant}
+            ${manquants}${erreursF}${phasesHtml}
+          </div>
         </div>`;
     }).join('');
 
@@ -6648,12 +6684,17 @@
         </div>
       </div>
       ${produitHtml}
-      <div class="produit-box">
-        <div class="produit-titre">Opérations de cet OF <span class="plan-note">— enregistrez vos saisies avant d'ajouter ou de retirer une opération</span></div>
-        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-          <select id="m-ajout-op" style="min-width:260px;"><option value="">— Ajouter une opération du catalogue —</option>${(catalogueOps || []).map(o => `<option value="${esc(o.code)}">${esc(o.nom)}</option>`).join('')}</select>
+      <div class="plan-box">
+        <div class="produit-titre">Opérations de cet OF (${data.etapes.length}) <span class="plan-note">— cliquez une ligne pour la régler. Vos saisies sont enregistrées automatiquement avant tout ajout ou retrait d'opération.</span></div>
+        <div class="plan-outils">
+          <select id="m-ajout-op"><option value="">— Ajouter une opération du catalogue —</option>${(catalogueOps || []).map(o => `<option value="${esc(o.code)}">${esc(o.nom)}</option>`).join('')}</select>
+          <select id="m-ajout-apres" title="Opération après laquelle la nouvelle démarre"><option value="">à la suite (automatique)</option>${data.etapes.map(x => `<option value="${x.sequence}">après : ${esc(libelles.get(x.sequence))}</option>`).join('')}</select>
           <button class="btn" type="button" id="m-ajout-btn">Ajouter</button>
+          <span class="plan-sep"></span>
+          <button class="btn" type="button" id="m-tout-deplier">Tout déplier</button>
+          <button class="btn" type="button" id="m-tout-replier">Tout replier</button>
         </div>
+        <div class="plan-table-wrap"><table class="plan-table"><thead><tr><th>#</th><th>Opération</th><th>Machine</th><th>Démarre après</th><th>Durée</th></tr></thead><tbody id="m-plan-body"></tbody></table></div>
       </div>
       ${etapesHtml || '<div class="empty">Cet OF n\'a aucune étape de gamme.</div>'}
       <div class="totaux-box">
@@ -6665,7 +6706,7 @@
         <div class="totaux-note">${calHtml}. Le parallélisme entre étapes n'est pas encore pris en compte (total en séquence).</div>
       </div>
       <div id="m-msg"></div>
-      <div class="actions"><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="m-submit">Recalculer et enregistrer</button></div>
+      <div class="actions actions-collant"><span id="m-statut" class="m-statut ok">✓ Tout est enregistré</span><button class="btn" id="m-cancel">Fermer</button><button class="btn primary" id="m-submit">Recalculer et enregistrer</button></div>
     `, 'large');
 
     // Quantité : la quantité de l'OF se répercute sur les opérations qui n'ont pas de valeur propre.
@@ -6727,28 +6768,73 @@
       row.querySelector('.s-pred-check').addEventListener('change', () => majLignePred(row));
       row.querySelector('.s-pred-mode').addEventListener('change', () => majLignePred(row));
     });
-    const modifierGamme = async (corps) => {
-      const msg = document.getElementById('m-msg');
-      try {
-        const res = await fetch(`${API}/modifier-gamme`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: ofUuid, ...corps }) });
-        const r = await res.json();
-        if (!res.ok) throw new Error(r.error || 'Erreur inconnue');
-        if (r.avertissements && r.avertissements.length) toast(r.avertissements.join(' '));
-        ouvrirModaleChiffrage(ofUuid, ofNumero);
-      } catch (err) { msg.innerHTML = `<div class="msg error">${esc(err.message)}</div>`; }
+    // ---- Plan de la gamme, dépliage des cartes, suivi des modifications ----
+    const modal = document.querySelector('.modal');
+    const cartes = () => Array.from(modal.querySelectorAll('.step-card'));
+    let modifie = false, toutRecalculer = false;
+    const ouvrirCarte = (c, ouvert) => {
+      c.classList.toggle('replie', !ouvert);
+      const t = c.querySelector('.step-toggle'); if (t) t.setAttribute('aria-expanded', ouvert ? 'true' : 'false');
+      const ch = c.querySelector('.step-chev'); if (ch) ch.textContent = ouvert ? '▾' : '▸';
     };
-    document.getElementById('m-ajout-btn').addEventListener('click', () => {
-      const code = document.getElementById('m-ajout-op').value;
-      if (code) modifierGamme({ ajouter: [code] });
+    const texteMachine = (c) => { const sel = c.querySelector('.s-machine'); const o = sel && sel.options[sel.selectedIndex]; return o && o.value ? o.textContent.replace(' ✓', '').trim() : ''; };
+    const textePreds = (c) => Array.from(c.querySelectorAll('.pred-row')).filter(r => r.querySelector('.s-pred-check').checked).map(r => {
+      const nom = r.querySelector('.pred-name').textContent.trim(); const m = r.querySelector('.s-pred-mode').value;
+      return nom + (m === 'en_ligne' ? ' (en ligne)' : (m === 'progressif' ? ` (dès ${r.querySelector('.s-pred-pct').value || 10} %)` : ''));
     });
-    document.querySelectorAll('.s-retirer').forEach(b => b.addEventListener('click', () => {
-      const pl = b.dataset.planifie === '1';
-      if (confirm(pl ? 'Cette opération est déjà planifiée.\nLa retirer supprimera aussi ses créneaux du planning (les personnes et machines seront libérées). Continuer ?' : 'Retirer cette opération de l\'OF ?')) modifierGamme({ supprimer: [b.dataset.gamme], avec_planning: pl });
-    }));
-    document.getElementById('m-cancel').addEventListener('click', fermerModale);
-    document.getElementById('m-submit').addEventListener('click', async () => {
-      const msg = document.getElementById('m-msg');
-      msg.innerHTML = `<div class="msg">Calcul en cours…</div>`;
+    const maj = () => {
+      const corps = document.getElementById('m-plan-body'); if (!corps) return;
+      corps.innerHTML = '';
+      cartes().forEach(c => {
+        const preds = textePreds(c), machine = texteMachine(c);
+        const recalc = c.dataset.modifie === '1' || toutRecalculer;
+        const duree = recalc ? '<span class="tag modif">à recalculer</span>' : (c.dataset.chiffre === '1' ? `<span class="tag ok">${esc(fmtH(Number(c.dataset.total)))}</span>` : '<span class="tag warn">Non chiffré</span>');
+        const tr = el(`<tr class="plan-ligne${c.dataset.completer === '1' ? ' a-completer' : ''}" data-cible="${c.id}">
+          <td class="mono">${esc(c.dataset.rang || c.dataset.seq)}</td>
+          <td><strong>${esc(c.dataset.nom)}</strong>${c.dataset.completer === '1' ? ' <span class="tag warn">à compléter</span>' : ''}</td>
+          <td>${machine ? esc(machine) : '<span class="plan-note">standard</span>'}</td>
+          <td>${preds.length ? preds.map(esc).join(' + ') : '<span class="plan-note">dès le début</span>'}</td>
+          <td>${duree}</td></tr>`);
+        tr.addEventListener('click', () => { const cible = document.getElementById(tr.dataset.cible); if (!cible) return; ouvrirCarte(cible, true); cible.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+        corps.appendChild(tr);
+        const rs = c.querySelector('.step-resume');
+        if (rs) rs.textContent = [machine || 'machine standard', preds.length ? 'après ' + preds.join(' + ') : 'dès le début'].join(' · ');
+        const dc = c.querySelector('.step-duree');
+        if (dc) { if (recalc) { dc.className = 'tag modif step-duree'; dc.textContent = 'à recalculer'; } else { dc.className = `tag ${c.dataset.chiffre === '1' ? 'ok' : 'warn'} step-duree`; dc.textContent = c.dataset.chiffre === '1' ? fmtH(Number(c.dataset.total)) : 'Non chiffré'; } }
+        const bm = c.querySelector('.step-modif'); if (bm) bm.classList.toggle('hidden', c.dataset.modifie !== '1');
+      });
+      const st = document.getElementById('m-statut');
+      if (st) { st.className = 'm-statut ' + (modifie ? 'avert' : 'ok'); st.textContent = modifie ? '● Modifications non enregistrées' : '✓ Tout est enregistré'; }
+    };
+    const etatCourant = () => ({ ouverts: cartes().filter(c => !c.classList.contains('replie')).map(c => c.dataset.gamme), connus: cartes().map(c => c.dataset.gamme), scroll: modal.scrollTop });
+    cartes().forEach(c => {
+      const t = c.querySelector('.step-toggle');
+      const basculer = () => ouvrirCarte(c, c.classList.contains('replie'));
+      t.addEventListener('click', (ev) => { if (ev.target.closest('.s-retirer')) return; basculer(); });
+      t.addEventListener('keydown', (ev) => { if ((ev.key === 'Enter' || ev.key === ' ') && ev.target === t) { ev.preventDefault(); basculer(); } });
+      const dejaConnue = etat && etat.connus && etat.connus.includes(c.dataset.gamme);
+      const ouvert = etat ? (!dejaConnue || (etat.ouverts || []).includes(c.dataset.gamme)) : data.etapes.length <= 2;
+      ouvrirCarte(c, ouvert);
+    });
+    document.getElementById('m-tout-deplier').addEventListener('click', () => cartes().forEach(c => ouvrirCarte(c, true)));
+    document.getElementById('m-tout-replier').addEventListener('click', () => cartes().forEach(c => ouvrirCarte(c, false)));
+    // Toute saisie marque la carte (ou tout l'OF pour les champs généraux) comme « modifiée, non enregistrée ».
+    const surSaisie = (ev) => {
+      const cible = ev.target;
+      if (!cible || !cible.matches || !cible.matches('input, select, textarea')) return;
+      if (cible.id === 'm-ajout-op' || cible.id === 'm-ajout-apres') return;
+      modifie = true;
+      const carte = cible.closest('.step-card');
+      if (carte) carte.dataset.modifie = '1'; else toutRecalculer = true;
+      maj();
+    };
+    modal.addEventListener('input', surSaisie);
+    modal.addEventListener('change', surSaisie);
+    maj();
+    if (etat && etat.scroll) modal.scrollTop = etat.scroll;
+
+    // ---- Lecture du formulaire et enregistrement ----
+    const collecter = () => {
       const caracteristiques = {};
       document.querySelectorAll('.s-car').forEach(i => { caracteristiques[i.dataset.cle] = i.value.trim(); });   // vide = effacer
       const etapes = Array.from(document.querySelectorAll('.step-card')).map(card => {
@@ -6790,17 +6876,65 @@
         }
         return etape;
       });
+      return { caracteristiques, etapes };
+    };
+    const enregistrer = async () => {
+      const { caracteristiques, etapes } = collecter();
+      const res = await fetch(`${API}/calculer-durees`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ of_id: ofUuid, caracteristiques, etapes, quantite_of: document.getElementById('m-of-qte').value, type_production: document.getElementById('m-type-prod').value || null }),
+      });
+      const resultat = await res.json();
+      if (!res.ok) throw new Error(resultat.error || 'Erreur inconnue');
+      return resultat;
+    };
+
+    // Ajouter / retirer une opération : les saisies en cours sont d'abord enregistrées, puis la fenêtre se rouvre
+    // dans le même état (cartes dépliées, position) — plus aucune saisie ne se perd.
+    const modifierGamme = async (corps) => {
+      const msg = document.getElementById('m-msg');
       try {
-        const res = await fetch(`${API}/calculer-durees`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ of_id: ofUuid, caracteristiques, etapes, quantite_of: document.getElementById('m-of-qte').value, type_production: document.getElementById('m-type-prod').value || null }),
-        });
-        const nouveau = await res.json();
-        if (!res.ok) throw new Error(nouveau.error || 'Erreur inconnue');
+        if (modifie) {
+          msg.innerHTML = `<div class="msg">Enregistrement de vos saisies…</div>`;
+          try { await enregistrer(); modifie = false; } catch (err) { msg.innerHTML = `<div class="msg error">Vos saisies n'ont pas pu être enregistrées (${esc(err.message)}) : l'opération n'a pas été modifiée et rien n'est perdu à l'écran.</div>`; return; }
+        }
+        const etatAvant = etatCourant();
+        const res = await fetch(`${API}/modifier-gamme`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ of_id: ofUuid, ...corps }) });
+        const r = await res.json();
+        if (!res.ok) throw new Error(r.error || 'Erreur inconnue');
+        if (r.avertissements && r.avertissements.length) toast(r.avertissements.join(' '));
+        ouvrirModaleChiffrage(ofUuid, ofNumero, undefined, etatAvant);
+      } catch (err) { msg.innerHTML = `<div class="msg error">${esc(err.message)}</div>`; }
+    };
+    document.getElementById('m-ajout-btn').addEventListener('click', () => {
+      const code = document.getElementById('m-ajout-op').value;
+      if (!code) { document.getElementById('m-msg').innerHTML = '<div class="msg error">Choisissez d\'abord l\'opération à ajouter dans la liste.</div>'; return; }
+      const apres = document.getElementById('m-ajout-apres').value;
+      modifierGamme(apres !== '' ? { ajouter: [code], apres_sequence: Number(apres) } : { ajouter: [code] });
+    });
+    document.querySelectorAll('.s-retirer').forEach(b => b.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const pl = b.dataset.planifie === '1';
+      if (confirm(pl ? 'Cette opération est déjà planifiée.\nLa retirer supprimera aussi ses créneaux du planning (les personnes et machines seront libérées). Continuer ?' : 'Retirer cette opération de l\'OF ?')) modifierGamme({ supprimer: [b.dataset.gamme], avec_planning: pl });
+    }));
+
+    // Fermer : on prévient s'il reste des saisies non enregistrées (bouton Fermer, croix et clic à côté).
+    const fermerAvecGarde = () => { if (!modifie || confirm('Des modifications ne sont pas enregistrées.\nFermer quand même et les abandonner ?')) fermerModale(); };
+    document.getElementById('m-cancel').addEventListener('click', fermerAvecGarde);
+    const garde = (ev) => { if (!modifie) return; if (ev.currentTarget.id === 'modal-overlay' && ev.target.id !== 'modal-overlay') return; ev.stopImmediatePropagation(); fermerAvecGarde(); };
+    const ov = document.getElementById('modal-overlay'), bx = document.getElementById('modal-x');
+    if (ov) ov.addEventListener('click', garde, true);
+    if (bx) bx.addEventListener('click', garde, true);
+    document.getElementById('m-submit').addEventListener('click', async () => {
+      const msg = document.getElementById('m-msg');
+      msg.innerHTML = `<div class="msg">Calcul en cours…</div>`;
+      try {
+        const nouveau = await enregistrer();
+        modifie = false;
         toast('Chiffrage enregistré.');
-        ouvrirModaleChiffrage(ofUuid, ofNumero, nouveau);
+        ouvrirModaleChiffrage(ofUuid, ofNumero, nouveau, etatCourant());
       } catch (e) {
-        msg.innerHTML = `<div class="msg error">${e.message}</div>`;
+        msg.innerHTML = `<div class="msg error">${esc(e.message)}</div>`;
       }
     });
   }
