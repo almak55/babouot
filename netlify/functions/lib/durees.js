@@ -24,6 +24,7 @@ const { imposerPause } = require('./horaires');
 const { analyser, evaluer } = require('./formules');
 const EL = require('./en-ligne');
 const DL = require('./delais');
+const RF = require('./refente');
 
 const arrondi = (x) => Math.round(x * 100) / 100;
 const heures = (t) => { const [h, m] = String(t).split(':'); return Number(h) + Number(m) / 60; };
@@ -110,19 +111,41 @@ async function calculerEtapes(supabase, ofId) {
     const parRatio = quantiteEtape !== null && quantiteEtape > 0 ? null : DL.quantiteParRatio(modeleDelais, reglesEL, g.operations.code, g.operations.nom, of.quantite);
     const quantite = quantiteEtape !== null && quantiteEtape > 0 ? quantiteEtape : (parRatio ? parRatio.quantite : of.quantite);
 
-    // Valeur d'une caractéristique : propre à l'étape, sinon celle de l'OF.
-    const valeurDe = (cle) => {
+    // Valeur saisie d'une caractéristique : propre à l'étape, sinon celle de l'OF.
+    const valeurSaisie = (cle) => {
       const brut = parametres[cle] !== undefined && parametres[cle] !== null && String(parametres[cle]).trim() !== ''
         ? parametres[cle] : caracteristiquesOf[cle];
       return brut === undefined || brut === null || String(brut).trim() === '' ? null : brut;
     };
+    // Composition du livre (cahiers, poses) -> coups de couteau et piles du massicot droit (lib/refente.js),
+    // pour la quantité de CETTE étape. Ces valeurs se calculent, elles ne se saisissent pas.
+    const compositionBrute = valeurSaisie(RF.CLE_COMPOSITION);
+    const pileMaxSaisie = nombreOuNull(valeurSaisie(RF.CLE_PILE_MAX));
+    const derivees = RF.variablesDerivees(compositionBrute, quantite, pileMaxSaisie);
+    const valeurDe = (cle) => {
+      const saisie = valeurSaisie(cle);
+      if (saisie !== null) return saisie;
+      return derivees && Object.prototype.hasOwnProperty.call(derivees, cle) ? derivees[cle] : null;
+    };
+    let utiliseRefente = false;
+    // Une donnée calculée manquante se traduit par « composition du livre à renseigner ».
+    const cleASaisir = (cle) => (RF.CLES_DERIVEES.includes(cle) ? RF.CLE_COMPOSITION : cle);
 
     const manquants = [];
     const requis = [];
     const erreursFormule = [];
     const ajouterRequis = (cle, libelle, type, unite) => {
+      if (RF.CLES_DERIVEES.includes(cle)) {
+        // Donnée calculée : on demande la composition du livre (et, facultatif, la hauteur de pile) plutôt que la valeur elle-même.
+        utiliseRefente = true;
+        const comp = parCle[RF.CLE_COMPOSITION]; const pile = parCle[RF.CLE_PILE_MAX];
+        ajouterRequis(RF.CLE_COMPOSITION, comp ? comp.libelle : 'Composition du livre (cahiers)', 'texte', null);
+        ajouterRequis(RF.CLE_PILE_MAX, pile ? pile.libelle : 'Feuilles par pile au massicot', 'nombre', pile ? pile.unite : 'feuilles');
+        return;
+      }
       if (!requis.some((r) => r.cle === cle)) requis.push({ cle, libelle, type: type || 'nombre', unite: unite || null });
     };
+    const signalerManquant = (cle) => { const c = cleASaisir(cle); if (!manquants.includes(c)) manquants.push(c); };
     // Unité de travail de l'étape quand la cadence porte sur autre chose que les exemplaires (ex. cahiers) :
     // sert à afficher la quantité de l'étape dans cette unité (exemplaires × cahiers par exemplaire…).
     let uniteQte = null;
@@ -135,11 +158,14 @@ async function calculerEtapes(supabase, ofId) {
         const valeur = nombreOuNull(valeurDe(p.element_param));
         ajouterRequis(p.element_param, (parCle[p.element_param] && parCle[p.element_param].libelle) || p.element_label || p.element_param, 'nombre', parCle[p.element_param] && parCle[p.element_param].unite);
         if (valeur === null) {
-          if (!manquants.includes(p.element_param)) manquants.push(p.element_param);
+          signalerManquant(p.element_param);
           detail = `${p.element_label || p.element_param} : non renseigné`;
         } else {
           d = Number(p.duree_h) * valeur;
-          detail = `${p.duree_h} h × ${valeur} ${p.element_label || p.element_param}`;
+          const secondes = Number(p.duree_h) * 3600;
+          detail = secondes > 0 && secondes < 120
+            ? `${Math.round(secondes * 10) / 10} s × ${valeur} ${p.element_label || p.element_param}`   // manutention d'une pile : quelques secondes
+            : `${p.duree_h} h × ${valeur} ${p.element_label || p.element_param}`;
         }
       } else if (p.type_calcul === 'formule') {
         const a = analyser(p.formule);
@@ -159,7 +185,7 @@ async function calculerEtapes(supabase, ofId) {
             erreursFormule.push({ phase: p.nom, message: r.erreur });
             detail = `erreur : ${r.erreur}`;
           } else if (r.manquantes.length) {
-            r.manquantes.forEach((v) => { if (!manquants.includes(v)) manquants.push(v); });
+            r.manquantes.forEach((v) => signalerManquant(v));
             detail = `${p.formule} — à renseigner : ${r.manquantes.join(', ')}`;
           } else {
             d = r.valeur;
@@ -190,7 +216,7 @@ async function calculerEtapes(supabase, ofId) {
             erreursFormule.push({ phase: p.nom, message: `quantité à traiter : ${r.erreur}` });
             detail = `erreur : ${r.erreur}`;
           } else if (r.manquantes.length) {
-            r.manquantes.forEach((v) => { if (!manquants.includes(v)) manquants.push(v); });
+            r.manquantes.forEach((v) => signalerManquant(v));
             detail = `à renseigner : ${r.manquantes.join(', ')}`;
           } else {
             if (uniteQte && uniteQte.valeur === null) uniteQte.valeur = r.valeur;
@@ -215,6 +241,9 @@ async function calculerEtapes(supabase, ofId) {
       }
       return { nom: p.nom, duree_h: arrondi(d), detail, occupe_machine: p.occupe_machine, nb_personnes: p.nb_personnes, type_calcul: p.type_calcul };
     });
+
+    // Détail de la refente (par pagination de cahier) pour l'écran de chiffrage ; null si aucune phase n'en dépend.
+    const refente = utiliseRefente ? RF.calculer(compositionBrute, quantite, pileMaxSaisie) : null;
 
     const totalPhases = phases.reduce((s, p) => s + p.duree_h, 0);
     let heuresMachine = phases.filter((p) => p.occupe_machine).reduce((s, p) => s + p.duree_h, 0);
@@ -252,6 +281,7 @@ async function calculerEtapes(supabase, ofId) {
       types_possibles: typeManquant ? typesAutres : [],
       parametres, parametres_requis: requis, parametres_manquants: manquants,
       quantite_etape: quantite,
+      refente,
       quantite_regle: parRatio ? parRatio.detail : null,
       quantite_ratio: parRatio ? parRatio.regle : (quantiteEtape !== null && quantiteEtape > 0 ? DL.ratioDe(modeleDelais, reglesEL, g.operations.code, g.operations.nom) : null),
       unite_quantite: uniteQte ? uniteQte.unite : null,

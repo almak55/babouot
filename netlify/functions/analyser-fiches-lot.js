@@ -52,6 +52,7 @@ Réponds UNIQUEMENT avec un JSON valide, sans texte autour ni balises markdown :
   "reception_date": string | null,      // AAAA-MM-JJ si une date est écrite
   "type_production": string | null,
   "caracteristiques": { [cle: string]: number | string },
+  "composition": [ { "pages": number, "cahiers": number, "poses": number | null } ],
   "operation_codes": string[],
   "confiance": "haute" | "moyenne" | "basse",
   "notes": string
@@ -65,6 +66,7 @@ Règles :
 - "caracteristiques" : valeurs techniques lues, uniquement pour ces clés (clé = libellé [unité]) :
 ${catalogueCar.length ? catalogueCar.map((c) => `  ${c.cle} = ${c.libelle}${c.unite ? ' [' + c.unite + ']' : ''}${c.type === 'texte' ? ' (texte)' : ' (nombre)'}`).join('\n') : '  (aucune)'}
   Nombres sans unité ; objet vide {} si rien de clair.
+- "composition" : la composition EXACTE de l'intérieur du livre telle qu'écrite sur la fiche, une ligne par pagination différente : "pages" = nombre de pages du cahier (4, 8, 16, 32…), "cahiers" = combien de cahiers de cette pagination composent UN exemplaire, "poses" = nombre de cahiers identiques imprimés sur une même feuille (« 2 poses », « 16 poses ») si la fiche l'indique, sinon null. Tableau vide [] si la fiche ne détaille pas les cahiers. Ne compte pas les couvertures, gardes ni hors-texte.
 - "operation_codes" : codes choisis UNIQUEMENT dans la liste ci-dessous, pour les opérations demandées par la fiche, dans l'ordre plausible d'une gamme. Chaque ligne de la fiche est une opération demandée si elle est à « oui » ou renseignée, et exclue si « non » : Cousu, Encollé, Dos carré / Dos rond, Signet, Tranchefile, Carton, Dorure, Perfo, Film, Passage coupe 3 faces / Coupe massicot, Pliage (« A plier »), Finition (mise sous film, étuis, mise en caisse, mise sur palette). N'invente aucun code.
 - "confiance" : "haute" si net, "moyenne" si des champs sont incertains, "basse" si difficile à lire.
 - "notes" : une phrase en français sur les champs douteux ou les mentions sans code correspondant (ex. « ATTENTION MODELE : LIVRE LECTURE INVERSEE »).
@@ -82,7 +84,7 @@ ${operations.map((o) => `${o.code} = ${o.nom}`).join('\n')}`;
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 2500, system: systemPrompt, messages: [{ role: 'user', content }] }),
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4000, system: systemPrompt, messages: [{ role: 'user', content }] }),
     });
     if (!res.ok) throw new Error(`Anthropic API: ${res.status} ${(await res.text()).slice(0, 300)}`);
     const data = await res.json();
@@ -101,6 +103,9 @@ ${operations.map((o) => `${o.code} = ${o.nom}`).join('\n')}`;
         const n = Number(String(val).replace(',', '.').replace(/[^0-9.\-]/g, ''));
         if (Number.isFinite(n)) propres[cle] = n;
       });
+      // Composition du livre (cahiers, paginations, poses) -> calcul précis de la refente au massicot droit.
+      let noteComposition = '';
+      if (catalogueCar.some((c) => c.cle === 'composition_cahiers')) noteComposition = require('./lib/refente').integrerCompositionFiche(f.composition, propres);
       const etat = ['ici', 'date', 'inconnue'].includes(f.reception_etat) ? f.reception_etat : 'inconnue';
       // Emboîtage par défaut (tranchefile/signet + finitions ; toujours pour un OF Pléiade) et assemblage avant la couture : voir lib/emboitage.js
       const typeProd = typesProd.some((t) => t.code === f.type_production) ? f.type_production : null;
@@ -119,7 +124,7 @@ ${operations.map((o) => `${o.code} = ${o.nom}`).join('\n')}`;
         operation_codes: emb.codes,
         emboitage_auto: emb.ajoute, assemblage_auto: emb.ajoute_assemblage, signes_emboitage: emb.signes, emboitage_code: emb.emboitage_code, assemblage_code: emb.assemblage_code,
         confiance: ['haute', 'moyenne', 'basse'].includes(f.confiance) ? f.confiance : 'moyenne',
-        notes: [f.notes, ...[emb.ajoute_assemblage, emb.ajoute_paves, emb.ajoute].filter(Boolean).map((x) => `« ${x.nom} » ajouté automatiquement (${x.raison}).`)].filter(Boolean).join(' '),
+        notes: [f.notes, noteComposition, ...[emb.ajoute_assemblage, emb.ajoute_paves, emb.ajoute].filter(Boolean).map((x) => `« ${x.nom} » ajouté automatiquement (${x.raison}).`)].filter(Boolean).join(' '),
       };
     });
     return { statusCode: 200, body: JSON.stringify({ fiches, aujourdhui }) };

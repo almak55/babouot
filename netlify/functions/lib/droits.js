@@ -66,6 +66,7 @@ const REGLES = {
   'detection-conflits': { get: 'lire' },
   'dispo-machine': { get: 'lire' },
   'evaluer-formule': { get: 'lire', ecrire: 'lire' },
+  'evaluer-refente': { get: 'lire', ecrire: 'lire' },
   'exporter-temps-standards': { get: 'lire' },
   'extraire-production': { ecrire: 'production' },
   'feuille-journaliere': { get: 'lire' },
